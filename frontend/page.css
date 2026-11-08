@@ -1,0 +1,76 @@
+:root {
+  color-scheme: light;
+  --bg: #faf7f0;
+  --bg-elevated: #fffef9;
+  --bg-soft: #f0eadf;
+  --input-bg: #fffefa;
+  --text: #28241d;
+  --text-muted: #665c4d;
+  --border: #cfc4b4;
+  --accent: #854522;
+  --accent-text: #fff;
+  --radius-sm: .45rem;
+  --font-sans: system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+}
+:root[data-theme="light"] { --bg: #f5f6f7; --bg-elevated: #fff; --bg-soft: #eef0f2; --input-bg: #fff; --accent: #23547c; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #17191d;
+  --bg-elevated: #20232a;
+  --bg-soft: #282d37;
+  --input-bg: #181b21;
+  --text: #f5f2eb;
+  --text-muted: #bdc5ce;
+  --border: #526071;
+  --accent: #ffb78e;
+  --accent-text: #231a14;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 1rem/1.5 var(--font-sans); }
+main { max-width: 76rem; margin: auto; padding: clamp(.65rem, 2vw, 1.25rem); }
+#plugin-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1.5rem; margin-bottom: 1rem; }
+h1, h2, h3 { line-height: 1.2; }
+#plugin-header h1 { margin: 0; font: 700 clamp(1.5rem, 5vw, 2rem) var(--font-serif); }
+#plugin-header nav, .actions { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
+#plugin-header nav button { background: var(--bg-elevated); }
+#plugin-header nav button[aria-current] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
+a { color: var(--accent); }
+button, input, textarea, select { font: inherit; color: inherit; }
+button, .fm-btn { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .45rem .75rem; background: var(--bg-elevated); color: var(--text); cursor: pointer; }
+.fm-btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.fm-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button:disabled { opacity: .55; cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fm-card { border: 1px solid var(--border); border-radius: .65rem; background: var(--bg-elevated); padding: 1rem; }
+.fm-card > h2, .fm-card > h3 { margin-block-start: 0; }
+.fm-field-hint { color: var(--text-muted); font-size: .875rem; }
+[role="status"]:empty { display: none; }
+#research-mcp-state:empty { display: inline; }
+form, .field-grid, .fm-compact-form { display: grid; gap: .75rem; }
+.field-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
+label, .form-field { display: grid; gap: .25rem; }
+input:not([type=checkbox]), select, textarea { max-width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .45rem .6rem; background: var(--input-bg); }
+input[type=checkbox] { accent-color: var(--accent); }
+[data-view="settings"] .fm-section { max-width: 52rem; }
+.fm-toggle { display: inline-block; position: relative; width: 40px; height: 22px; flex: none; }
+.fm-toggle input { opacity: 0; width: 0; height: 0; }
+.fm-toggle-slider { position: absolute; inset: 0; background: var(--border); border-radius: 999px; cursor: pointer; }
+.fm-toggle-slider::before { content: ""; position: absolute; inset: 3px auto auto 3px; width: 16px; height: 16px; border-radius: 50%; background: white; }
+.fm-toggle input:checked + .fm-toggle-slider { background: var(--accent); }
+.fm-toggle input:checked + .fm-toggle-slider::before { transform: translateX(18px); }
+.fm-toggle input:disabled + .fm-toggle-slider { opacity: .55; cursor: not-allowed; }
+dialog { color: var(--text); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: .65rem; width: min(42rem, calc(100vw - 2rem)); }
+dialog::backdrop { background: #0008; }
+dialog dl { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; }
+dialog dd { margin: 0; overflow-wrap: anywhere; }
+.fm-modal-actions { display: flex; justify-content: end; gap: .5rem; padding-block-start: .75rem; }
+#library-records, #research-results { margin-block: .8rem; }
+#library-records label, .proposal-row > label { display: flex; align-items: baseline; gap: .5rem; padding: .35rem 0; }
+.proposal-row { margin: .7rem 0; border-top: 1px solid var(--border); padding: .65rem 0; overflow-wrap: anywhere; }
+.proposal-row p { margin: .25rem 0; }
+.proposal-row .evidence { color: var(--text-muted); font-size: .85rem; }
+#research-pairing { margin-top: 1rem; }
+#research-pairing summary { cursor: pointer; }
+#research-pairing button, #pair-credentials { margin-block-start: .5rem; }

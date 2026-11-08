@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FilaMan - Filament Research</title>
+  <style><!-- styles --></style>
+</head>
+<body>
+<main>
+  <header id="plugin-header">
+    <h1 data-i18n="filamentResearch.title">Filament Research</h1>
+    <nav aria-label="Filament Research">
+      <button type="button" data-tab="chat" hidden>Chat</button>
+      <button type="button" data-tab="new" hidden>Research new filament</button>
+      <button type="button" data-tab="library" hidden>Research library</button>
+      <button type="button" data-tab="batches" data-i18n="researchBatches.title" hidden>Research batches</button>
+      <button type="button" data-tab="settings" hidden>Model &amp; MCP settings</button>
+    </nav>
+  </header>
+  <p id="plugin-status" role="status">Loading…</p>
+  <section data-view="chat" hidden><!-- chat --></section>
+  <section data-view="new" hidden>
+    <div class="fm-card">
+      <h2 id="research-heading">Research a new filament</h2>
+      <p id="research-target" class="fm-field-hint" hidden></p>
+      <form id="product-research">
+        <div class="field-grid" id="draft-fields">
+          <div class="form-field"><label for="draft-manufacturer">Manufacturer</label><select name="manufacturer_id" id="draft-manufacturer"><option value="">Choose an existing manufacturer</option></select></div>
+          <label>Designation<input name="designation" maxlength="255"></label>
+          <label>Material<input name="material_type" maxlength="50"></label>
+          <label>Diameter (mm)<input name="diameter_mm" type="number" step="any" min="0.01"></label>
+          <label>Manufacturer color<input name="manufacturer_color_name" maxlength="255"></label>
+          <div class="form-field"><label for="draft-palette">Palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select></div>
+          <label>Manufacturer SKU<input name="manufacturer_sku" maxlength="255"></label>
+        </div>
+        <div class="field-grid">
+          <label>Product URL<input type="url" name="product_url" maxlength="2048" placeholder="https://…"></label>
+          <label>SKU to look up<input name="sku_hint" maxlength="255"></label>
+          <label>Follow-up instructions<input name="guidance" maxlength="400"></label>
+        </div>
+        <div class="actions">
+          <button class="fm-btn fm-btn-primary" type="submit" value="fill">Find specifications</button>
+          <button class="fm-btn fm-btn-outline" type="submit" value="standardize" hidden>Standardize this filament</button>
+        </div>
+      </form>
+      <details id="research-pairing" hidden>
+        <summary data-i18n="filamentResearch.externalClient">External MCP client</summary>
+        <p class="fm-field-hint" id="pair-off" data-i18n="filamentResearch.mcpOffDrawer" hidden>External MCP access is off.</p>
+        <div class="actions">
+          <button type="button" class="fm-btn fm-btn-outline" id="pair-client" data-i18n="filamentResearch.pair">Pair a client</button>
+          <a id="pair-settings" href="?tab=settings#mcp-settings" target="_blank" rel="noopener noreferrer" data-i18n="filamentResearch.mcpSettings" hidden>MCP settings</a>
+        </div>
+        <div class="field-grid" id="pair-credentials" hidden>
+          <label><span data-i18n="filamentResearch.mcpUrl">MCP URL</span><input id="pair-url" readonly></label>
+          <label><span data-i18n="filamentResearch.mcpToken">Bearer token (expires in 15 minutes)</span><input id="pair-token" readonly></label>
+          <div><button class="fm-btn fm-btn-outline" type="button" id="pair-revoke" data-i18n="filamentResearch.revoke">Disconnect</button></div>
+        </div>
+      </details>
+      <p id="research-status" class="fm-field-hint" role="status"></p>
+      <div id="research-results"></div>
+      <div class="actions">
+        <button type="button" id="save-filament" class="fm-btn fm-btn-primary" disabled>Save new filament</button>
+        <a id="saved-filament" target="_blank" rel="noopener noreferrer" hidden>Open saved filament</a>
+      </div>
+    </div>
+    <dialog id="create-confirm" aria-labelledby="create-heading">
+      <h2 id="create-heading">Confirm new filament</h2>
+      <dl id="create-preview"></dl>
+      <div class="actions">
+        <button type="button" class="fm-btn fm-btn-outline" id="create-cancel" autofocus>Cancel</button>
+        <button type="button" class="fm-btn fm-btn-primary" id="create-filament">Create filament</button>
+      </div>
+      <p id="create-message" role="status"></p>
+    </dialog>
+  </section>
+  <section data-view="library" hidden>
+    <div class="fm-card">
+      <h2>Research existing filaments</h2>
+      <p id="library-hint" class="fm-field-hint">Select up to 50 filaments. Review their proposals before applying changes.</p>
+      <form id="library-search" class="actions">
+        <label>Search filament library <input name="search" type="search" maxlength="200"></label>
+        <button type="submit" class="fm-btn fm-btn-outline">Search</button>
+      </form>
+      <div id="library-records"></div>
+      <div id="library-pages" class="actions" hidden>
+        <button type="button" class="fm-btn fm-btn-outline" id="library-prev">Previous</button>
+        <button type="button" class="fm-btn fm-btn-outline" id="library-next">Next</button>
+      </div>
+      <form id="library-research">
+        <p id="library-selected" role="status"></p>
+        <div class="actions">
+          <div class="form-field"><label for="library-mode">Research mode</label><select name="mode" id="library-mode">
+            <option value="fill" data-i18n="researchBatches.mode.fill">Fill missing specs</option>
+            <option value="standardize" data-i18n="researchBatches.mode.standardize">Standardize entries</option>
+          </select></div>
+          <button type="submit" class="fm-btn fm-btn-primary" disabled>Start research</button>
+        </div>
+        <p id="library-status" class="fm-field-hint" role="status"></p>
+      </form>
+    </div>
+  </section>
+  <section data-view="batches" hidden><!-- batches --></section>
+  <section data-view="settings" hidden><!-- settings --></section>
+</main>
+<script><!-- script --></script>
+</body>
+</html>

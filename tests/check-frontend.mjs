@@ -1,0 +1,172 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+
+const html = await readFile(new URL('../filament_research/page.html', import.meta.url), 'utf8')
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright-core')
+const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE_PATH })
+const url = 'https://fila.test/plugin-page/filament-research'
+const manufacturer = { id: 7, name: 'Fixture Brand' }
+const filament = {
+  id: 10, designation: 'Fixture PLA', manufacturer_id: 7, manufacturer,
+  material_type: 'PLA', diameter_mm: 1.75, color_mode: 'single',
+}
+const evidence = [{ title: 'Fixture catalog', url: 'https://manufacturer.test/pla', evidence: '1.24 g/cm³' }]
+const fixtureBatch = {
+  id: 'fixture-batch', mode: 'fill', status: 'active', total: 1,
+  created_at: '2026-01-01T00:00:00Z', finished_at: null,
+  items: [{ id: 12, filament_id: 10, live_filament_id: 10, status: 'ready', decision: 'pending',
+    revision: 1, decision_revision: 0, identity: { designation: 'Fixture PLA' }, issues: [],
+    approved_ids: [], changed_fields: [], applied_at: null,
+    proposals: [{ id: 'density', fields: { density_g_cm3: { old: null, value: 1.24 } },
+      sources: [], reason: 'Confirmed density', group_key: null }],
+  }],
+}
+
+try {
+  const page = await browser.newPage()
+  page.setDefaultTimeout(5_000)
+  const writes = []
+  let mcpEnabled = false
+  await page.route('https://fila.test/**', async route => {
+    const req = route.request()
+    const path = new URL(req.url()).pathname
+    if (path.startsWith('/plugin-page/')) return route.fulfill({ contentType: 'text/html', body: html })
+    if (path === '/selection-fixture') return route.fulfill({ contentType: 'text/html', body: `
+      <iframe sandbox="allow-scripts allow-same-origin allow-forms" src="${url}?filament_host=selection"></iframe>
+      <script>window.addEventListener('message', event => {
+        if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
+        const { type, request_id } = event.data;
+        if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'selection', filament_ids:[10]}, location.origin)
+      })</script>` })
+    if (path === '/editor-fixture') return route.fulfill({ contentType: 'text/html', body: `
+      <iframe sandbox="allow-scripts allow-same-origin allow-forms" src="${url}?filament_host=editor"></iframe>
+      <script>
+        window.addEventListener('message', event => {
+          if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
+          const { type, request_id, units } = event.data;
+          if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'edit',
+            filament_id:10, fields:{ designation:'Fixture PLA', manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75 }}, location.origin)
+          if (type === 'filaman:filament-stage') {
+            window.staged = units;
+            event.source.postMessage({type, request_id, staged:units.flatMap(unit => Object.keys(unit)), skipped:[]}, location.origin)
+          }
+        })
+      </script>` })
+    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: 'Fixture model',
+      can_create: true, can_update: true, can_configure: true, mcp_enabled: mcpEnabled } })
+    if (path.endsWith('/chat')) {
+      assert.equal(req.postDataJSON().messages[0].content, 'Compare these materials')
+      return route.fulfill({ json: { reply: 'PLA is easier to print.', action: null } })
+    }
+    if (path.endsWith('/proposals')) {
+      const target = req.postDataJSON()
+      if (target.action === 'standardize') return route.fulfill({ json: {
+        target, suggestions: [], issues: [],
+        proposals: [{ id: 'linked', fields: {
+          designation: { old: 'Fixture PLA', value: 'Fixture-PLA' },
+          material_subgroup: { old: null, value: 'Matte' },
+        }, sources: [], reason: 'Consistent designation and finish.', group_key: null }],
+      } })
+      return route.fulfill({ json: { target, suggestions: [
+        { field: 'density_g_cm3', value: 1.24, sources: evidence },
+        { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
+      ], issues: [] } })
+    }
+    if (path.endsWith('/settings/mcp')) {
+      mcpEnabled = req.postDataJSON().mcp_enabled
+      return route.fulfill({ json: { mcp_enabled: mcpEnabled } })
+    }
+    if (path.endsWith('/settings')) return route.fulfill({ json: {
+      model_url: '', model_id: '', search_url: '', has_key: false, mcp_enabled: mcpEnabled,
+    } })
+    if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
+    if (path.endsWith('/colors')) return route.fulfill({ json: { items: [], total: 0 } })
+    if (path.endsWith('/filaments') && req.method() === 'GET') return route.fulfill({ json: { items: [filament], total: 1 } })
+    if (path.endsWith('/filaments') && req.method() === 'POST') {
+      writes.push(req.postDataJSON())
+      return route.fulfill({ json: { id: 11 } })
+    }
+    if (path.endsWith('/batches') && req.method() === 'POST') {
+      assert.deepEqual(req.postDataJSON(), { filament_ids: [10], mode: 'fill' })
+      return route.fulfill({ json: fixtureBatch })
+    }
+    if (path.endsWith('/batches/fixture-batch')) return route.fulfill({ json: fixtureBatch })
+    if (path.endsWith('/decisions')) {
+      const [decision] = req.postDataJSON().items
+      assert.deepEqual(decision.approved_ids, ['density'])
+      Object.assign(fixtureBatch.items[0], { decision: 'approved', approved_ids: ['density'], decision_revision: 1 })
+      return route.fulfill({ json: fixtureBatch })
+    }
+    if (path.endsWith('/apply')) {
+      assert.equal(req.postDataJSON().items[0].decision_revision, 1)
+      Object.assign(fixtureBatch.items[0], { status: 'applied', applied_at: '2026-01-01T00:00:00Z' })
+      return route.fulfill({ json: { batch: fixtureBatch, results: [{ item_id: 12, status: 'applied', changed_fields: [] }] } })
+    }
+    if (path.endsWith('/batches')) return route.fulfill({ json: [] })
+    return route.fulfill({ status: 404, json: {} })
+  })
+
+  await page.goto(url)
+  await page.getByRole('textbox', { name: 'Your question' }).fill('Compare these materials')
+  await page.getByRole('button', { name: 'Send message' }).click()
+  await page.getByText('PLA is easier to print.').waitFor()
+
+  await page.getByRole('button', { name: 'Research new filament' }).click()
+  await page.getByLabel('Manufacturer', { exact: true }).selectOption('7')
+  await page.getByLabel('Designation', { exact: true }).fill('Fixture PLA')
+  await page.getByLabel('Material', { exact: true }).fill('PLA')
+  await page.getByLabel('Diameter (mm)').fill('1.75')
+  await page.getByRole('button', { name: 'Find specifications' }).click()
+  await page.getByRole('link', { name: 'Fixture catalog' }).first().waitFor()
+  await page.getByRole('checkbox', { name: /Density/ }).check()
+  assert.equal(writes.length, 0)
+  await page.getByRole('button', { name: 'Save new filament' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Create filament' }).click()
+  await page.getByRole('link', { name: 'Open saved filament' }).waitFor()
+  assert.deepEqual(writes, [{ manufacturer_id: 7, designation: 'Fixture PLA', material_type: 'PLA',
+    diameter_mm: 1.75, density_g_cm3: 1.24 }])
+
+  await page.getByRole('button', { name: 'Research library' }).click()
+  await page.getByRole('checkbox', { name: /Fixture PLA/ }).check()
+  await page.getByRole('button', { name: 'Start research' }).click()
+  await page.getByText('Confirmed density').waitFor()
+  await page.getByRole('checkbox', { name: /Density/ }).check()
+  await page.getByRole('button', { name: /Approve/ }).click()
+  await page.getByRole('button', { name: 'Apply approved changes' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: /Apply/ }).click()
+  await page.getByRole('heading', { name: 'Apply report' }).waitFor()
+
+  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  const settings = page.locator('#mcp-settings').locator('..').locator('..')
+  await settings.getByText('Off', { exact: true }).waitFor()
+  assert.equal(await settings.getByRole('textbox', { name: 'MCP URL' }).isVisible(), false)
+  await settings.getByRole('switch').press('Space')
+  await settings.getByText('On', { exact: true }).waitFor()
+  assert.equal(await settings.getByRole('textbox', { name: 'MCP URL' }).isVisible(), true)
+
+  await page.goto('https://fila.test/editor-fixture')
+  const frame = page.frameLocator('iframe')
+  await frame.getByRole('button', { name: 'Find specifications' }).click()
+  await frame.getByRole('checkbox', { name: /Density/ }).check()
+  await frame.getByRole('button', { name: 'Stage in FilaMan editor' }).click()
+  await frame.getByText('1 field staged.', { exact: false }).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.staged), [{ density_g_cm3: { old: null, value: 1.24 } }])
+  await frame.getByRole('button', { name: 'Standardize this filament' }).click()
+  await frame.getByRole('checkbox', { name: /Fixture-PLA.*Matte/ }).check()
+  await frame.getByRole('button', { name: 'Stage in FilaMan editor' }).click()
+  await frame.getByText('2 fields staged.', { exact: false }).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.staged), [{
+    designation: { old: 'Fixture PLA', value: 'Fixture-PLA' },
+    material_subgroup: { old: null, value: 'Matte' },
+  }])
+  assert.equal(writes.length, 1)
+
+  await page.goto('https://fila.test/selection-fixture')
+  await frame.getByText('1 of 50 selected').waitFor()
+  assert.equal(await frame.getByLabel('Search filament library').isVisible(), false)
+  await frame.getByRole('button', { name: 'Start research' }).click()
+  await frame.getByRole('heading', { name: 'Review queue' }).waitFor()
+  console.log('Filament Research plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
+} finally {
+  await browser.close()
+}

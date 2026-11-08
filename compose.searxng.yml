@@ -1,0 +1,20 @@
+services:
+  searxng:
+    image: docker.io/searxng/searxng:2026.11.6-ac11e14c5
+    restart: unless-stopped
+    environment:
+      FORCE_OWNERSHIP: "false"
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        export SEARXNG_SECRET="$$(head -c 32 /dev/urandom | base64)"
+        exec /usr/local/searxng/entrypoint.sh
+    networks: [filaman]
+
+networks:
+  filaman:
+    external: true
+    name: ${FILAMAN_NETWORK:?Set FILAMAN_NETWORK to the FilaMan Compose network}

@@ -1,0 +1,11 @@
+.fm-compact-form > label { display: grid; gap: .4rem; }
+  .fm-compact-form > label:has(input[type=checkbox]) { display: flex; align-items: center; }
+  .research-model-picker { display: grid; gap: .4rem; }
+  .research-model-picker > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; }
+  .research-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+  .research-mcp-section { margin-block-start: 1rem; }
+  .research-mcp-section #mcp-settings { scroll-margin-block-start: 4rem; }
+  .research-mcp-toggle { display: flex; align-items: center; gap: .75rem; }
+  .research-mcp-toggle > label:first-child { flex: 1; }
+  .fm-toggle input:focus-visible + .fm-toggle-slider { outline: 2px solid var(--accent); outline-offset: 3px; }
+  #research-mcp-setup[hidden], #research-mcp-message:empty { display: none; }

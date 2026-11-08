@@ -1,0 +1,13 @@
+{
+  "name": "filaman-filament-research-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node frontend/build.mjs",
+    "test": "node tests/check-frontend.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.27.3",
+    "playwright-core": "1.61.1"
+  }
+}

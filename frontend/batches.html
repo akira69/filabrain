@@ -1,0 +1,39 @@
+<div id="filament-batches" class="fm-admin-page">
+    <a href="/filaments" class="fm-admin-back">&larr; <span data-i18n="filaments.backToFilaments">Back to Filaments</span></a>
+    <div class="fm-list-toolbar">
+      <h1 data-i18n="researchBatches.title">Research batches</h1>
+      <a href="?tab=batches" class="fm-btn fm-btn-outline" data-batch-history-link hidden data-i18n="researchBatches.title">Research batches</a>
+    </div>
+    <p class="batch-muted" data-i18n="researchBatches.retention">Reports are kept for 30 days after a batch finishes or is canceled.</p>
+    <p data-batch-message role="status" class="batch-message" data-i18n="common.loading">Loading…</p>
+    <div data-batch-history hidden></div>
+    <div data-batch-workspace hidden>
+      <div class="batch-row batch-toolbar">
+        <p data-batch-progress role="status"></p>
+        <div class="batch-actions">
+          <button type="button" class="fm-btn fm-btn-outline" data-action="cancel" data-i18n="researchBatches.cancel">Cancel batch</button>
+          <button type="button" class="fm-btn fm-btn-primary" data-action="apply" data-i18n="researchBatches.apply">Apply approved changes</button>
+        </div>
+      </div>
+      <div class="batch-layout">
+        <nav class="fm-card" aria-labelledby="batch-queue-title">
+          <h2 id="batch-queue-title" data-i18n="researchBatches.queue">Review queue</h2>
+          <ol data-batch-queue></ol>
+        </nav>
+        <section class="fm-card" data-batch-review></section>
+      </div>
+      <section class="fm-card batch-section" data-batch-groups hidden></section>
+      <section class="fm-card batch-section" data-batch-report hidden></section>
+    </div>
+    <dialog class="fm-form-dialog fm-form-dialog-wide" aria-labelledby="batch-confirm-heading">
+      <div class="fm-section-header fm-form-dialog-header"><h2 id="batch-confirm-heading"></h2></div>
+      <div class="fm-section-body">
+        <p data-batch-preview-message role="status" class="batch-message"></p>
+        <div data-batch-preview></div>
+        <div class="fm-modal-actions">
+          <button type="button" class="fm-btn fm-btn-outline" data-action="close" autofocus data-i18n="common.cancel">Cancel</button>
+          <button type="button" class="fm-btn fm-btn-primary" data-action="confirm"></button>
+        </div>
+      </div>
+    </dialog>
+  </div>

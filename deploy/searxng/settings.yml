@@ -1,0 +1,8 @@
+use_default_settings: true
+
+search:
+  formats: [json]
+
+server:
+  limiter: false
+  public_instance: false
