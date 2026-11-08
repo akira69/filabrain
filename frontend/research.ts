@@ -77,7 +77,6 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   const buttons = [...form.querySelectorAll<HTMLButtonElement>('button[type=submit]')]
   const followUp = element<HTMLFormElement>('research-follow-up')
   const guidance = element<HTMLTextAreaElement>('research-guidance')
-  const guidanceLabel = element('research-guidance-label')
   const sendFollowUp = followUp.querySelector<HTMLButtonElement>('button[type=submit]')!
   const modelPicker = mountModelPicker(followUp, status.chat_model)
   const searchOptions = element<HTMLDetailsElement>('research-options')
@@ -98,7 +97,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   let lastAction = 'fill'
   let formRevision = 0
   function showFollowUp(visible: boolean) {
-    guidanceLabel.hidden = guidance.hidden = sendFollowUp.hidden = !visible
+    guidance.hidden = sendFollowUp.hidden = !visible
     guidance.required = visible
   }
   document.addEventListener('filaman:model-change', () => { void modelPicker.setDefault(status.chat_model) })

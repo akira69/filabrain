@@ -97,10 +97,8 @@ dialog dd { margin: 0; overflow-wrap: anywhere; }
 #research-reply #research-results { margin-block-start: 0; }
 #research-follow-up {
   margin-block-start: .75rem;
-  gap: .4rem;
   flex: none;
 }
-#research-follow-up textarea { width: 100%; resize: vertical; }
 @media (min-height: 420px) {
   :root[data-research-editor] main { display: flex; flex-direction: column; height: 100dvh; }
   :root[data-research-editor] [data-view="new"] { display: flex; flex-direction: column; flex: 1; min-height: 0; }

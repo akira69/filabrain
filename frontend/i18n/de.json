@@ -25,6 +25,7 @@
     "followUpHint": "Ein Datenblatt, einen anderen Shop oder das Leergewicht der Spule suchen",
     "researchOptions": "Suchoptionen",
     "modelForConversation": "Modell für diese Unterhaltung",
+    "modelDefault": "Standard",
     "otherModelsUnavailable": "Weitere Modelle konnten nicht geladen werden.",
     "researchNoModel": "Kein Modell eingerichtet",
     "researchReview": "Das habe ich gefunden. Prüfe die Ergebnisse unten.",

@@ -25,6 +25,7 @@
     "followUpHint": "Essayer une fiche technique, une autre boutique ou cibler le poids de la bobine vide",
     "researchOptions": "Options de recherche",
     "modelForConversation": "Modèle pour cette conversation",
+    "modelDefault": "Par défaut",
     "otherModelsUnavailable": "Impossible de charger les autres modèles.",
     "researchNoModel": "Aucun modèle configuré",
     "researchReview": "Voici ce que j’ai trouvé. Consultez les résultats ci-dessous.",

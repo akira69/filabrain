@@ -1,4 +1,11 @@
 <div class="chat-model-picker">
-  <select data-model-picker aria-label="Model for this conversation" data-i18n-aria-label="filaBrain.modelForConversation" disabled></select>
+  <button type="button" class="chat-model-trigger" data-model-trigger aria-haspopup="menu" aria-expanded="false" disabled>
+    <span data-model-name></span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+  </button>
+  <div class="chat-model-menu" data-model-menu popover="auto" role="menu" aria-label="Model for this conversation" data-i18n-aria-label="filaBrain.modelForConversation">
+    <div class="chat-model-menu-title" role="presentation" data-i18n="filaBrain.chooseModel">Choose a model</div>
+    <div data-model-options role="presentation"></div>
+  </div>
   <small data-model-picker-status class="fm-field-hint" role="status" hidden></small>
 </div>

@@ -25,6 +25,7 @@
     "followUpHint": "Try a datasheet, a different store, or focus on empty spool weight",
     "researchOptions": "Search options",
     "modelForConversation": "Model for this conversation",
+    "modelDefault": "Default",
     "otherModelsUnavailable": "Could not load other models.",
     "researchNoModel": "Model not configured",
     "researchReview": "Here’s what I found. Review the results below.",
