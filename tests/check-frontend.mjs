@@ -39,7 +39,7 @@ try {
         if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'selection', filament_ids:[10]}, location.origin)
       })</script>` })
     if (path === '/editor-fixture') return route.fulfill({ contentType: 'text/html', body: `
-      <iframe sandbox="allow-scripts allow-same-origin allow-forms" src="${url}?filament_host=editor"></iframe>
+      <iframe style="width: 640px; height: 520px" sandbox="allow-scripts allow-same-origin allow-forms" src="${url}?filament_host=editor"></iframe>
       <script>
         window.addEventListener('message', event => {
           if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
@@ -60,11 +60,19 @@ try {
     }
     if (path.endsWith('/proposals')) {
       const target = req.postDataJSON()
+      if (target.guidance) {
+        assert.equal(target.action, 'standardize')
+        assert.equal(target.filament_id, 10)
+        if (target.guidance === 'Check an unavailable source') return route.fulfill({
+          status: 502, json: { detail: 'Source unavailable' },
+        })
+        assert.equal(target.guidance, 'Focus on the material finish')
+      }
       if (target.action === 'standardize') return route.fulfill({ json: {
         target, suggestions: [], issues: [],
         proposals: [{ id: 'linked', fields: {
           designation: { old: 'Fixture PLA', value: 'Fixture-PLA' },
-          material_subgroup: { old: null, value: 'Matte' },
+          material_subgroup: { old: null, value: target.guidance ? 'Silk' : 'Matte' },
         }, sources: [], reason: 'Consistent designation and finish.', group_key: null }],
       } })
       return route.fulfill({ json: { target, suggestions: [
@@ -146,18 +154,36 @@ try {
 
   await page.goto('https://fila.test/editor-fixture')
   const frame = page.frameLocator('iframe')
+  const followUp = frame.getByRole('textbox', { name: 'Follow up on this search' })
+  await frame.getByText('Fixture model', { exact: true }).waitFor()
+  await frame.getByText('Advanced options', { exact: true }).waitFor()
+  assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).isVisible(), false)
+  assert.equal(await followUp.isVisible(), false)
   await frame.getByRole('button', { name: 'Find specifications' }).click()
   await frame.getByRole('checkbox', { name: /Density/ }).check()
+  await followUp.waitFor()
+  await frame.getByRole('log').getByText('Find specifications', { exact: true }).waitFor()
   await frame.getByRole('button', { name: 'Stage in FilaMan editor' }).click()
   await frame.getByText('1 field staged.', { exact: false }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.staged), [{ density_g_cm3: { old: null, value: 1.24 } }])
+  await frame.getByText('Search options', { exact: true }).click()
   await frame.getByRole('button', { name: 'Standardize this filament' }).click()
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Matte/ }).check()
+  await followUp.fill('Check an unavailable source')
+  await frame.getByRole('button', { name: 'Send follow-up' }).click()
+  await frame.getByText('Source unavailable', { exact: true }).waitFor()
+  assert.equal(await frame.getByRole('checkbox', { name: /Fixture-PLA.*Matte/ }).isChecked(), true)
+  assert.equal(await followUp.inputValue(), 'Check an unavailable source')
+  await followUp.fill('Focus on the material finish')
+  await followUp.press('Enter')
+  await frame.getByRole('log').getByText('Focus on the material finish', { exact: true }).waitFor()
+  await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).check()
+  assert.equal(await followUp.inputValue(), '')
   await frame.getByRole('button', { name: 'Stage in FilaMan editor' }).click()
   await frame.getByText('2 fields staged.', { exact: false }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.staged), [{
     designation: { old: 'Fixture PLA', value: 'Fixture-PLA' },
-    material_subgroup: { old: null, value: 'Matte' },
+    material_subgroup: { old: null, value: 'Silk' },
   }])
   assert.equal(writes.length, 1)
 

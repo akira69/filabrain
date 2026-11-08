@@ -74,6 +74,15 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   const manufacturer = form.elements.namedItem('manufacturer_id') as HTMLSelectElement
   const palette = form.elements.namedItem('color_id') as HTMLSelectElement
   const buttons = [...form.querySelectorAll<HTMLButtonElement>('button[type=submit]')]
+  const followUp = element<HTMLFormElement>('research-follow-up')
+  const guidance = element<HTMLTextAreaElement>('research-guidance')
+  const sendFollowUp = followUp.querySelector('button')!
+  const searchOptions = element<HTMLDetailsElement>('research-options')
+  const optionsSummary = searchOptions.querySelector('summary')!
+  const conversation = element('research-conversation')
+  const transcript = element('research-transcript')
+  const reply = element('research-reply')
+  const model = element('research-model')
   const mcpTarget = (context: EditorContext) => ({
     mode: context.mode, filament_id: context.filament_id, identity: identity(context.fields),
   })
@@ -84,8 +93,16 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   let pairGeneration = 0
   let pairPoll = 0
   let busy = false
+  let lastAction = 'fill'
+  let formRevision = 0
+  function showModel() {
+    model.textContent = status.chat_model || t('filaBrain.researchNoModel')
+  }
+  showModel()
+  document.addEventListener('filaman:model-change', showModel)
 
   if (editor) {
+    document.documentElement.dataset.researchEditor = ''
     element('draft-fields').hidden = true
     element('research-heading').textContent = editor.mode === 'edit' ? 'Research this filament' : 'Research the new filament draft'
     const target = element('research-target')
@@ -99,6 +116,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
         const { items } = await fetchAllPages<{ id: number; name: string }>(path)
         select.append(...items.map(item => new Option(item.name, String(item.id))))
       } catch (error) {
+        conversation.hidden = false
         notice.textContent = errorText(error)
       }
     }
@@ -127,6 +145,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     results.replaceChildren()
     save.disabled = true
     bound = undefined
+    reply.hidden = true
   }
 
   function selected() {
@@ -227,39 +246,87 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       const sources = proposalUnit.sources.map(source => ({ title: source.title, url: source.url, evidence: source.quote }))
       results.append(option(unit, sources, proposalUnit.reason))
     }
-    if (!results.childElementCount) notice.textContent = t('filaBrain.noSuggestions')
     save.disabled = duplicate || (!!editor && !choices.size)
+    reply.hidden = !!editor && !results.childElementCount
   }
 
-  form.addEventListener('submit', async event => {
-    event.preventDefault()
+  function message(text: string, fromUser = false) {
+    const item = document.createElement('p')
+    item.className = fromUser ? 'chat-message chat-user' : 'chat-message research-assistant'
+    item.textContent = text
+    transcript.append(item)
+    return item
+  }
+
+  async function search(action: string, prompt = '') {
     if (busy) return
+    const revision = formRevision
+    const previous = bound
+    const saveWasDisabled = save.disabled
     busy = true
     buttons.forEach(button => { button.disabled = true })
-    clearResults()
+    sendFollowUp.disabled = save.disabled = true
     saved.hidden = true
-    notice.textContent = 'Looking up specifications…'
+    notice.textContent = ''
+    conversation.hidden = false
+    message(prompt || (action === 'standardize' ? buttons[1].textContent! : buttons[0].textContent!), true)
+    const answer = message(t('filaBrain.searching'))
+    if (!prompt) {
+      optionsSummary.hidden = false
+      searchOptions.open = false
+    }
+    if (editor) answer.scrollIntoView({ block: 'nearest' })
     try {
       const context = await target()
+      if (revision !== formRevision) return
       const formData = new FormData(form)
       const proposal = await api.post<ResearchProposal>(route + '/proposals', {
         ...mcpTarget(context),
-        action: (event.submitter as HTMLButtonElement).value,
+        action,
         product_url: String(formData.get('product_url') || '').trim() || undefined,
         sku_hint: String(formData.get('sku_hint') || '').trim(),
-        guidance: String(formData.get('guidance') || '').trim(),
+        guidance: prompt,
       })
-      notice.textContent = ''
+      if (revision !== formRevision) return
       render(proposal, context)
+      answer.textContent = results.childElementCount ? t('filaBrain.researchReview') : t('filaBrain.noSuggestions')
+      if (prompt && guidance.value.trim() === prompt) guidance.value = ''
     } catch (error) {
-      notice.textContent = errorText(error)
+      if (revision === formRevision) answer.textContent = errorText(error)
     } finally {
+      if (revision === formRevision) {
+        lastAction = action
+        followUp.hidden = false
+        if (bound && bound === previous) save.disabled = saveWasDisabled
+      }
       buttons.forEach(button => { button.disabled = false })
+      sendFollowUp.disabled = false
       busy = false
     }
+  }
+
+  form.addEventListener('submit', event => {
+    event.preventDefault()
+    void search((event.submitter as HTMLButtonElement | null)?.value || 'fill')
+  })
+
+  followUp.addEventListener('submit', event => {
+    event.preventDefault()
+    const prompt = guidance.value.trim()
+    if (prompt) void search(lastAction, prompt)
+  })
+  guidance.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+    event.preventDefault()
+    if (!busy) followUp.requestSubmit()
   })
 
   form.addEventListener('input', () => {
+    formRevision++
+    followUp.hidden = true
+    guidance.value = ''
+    transcript.replaceChildren()
+    conversation.hidden = true
     clearResults()
     saved.hidden = true
     notice.textContent = ''
@@ -355,12 +422,12 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     if (id) return revoke(id)
   }
 
-  element('pair-settings').hidden = !status.can_configure
   function showPairing(enabled: boolean) {
-    pairing.hidden = !status.can_configure && !enabled
-    element('pair-off').hidden = enabled
-    pair.hidden = !enabled
-    if (!enabled) void disconnect()
+    pairing.hidden = !enabled
+    if (!enabled) {
+      pairing.open = false
+      void disconnect()
+    }
   }
   showPairing(status.mcp_enabled)
   document.addEventListener('filaman:mcp-state', event => showPairing((event as CustomEvent<boolean>).detail))
@@ -368,6 +435,8 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     if (form.closest<HTMLElement>('[data-view]')?.hidden) return
     try {
       const current = await api.get<Status>(route + '/status', { cache: 'no-store' })
+      status.chat_model = current.chat_model
+      showModel()
       showPairing(current.mcp_enabled)
     } catch { /* Pairing endpoints enforce current access. */ }
   })
@@ -397,6 +466,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
           if (pairId !== session.id) return
           if (incoming.proposal && incoming.proposal_id && incoming.proposal_id !== lastId) {
             lastId = incoming.proposal_id
+            conversation.hidden = false
             render(incoming.proposal, context)
             notice.textContent = t('filaBrain.pairReceived')
           }
@@ -410,6 +480,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       pairPoll = window.setTimeout(poll, 2000)
     } catch (error) {
       if (generation !== pairGeneration) return
+      conversation.hidden = false
       notice.textContent = errorText(error)
       void disconnect()
     }

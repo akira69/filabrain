@@ -113,7 +113,10 @@ export async function mountSettings() {
         message.textContent = t(data.models.length ? 'filaBrain.modelsLoaded' : 'filaBrain.noModels')
         return
       }
-      if (action === 'save') fill(data)
+      if (action === 'save') {
+        fill(data)
+        document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: data.model_id }))
+      }
       message.textContent = t(action === 'test' ? 'filaBrain.testPassed' : 'filaBrain.settingsSaved')
     } catch (error) {
       message.textContent = error instanceof Error ? error.message : t('filaBrain.failed')

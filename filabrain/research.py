@@ -87,7 +87,9 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 raise
     can_chat = enabled and principal.auth_type == "session" and "filaments:read" in permissions
     chat_model = None
-    if can_chat:
+    if enabled and principal.auth_type == "session" and (
+        can_chat or permissions.intersection({"filaments:create", "filaments:update"})
+    ):
         _, config = await config_record(db)
         chat_model = (config["model_id"] or None) if config["model_url"] else None
     return {

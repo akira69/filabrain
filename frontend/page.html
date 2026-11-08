@@ -21,52 +21,72 @@
   <p id="plugin-status" role="status">Loading…</p>
   <section data-view="chat" hidden><!-- chat --></section>
   <section data-view="new" hidden>
-    <div class="fm-card">
-      <div class="filabrain-heading">
-        <!-- mark -->
-        <h2 id="research-heading">Research a new filament</h2>
-      </div>
-      <p id="research-target" class="fm-field-hint" hidden></p>
-      <form id="product-research">
-        <div class="field-grid" id="draft-fields">
-          <div class="form-field"><label for="draft-manufacturer">Manufacturer</label><select name="manufacturer_id" id="draft-manufacturer"><option value="">Choose an existing manufacturer</option></select></div>
-          <label>Designation<input name="designation" maxlength="255"></label>
-          <label>Material<input name="material_type" maxlength="50"></label>
-          <label>Diameter (mm)<input name="diameter_mm" type="number" step="any" min="0.01"></label>
-          <label>Manufacturer color<input name="manufacturer_color_name" maxlength="255"></label>
-          <div class="form-field"><label for="draft-palette">Palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select></div>
-          <label>Manufacturer SKU<input name="manufacturer_sku" maxlength="255"></label>
+    <div class="research-scroll">
+      <div class="fm-card">
+        <div class="filabrain-heading">
+          <!-- mark -->
+          <div>
+            <h2 id="research-heading">Research a new filament</h2>
+            <span id="research-model" class="fm-field-hint"></span>
+          </div>
         </div>
-        <div class="field-grid">
-          <label>Product URL<input type="url" name="product_url" maxlength="2048" placeholder="https://…"></label>
-          <label>SKU to look up<input name="sku_hint" maxlength="255"></label>
-          <label>Follow-up instructions<input name="guidance" maxlength="400"></label>
-        </div>
-        <div class="actions">
-          <button class="fm-btn fm-btn-primary" type="submit" value="fill">Find specifications</button>
-          <button class="fm-btn fm-btn-outline" type="submit" value="standardize" hidden>Standardize this filament</button>
-        </div>
-      </form>
-      <details id="research-pairing" hidden>
-        <summary data-i18n="filaBrain.externalClient">External MCP client</summary>
-        <p class="fm-field-hint" id="pair-off" data-i18n="filaBrain.mcpOffDrawer" hidden>External MCP access is off.</p>
-        <div class="actions">
+        <p id="research-target" class="fm-field-hint" hidden></p>
+        <details id="research-pairing" hidden>
+          <summary data-i18n="filaBrain.researchAdvanced">Advanced options</summary>
+          <p class="fm-field-hint" data-i18n="filaBrain.researchPairHint">Connect an external MCP client to send proposals to this draft.</p>
           <button type="button" class="fm-btn fm-btn-outline" id="pair-client" data-i18n="filaBrain.pair">Pair a client</button>
-          <a id="pair-settings" href="?tab=settings#mcp-settings" target="_blank" rel="noopener noreferrer" data-i18n="filaBrain.mcpSettings" hidden>MCP settings</a>
-        </div>
-        <div class="field-grid" id="pair-credentials" hidden>
-          <label><span data-i18n="filaBrain.mcpUrl">MCP URL</span><input id="pair-url" readonly></label>
-          <label><span data-i18n="filaBrain.mcpToken">Bearer token (expires in 15 minutes)</span><input id="pair-token" readonly></label>
-          <div><button class="fm-btn fm-btn-outline" type="button" id="pair-revoke" data-i18n="filaBrain.revoke">Disconnect</button></div>
-        </div>
-      </details>
-      <p id="research-status" class="fm-field-hint" role="status"></p>
-      <div id="research-results"></div>
-      <div class="actions">
-        <button type="button" id="save-filament" class="fm-btn fm-btn-primary" disabled>Save new filament</button>
-        <a id="saved-filament" target="_blank" rel="noopener noreferrer" hidden>Open saved filament</a>
+          <div class="field-grid" id="pair-credentials" hidden>
+            <label><span data-i18n="filaBrain.mcpUrl">MCP URL</span><input id="pair-url" readonly></label>
+            <label><span data-i18n="filaBrain.mcpToken">Bearer token (expires in 15 minutes)</span><input id="pair-token" readonly></label>
+            <div><button class="fm-btn fm-btn-outline" type="button" id="pair-revoke" data-i18n="filaBrain.revoke">Disconnect</button></div>
+          </div>
+        </details>
+        <details id="research-options" open>
+          <summary data-i18n="filaBrain.researchOptions" hidden>Search options</summary>
+          <form id="product-research">
+            <div class="field-grid" id="draft-fields">
+              <div class="form-field"><label for="draft-manufacturer">Manufacturer</label><select name="manufacturer_id" id="draft-manufacturer"><option value="">Choose an existing manufacturer</option></select></div>
+              <label>Designation<input name="designation" maxlength="255"></label>
+              <label>Material<input name="material_type" maxlength="50"></label>
+              <label>Diameter (mm)<input name="diameter_mm" type="number" step="any" min="0.01"></label>
+              <label>Manufacturer color<input name="manufacturer_color_name" maxlength="255"></label>
+              <div class="form-field"><label for="draft-palette">Palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select></div>
+              <label>Manufacturer SKU<input name="manufacturer_sku" maxlength="255"></label>
+            </div>
+            <div class="field-grid">
+              <label>Product URL<input type="url" name="product_url" maxlength="2048" placeholder="https://…"></label>
+              <label>SKU to look up<input name="sku_hint" maxlength="255"></label>
+            </div>
+            <div class="actions">
+              <button class="fm-btn fm-btn-primary" type="submit" value="fill">Find specifications</button>
+              <button class="fm-btn fm-btn-outline" type="submit" value="standardize" hidden>Standardize this filament</button>
+            </div>
+          </form>
+        </details>
       </div>
+      <section id="research-conversation" aria-label="Filament research" hidden>
+        <div id="research-transcript" class="chat-log" role="log" aria-live="polite" aria-relevant="additions text"></div>
+        <p id="research-status" class="fm-field-hint" role="status"></p>
+        <div id="research-reply" class="fm-card" hidden>
+          <div id="research-results"></div>
+          <div class="actions">
+            <button type="button" id="save-filament" class="fm-btn fm-btn-primary" disabled>Save new filament</button>
+          </div>
+        </div>
+        <div class="actions">
+          <a id="saved-filament" target="_blank" rel="noopener noreferrer" hidden>Open saved filament</a>
+        </div>
+      </section>
     </div>
+    <form id="research-follow-up" class="fm-card" hidden>
+      <label for="research-guidance" data-i18n="filaBrain.followUp">Follow up on this search</label>
+      <div class="research-composer">
+        <textarea id="research-guidance" rows="2" maxlength="400" required data-i18n-placeholder="filaBrain.followUpHint" placeholder="Try a datasheet, a different store, or focus on empty spool weight"></textarea>
+        <button type="submit" class="fm-btn fm-btn-primary chat-send" aria-label="Send follow-up" data-i18n-aria-label="filaBrain.sendFollowUp">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
+        </button>
+      </div>
+    </form>
     <dialog id="create-confirm" aria-labelledby="create-heading">
       <h2 id="create-heading">Confirm new filament</h2>
       <dl id="create-preview"></dl>

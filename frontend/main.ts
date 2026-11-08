@@ -8,6 +8,7 @@ import { initI18n } from './shared/i18n'
 export type Status = {
   enabled: boolean
   can_chat: boolean
+  chat_model?: string | null
   can_create: boolean
   can_update: boolean
   can_configure: boolean
@@ -144,6 +145,9 @@ async function main() {
     const status = await api.get<Status>('/filabrain/status', { cache: 'no-store' })
     document.addEventListener('filaman:mcp-state', event => {
       status.mcp_enabled = (event as CustomEvent<boolean>).detail
+    })
+    document.addEventListener('filaman:model-change', event => {
+      status.chat_model = (event as CustomEvent<string>).detail || null
     })
     if (!status.enabled) {
       message.textContent = 'FilaBrain is disabled.'
