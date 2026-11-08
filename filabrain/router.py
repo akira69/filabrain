@@ -14,13 +14,13 @@ async def lifespan(app):
     try:
         yield
     finally:
-        task = app.state.filament_research_worker
+        task = app.state.filabrain_worker
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
 
 router = APIRouter(
-    prefix="/filament-research",
+    prefix="/filabrain",
     dependencies=[Depends(ensure_schema)],
     lifespan=lifespan,
 )

@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const html = await readFile(new URL('../filament_research/page.html', import.meta.url), 'utf8')
+const html = await readFile(new URL('../filabrain/page.html', import.meta.url), 'utf8')
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright-core')
 const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE_PATH })
-const url = 'https://fila.test/plugin-page/filament-research'
+const url = 'https://fila.test/plugin-page/filabrain'
 const manufacturer = { id: 7, name: 'Fixture Brand' }
 const filament = {
   id: 10, designation: 'Fixture PLA', manufacturer_id: 7, manufacturer,
@@ -166,7 +166,7 @@ try {
   assert.equal(await frame.getByLabel('Search filament library').isVisible(), false)
   await frame.getByRole('button', { name: 'Start research' }).click()
   await frame.getByRole('heading', { name: 'Review queue' }).waitFor()
-  console.log('Filament Research plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
+  console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
 } finally {
   await browser.close()
 }

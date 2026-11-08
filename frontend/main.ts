@@ -2,7 +2,7 @@ import { mountChat } from './chat'
 import { mountSettings } from './settings'
 import { mountResearch, type EditorContext, type SelectionContext } from './research'
 import { api } from './shared/api'
-import { batchHref, createResearchBatch, mountResearchBatches, type BatchMode } from './shared/filament-research-batches'
+import { batchHref, createResearchBatch, mountResearchBatches, type BatchMode } from './shared/filabrain-batches'
 import { initI18n } from './shared/i18n'
 
 export type Status = {
@@ -23,7 +23,7 @@ export function hostRequest<T>(type: string, payload: Record<string, unknown> = 
     const request_id = Array.from(crypto.getRandomValues(new Uint32Array(4))).join('-')
     const timer = window.setTimeout(() => {
       window.removeEventListener('message', receive)
-      reject(new Error('The FilaMan editor did not respond. Reopen Filament Research and try again.'))
+      reject(new Error('The FilaMan editor did not respond. Reopen FilaBrain and try again.'))
     }, 3500)
     function receive(event: MessageEvent) {
       if (event.origin !== location.origin || event.source !== window.parent ||
@@ -141,12 +141,12 @@ async function main() {
   const hostMode = window.parent === window ? null : params.get('filament_host')
   const message = element('plugin-status')
   try {
-    const status = await api.get<Status>('/filament-research/status', { cache: 'no-store' })
+    const status = await api.get<Status>('/filabrain/status', { cache: 'no-store' })
     document.addEventListener('filaman:mcp-state', event => {
       status.mcp_enabled = (event as CustomEvent<boolean>).detail
     })
     if (!status.enabled) {
-      message.textContent = 'Filament Research is disabled.'
+      message.textContent = 'FilaBrain is disabled.'
       return
     }
     if (hostMode === 'editor' || hostMode === 'selection') {
@@ -198,7 +198,7 @@ async function main() {
     }
     const available = Object.keys(mount).find(tab => mount[tab])
     if (!available) {
-      message.textContent = 'You do not have permission to use Filament Research.'
+      message.textContent = 'You do not have permission to use FilaBrain.'
       return
     }
     message.textContent = ''

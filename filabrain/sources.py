@@ -240,7 +240,7 @@ def _get_pinned(url, address: str, deadline: float) -> tuple[int, str, str, byte
             headers={
                 "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf",
                 "Accept-Encoding": "identity",
-                "User-Agent": "FilaMan Filament Research",
+                "User-Agent": "FilaBrain",
             },
         )
         response = connection.getresponse()

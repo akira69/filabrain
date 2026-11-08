@@ -27,14 +27,14 @@ from .settings import (
     model_key,
 )
 
-router = APIRouter(tags=["Filament Research"])
-PLUGIN_KEY = "filament_research"
+router = APIRouter(tags=["FilaBrain"])
+PLUGIN_KEY = "filabrain"
 CHAT_PAGES = {
     "new_filament": ("/filaments/new", "filaments:create"),
     "new_spool": ("/filaments?select_for_spool=1", "spools:create"),
     "filaments": ("/filaments", "filaments:read"),
     "research_batches": ("/filaments/research", "filaments:update"),
-    "model_settings": ("/admin/system/filament-research", "admin:plugins_manage"),
+    "model_settings": ("/admin/system/filabrain", "admin:plugins_manage"),
 }
 PAGE_MARKER = re.compile(r"(?m)^\[\[open:([a-z_]+)(?:\|([^\]\r\n]{1,255}))?\]\][ \t]*$")
 
@@ -104,7 +104,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
 @router.post("/chat")
 async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDep):
     if not await is_enabled(db):
-        raise HTTPException(404, "Filament Research is disabled")
+        raise HTTPException(404, "FilaBrain is disabled")
     if principal.auth_type != "session":
         raise HTTPException(403, "A browser session is required")
     permissions = await ensure_any_permission(db, principal, *(permission for _, permission in CHAT_PAGES.values()))
@@ -119,7 +119,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         raise HTTPException(422, "Expected a conversation ending in a user question")
     _, config = await config_record(db)
     if not (config["model_url"] and config["model_id"]):
-        raise HTTPException(503, "Configure a model in Filament Research settings")
+        raise HTTPException(503, "Configure a model in FilaBrain settings")
     await db.rollback()
     messages = [
         {"role": "system", "content": (
@@ -241,7 +241,7 @@ async def research_proposal(
     data: ProposalRequest, db: DBSession, principal: PrincipalDep
 ):
     if not await is_enabled(db):
-        raise HTTPException(404, "Filament Research is disabled")
+        raise HTTPException(404, "FilaBrain is disabled")
     await ensure_any_permission(
         db, principal, "filaments:update" if data.mode == "edit" else "filaments:create"
     )

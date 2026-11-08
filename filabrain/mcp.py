@@ -51,7 +51,7 @@ from .settings import (
     mcp_access_enabled,
 )
 
-router = APIRouter(tags=["Filament Research"])
+router = APIRouter(tags=["FilaBrain"])
 VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")
 MAX_REQUEST = 16_384
 PAIR_DURATION = timedelta(minutes=15)
@@ -172,7 +172,7 @@ def _secure(request: Request):
         peer = headers.get("X-Real-IP", "")
         trusted = {
             address.strip()
-            for address in getenv("FILAMENT_RESEARCH_MCP_TRUSTED_PROXY_IPS", "").split(",")
+            for address in getenv("FILABRAIN_MCP_TRUSTED_PROXY_IPS", "").split(",")
             if address.strip()
         }
         if (
@@ -202,7 +202,7 @@ def _secure(request: Request):
 async def _require_mcp(db, *, for_write=False):
     enabled = await lock_research_plugin(db) if for_write else await is_enabled(db)
     if not enabled:
-        raise HTTPException(404, "Filament Research is disabled")
+        raise HTTPException(404, "FilaBrain is disabled")
     if not await mcp_access_enabled(db, locked=for_write):
         raise HTTPException(404, "External MCP access is disabled")
 
@@ -539,7 +539,7 @@ async def research_mcp(request: Request, db: DBSession):
             result={
                 "protocolVersion": proposed if proposed in VERSIONS else VERSIONS[0],
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "filaman-filament-research", "version": "1.0.0"},
+                "serverInfo": {"name": "filabrain", "version": "1.0.0"},
             },
         )
     if method == "ping":

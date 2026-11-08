@@ -13,7 +13,7 @@ class Base(DeclarativeBase):
 
 
 class FilamentResearchSettings(Base):
-    __tablename__ = "filament_research_settings"
+    __tablename__ = "filabrain_settings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     config: Mapped[dict | None] = mapped_column(JSON)
@@ -21,7 +21,7 @@ class FilamentResearchSettings(Base):
 
 
 class FilamentResearchPairing(Base):
-    __tablename__ = "filament_research_pairings"
+    __tablename__ = "filabrain_pairings"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     session_id: Mapped[int] = mapped_column(
@@ -35,7 +35,7 @@ class FilamentResearchPairing(Base):
 
 
 class FilamentResearchBatch(Base):
-    __tablename__ = "filament_research_batches"
+    __tablename__ = "filabrain_batches"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     owner_id: Mapped[int] = mapped_column(
@@ -48,11 +48,11 @@ class FilamentResearchBatch(Base):
 
 
 class FilamentResearchBatchItem(Base):
-    __tablename__ = "filament_research_batch_items"
+    __tablename__ = "filabrain_batch_items"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     batch_id: Mapped[str] = mapped_column(
-        ForeignKey("filament_research_batches.id", ondelete="CASCADE"), index=True
+        ForeignKey("filabrain_batches.id", ondelete="CASCADE"), index=True
     )
     filament_id: Mapped[int] = mapped_column()
     live_filament_id: Mapped[int | None] = mapped_column(
@@ -92,15 +92,15 @@ async def ensure_schema(db: DBSession) -> None:
             await connection.execute(text("SELECT pg_advisory_xact_lock(2743261400)"))
         elif dialect in ("mysql", "mariadb"):
             locked = await connection.scalar(
-                text("SELECT GET_LOCK('filaman_filament_research_schema', 30)")
+                text("SELECT GET_LOCK('filaman_filabrain_schema', 30)")
             )
             if locked != 1:
-                raise RuntimeError("Could not lock the Filament Research schema")
+                raise RuntimeError("Could not lock the FilaBrain schema")
         try:
             await connection.run_sync(Base.metadata.create_all)
         finally:
             if dialect in ("mysql", "mariadb"):
                 await connection.execute(
-                    text("SELECT RELEASE_LOCK('filaman_filament_research_schema')")
+                    text("SELECT RELEASE_LOCK('filaman_filabrain_schema')")
                 )
     _initialized.add(bind)

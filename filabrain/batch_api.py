@@ -35,7 +35,7 @@ from .proposals import (
     is_missing,
 )
 
-router = APIRouter(prefix="/batches", tags=["Filament Research"])
+router = APIRouter(prefix="/batches", tags=["FilaBrain"])
 logger = logging.getLogger(__name__)
 MAX_DATABASE_ID = 2_147_483_647
 ID = Annotated[int, Field(gt=0, le=MAX_DATABASE_ID, strict=True)]
@@ -154,7 +154,7 @@ async def detail(db: DBSession, batch: Batch) -> dict:
 
 def require_active(enabled: bool, batch: Batch | None = None) -> None:
     if not enabled:
-        raise HTTPException(409, "Filament Research is disabled")
+        raise HTTPException(409, "FilaBrain is disabled")
     if batch is not None and batch.canceled_at is not None:
         raise HTTPException(409, "The batch was canceled")
 
@@ -406,7 +406,7 @@ async def apply(batch_id: str, data: ApplyBatch, db: DBSession, principal: Princ
             }) from exc
         except SQLAlchemyError:
             await db.rollback()
-            logger.exception("Could not apply filament research item %s", entry.item_id)
+            logger.exception("Could not apply FilaBrain item %s", entry.item_id)
             results.append({"item_id": entry.item_id, "status": "error", "changed_fields": []})
             break
         results.append(result)
@@ -419,6 +419,6 @@ async def apply(batch_id: str, data: ApplyBatch, db: DBSession, principal: Princ
         batch_detail = await detail(db, batch)
     except SQLAlchemyError:
         await db.rollback()
-        logger.exception("Could not refresh filament research batch %s after Apply", batch_id)
+        logger.exception("Could not refresh FilaBrain batch %s after Apply", batch_id)
         batch_detail = None
     return {"results": results, "batch": batch_detail}

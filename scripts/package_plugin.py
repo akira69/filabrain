@@ -5,7 +5,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "filament_research"
+PACKAGE = ROOT / "filabrain"
 REQUIRED = {"__init__.py", "page.html", "plugin.json", "router.py"}
 
 

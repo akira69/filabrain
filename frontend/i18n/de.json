@@ -1,5 +1,5 @@
 {
-  "filamentResearch": {
+  "filaBrain": {
     "chatChipAdd": "Filament hinzufügen",
     "chatPromptAdd": "Öffne das Formular zum Hinzufügen eines Filaments.",
     "chatNew": "Neuer Chat",
@@ -18,13 +18,13 @@
     "chatStopped": "Abgebrochen. Du kannst deine Frage bearbeiten und erneut senden.",
     "chatWorking": "Denkt nach …",
     "chatFailed": "Das Modell konnte nicht antworten. Versuche es erneut.",
-    "chatUnavailable": "Die Filamentrecherche ist für dieses Konto nicht verfügbar.",
-    "chatSetup": "Wähle in den Einstellungen der Filamentrecherche ein Modell aus, um zu chatten.",
+    "chatUnavailable": "FilaBrain ist für dieses Konto nicht verfügbar.",
+    "chatSetup": "Wähle in den Einstellungen von FilaBrain ein Modell aus, um zu chatten.",
     "archived_page": "Archivierte Kopie geprüft: {name}",
     "followUp": "Weitere Suchanweisungen",
     "followUpHint": "Ein Datenblatt, einen anderen Shop oder das Leergewicht der Spule suchen",
     "searchAgain": "Erneut suchen",
-    "title": "Filament-Recherche",
+    "title": "FilaBrain",
     "description": "Recherchiere ein Filament und prüfe die Quellen, bevor du Vorschläge übernimmst.",
     "query": "Produktname, Artikelnummer oder Produkt-URL",
     "queryHint": "Produktname, SKU: EX-123 oder https://…",
@@ -93,7 +93,7 @@
     "mcpEnabled": "MCP-Zugriff aktivieren",
     "mcpSettings": "MCP-Einstellungen",
     "mcpOffDrawer": "Der externe MCP-Zugriff ist deaktiviert.",
-    "mcpOffHint": "Der externe MCP-Zugriff ist deaktiviert. Aktiviere ihn, um einen externen Client zu verbinden oder ihn im Filamentrecherche-Bereich zu koppeln.",
+    "mcpOffHint": "Der externe MCP-Zugriff ist deaktiviert. Aktiviere ihn, um einen externen Client zu verbinden oder ihn im FilaBrain-Bereich zu koppeln.",
     "mcpSaveFailed": "Der MCP-Zugriff konnte nicht gespeichert werden. Versuche es erneut.",
     "standaloneMcpHint": "Füge diese URL einem MCP-Client mit Streamable HTTP hinzu. Verwende einen FilaMan-API-Schlüssel als Bearer-Token. Verwende HTTPS, wenn du dich von einem anderen Gerät verbindest.",
     "mcpUrl": "MCP-URL",

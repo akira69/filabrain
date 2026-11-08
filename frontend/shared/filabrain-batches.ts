@@ -2,10 +2,10 @@ import { isAbortError } from './abort'
 import { api, ApiError } from './api'
 import { CACHE_KEYS, invalidateCache } from './cache'
 import { escapeHtml, formatNumericRange } from './extra-fields'
-import { researchFieldLabel, researchOptionValue, type ResearchOption } from './filament-research'
+import { researchFieldLabel, researchOptionValue, type ResearchOption } from './filabrain'
 import { t } from './i18n'
 
-const route = '/filament-research/batches'
+const route = '/filabrain/batches'
 const page = location.pathname
 const tr = (key: string, vars?: Record<string, string | number>) => t('researchBatches.' + key, vars)
 
@@ -115,7 +115,7 @@ function proposalCard(proposal: Proposal, checked: boolean, editable: boolean) {
 function issueText(issue: Item['issues'][number]) {
   if (issue.message) return issue.message
   if (issue.code === 'needs_match') return tr('issue.needs_match')
-  const key = 'filamentResearch.' + issue.code
+  const key = 'filaBrain.' + issue.code
   const description = t(key, { name: issue.name || issue.source || (issue.field ? fieldName(issue.field) : ''), source: issue.source || '' })
   return description === key ? issue.code.replaceAll('_', ' ') : description
 }

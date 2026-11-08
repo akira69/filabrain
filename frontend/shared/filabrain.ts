@@ -40,7 +40,7 @@ export function researchHeaders() {
   return { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf ? decodeURIComponent(csrf) : '' }
 }
 
-const prefix = '/api/v1/filament-research'
+const prefix = '/api/v1/filabrain'
 const labelKeys: Record<string, string> = {
   manufacturer_id: 'manufacturer', manufacturer_sku: 'sku', designation: 'designation',
   material_type: 'material', diameter_mm: 'diameter', manufacturer_color_name: 'color', color_id: 'paletteColor',
@@ -63,7 +63,7 @@ const spoolFields: Record<string, string> = {
 export function researchFieldLabel(field: string) {
   if (filamentFields[field]) return t(`filaments.${filamentFields[field]}`)
   if (spoolFields[field]) return t(`spools.${spoolFields[field]}`)
-  return labelKeys[field] ? t(`filamentResearch.${labelKeys[field]}`) : field.replaceAll('_', ' ')
+  return labelKeys[field] ? t(`filaBrain.${labelKeys[field]}`) : field.replaceAll('_', ' ')
 }
 
 export function researchOptionValue(value: ResearchOption['value']) {

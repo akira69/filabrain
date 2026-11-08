@@ -1,6 +1,6 @@
 import { element, errorText, hostRequest, type Status } from './main'
 import { api, fetchAllPages, getCsrfToken } from './shared/api'
-import { researchFieldLabel, researchOptionValue, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filament-research'
+import { researchFieldLabel, researchOptionValue, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
 
 type Value = ResearchOption['value'] | boolean | null
@@ -9,7 +9,7 @@ type Unit = Record<string, { old: Value; value: Value }>
 export type EditorContext = { mode: 'create' | 'edit'; filament_id: number | null; fields: Fields }
 export type SelectionContext = { mode: 'selection'; filament_ids: number[] }
 
-const route = '/filament-research'
+const route = '/filabrain'
 const nativeFields = new Set([
   'manufacturer_id', 'color_id', 'designation', 'material_type', 'diameter_mm',
   'manufacturer_color_name', 'manufacturer_sku', 'density_g_cm3', 'raw_material_weight_g',
@@ -175,18 +175,18 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     const alternatives = new Set<string>()
     for (const issue of proposal.issues) {
       const p = document.createElement('p')
-      const key = `filamentResearch.${issue.code}`
+      const key = `filaBrain.${issue.code}`
       const explanation = t(key, { name: issue.name || '', source: issue.source || '' })
       p.textContent = explanation === key ? issue.code.replaceAll('_', ' ') : explanation
       if (issue.reason) p.append(` (${issue.reason})`)
       if (issue.filament_id && issue.code === 'duplicate') {
-        p.append(' ', externalLink(`/filaments/${issue.filament_id}`, t('filamentResearch.openExisting')))
+        p.append(' ', externalLink(`/filaments/${issue.filament_id}`, t('filaBrain.openExisting')))
       }
-      if (issue.url && /^https?:\/\//i.test(issue.url)) p.append(' ', externalLink(issue.url, t('filamentResearch.openSource')))
+      if (issue.url && /^https?:\/\//i.test(issue.url)) p.append(' ', externalLink(issue.url, t('filaBrain.openSource')))
       if (issue.product_url && /^https?:\/\//i.test(issue.product_url)) {
         const choose = document.createElement('button')
         choose.type = 'button'
-        choose.textContent = t('filamentResearch.useProductPage')
+        choose.textContent = t('filaBrain.useProductPage')
         choose.addEventListener('click', () => {
           ;(form.elements.namedItem('product_url') as HTMLInputElement).value = issue.product_url!
           form.requestSubmit(buttons[0])
@@ -207,7 +207,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
         noChoice.type = 'radio'
         noChoice.name = `choice-${field}`
         noChoice.checked = true
-        none.append(noChoice, t('filamentResearch.leaveBlank'))
+        none.append(noChoice, t('filaBrain.leaveBlank'))
         group.append(none)
         for (const candidate of issue.options) {
           group.append(option(unitFor(field, candidate.value), candidate.sources, undefined, noChoice.name))
@@ -227,7 +227,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       const sources = proposalUnit.sources.map(source => ({ title: source.title, url: source.url, evidence: source.quote }))
       results.append(option(unit, sources, proposalUnit.reason))
     }
-    if (!results.childElementCount) notice.textContent = t('filamentResearch.noSuggestions')
+    if (!results.childElementCount) notice.textContent = t('filaBrain.noSuggestions')
     save.disabled = duplicate || (!!editor && !choices.size)
   }
 
@@ -276,7 +276,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       if (bound !== snapshot || context.mode !== snapshot.mode || context.filament_id !== snapshot.filament_id ||
           JSON.stringify(identity(context.fields)) !== JSON.stringify(identity(snapshot.fields))) {
         clearResults()
-        throw new Error(t('filamentResearch.identityChanged'))
+        throw new Error(t('filaBrain.identityChanged'))
       }
       if (editor) {
         if (!units.length) throw new Error('Choose the fields to stage first.')
@@ -398,13 +398,13 @@ export function mountResearch(status: Status, editor?: EditorContext) {
           if (incoming.proposal && incoming.proposal_id && incoming.proposal_id !== lastId) {
             lastId = incoming.proposal_id
             render(incoming.proposal, context)
-            notice.textContent = t('filamentResearch.pairReceived')
+            notice.textContent = t('filaBrain.pairReceived')
           }
           pairPoll = window.setTimeout(poll, 2000)
         } catch {
           if (pairId !== session.id) return
           void disconnect()
-          notice.textContent = t('filamentResearch.pairExpired')
+          notice.textContent = t('filaBrain.pairExpired')
         }
       }
       pairPoll = window.setTimeout(poll, 2000)

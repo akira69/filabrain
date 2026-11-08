@@ -1,9 +1,9 @@
 import { initI18n, t } from './shared/i18n'
-import { researchHeaders } from './shared/filament-research'
+import { researchHeaders } from './shared/filabrain'
 
 export async function mountChat() {
   await initI18n()
-  const api = '/api/v1/filament-research'
+  const api = '/api/v1/filabrain'
   const form = document.querySelector<HTMLFormElement>('[data-chat-form]')!
   const input = form.querySelector('textarea')!
   const submit = form.querySelector<HTMLButtonElement>('[type=submit]')!
@@ -18,7 +18,7 @@ export async function mountChat() {
     new_spool: 'spools.newSpool',
     filaments: 'nav.filaments',
     research_batches: 'researchBatches.title',
-    model_settings: 'filamentResearch.settings',
+    model_settings: 'filaBrain.settings',
   }
   let messages: Message[] = []
   let request: AbortController | undefined
@@ -27,7 +27,7 @@ export async function mountChat() {
 
   function updateControls() {
     submit.disabled = !request && !input.value.trim()
-    submit.setAttribute('aria-label', t(request ? 'filamentResearch.chatStop' : 'filamentResearch.chatSend'))
+    submit.setAttribute('aria-label', t(request ? 'filaBrain.chatStop' : 'filaBrain.chatSend'))
     submit.title = submit.getAttribute('aria-label')!
     submit.toggleAttribute('data-busy', !!request)
     input.readOnly = !!request
@@ -53,7 +53,7 @@ export async function mountChat() {
   })
   for (const button of prompts.querySelectorAll<HTMLButtonElement>('[data-chat-prompt]')) {
     button.addEventListener('click', () => {
-      input.value = t(`filamentResearch.${button.dataset.chatPrompt}`)
+      input.value = t(`filaBrain.${button.dataset.chatPrompt}`)
       updateControls()
       input.focus()
     })
@@ -80,7 +80,7 @@ export async function mountChat() {
     const bubble = append(question)
     const controller = request = new AbortController()
     input.value = ''
-    status.textContent = t('filamentResearch.chatWorking')
+    status.textContent = t('filaBrain.chatWorking')
     updateControls()
     try {
       const response = await fetch(`${api}/chat`, {
@@ -112,7 +112,7 @@ export async function mountChat() {
       if (request !== controller) return
       bubble.remove()
       input.value = content
-      status.textContent = t(controller.signal.aborted ? 'filamentResearch.chatStopped' : 'filamentResearch.chatFailed')
+      status.textContent = t(controller.signal.aborted ? 'filaBrain.chatStopped' : 'filaBrain.chatFailed')
     } finally {
       if (request === controller) {
         request = undefined
@@ -130,9 +130,9 @@ export async function mountChat() {
     document.querySelector<HTMLElement>('[data-chat-batches]')!.hidden = !availability.can_update
     document.querySelector<HTMLElement>('[data-chat-settings]')!.hidden = !availability.can_configure
     if (!availability.can_chat) {
-      status.textContent = t('filamentResearch.chatUnavailable')
+      status.textContent = t('filaBrain.chatUnavailable')
     } else if (!availability.chat_model) {
-      status.textContent = t('filamentResearch.chatSetup')
+      status.textContent = t('filaBrain.chatSetup')
     } else {
       document.querySelector<HTMLElement>('[data-chat-model]')!.textContent = availability.chat_model
       form.hidden = false
@@ -140,6 +140,6 @@ export async function mountChat() {
       updateControls()
     }
   } catch {
-    status.textContent = t('filamentResearch.chatFailed')
+    status.textContent = t('filaBrain.chatFailed')
   }
 }

@@ -267,9 +267,9 @@ async def run_next_batch_item(sessions=async_session_maker) -> bool:
 
 
 def start_worker(app) -> None:
-    task = getattr(app.state, "filament_research_worker", None)
+    task = getattr(app.state, "filabrain_worker", None)
     if task is None or task.done():
-        app.state.filament_research_worker = asyncio.create_task(run_batch_worker())
+        app.state.filabrain_worker = asyncio.create_task(run_batch_worker())
 
 
 async def run_batch_worker() -> None:
@@ -288,5 +288,5 @@ async def run_batch_worker() -> None:
                     await db.commit()
                 next_cleanup = now() + timedelta(hours=1)
         except Exception:
-            logger.exception("Filament research worker failed, will retry")
+            logger.exception("FilaBrain worker failed, will retry")
         await asyncio.sleep(2)

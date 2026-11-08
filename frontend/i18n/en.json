@@ -1,5 +1,5 @@
 {
-  "filamentResearch": {
+  "filaBrain": {
     "chatChipAdd": "Add a filament",
     "chatPromptAdd": "Open the Add Filament form.",
     "chatNew": "New chat",
@@ -18,13 +18,13 @@
     "chatStopped": "Stopped. You can edit and resend your question.",
     "chatWorking": "Thinking…",
     "chatFailed": "The model could not answer. Try again.",
-    "chatUnavailable": "Filament Research is unavailable for this account.",
-    "chatSetup": "Choose a model in Filament Research settings to start chatting.",
+    "chatUnavailable": "FilaBrain is unavailable for this account.",
+    "chatSetup": "Choose a model in FilaBrain settings to start chatting.",
     "archived_page": "Archived copy checked: {name}",
     "followUp": "Follow-up instructions",
     "followUpHint": "Try a datasheet, a different store, or focus on empty spool weight",
     "searchAgain": "Search again",
-    "title": "Filament Research",
+    "title": "FilaBrain",
     "description": "Research a filament and review the sources before applying suggestions.",
     "query": "Product name, SKU, or product URL",
     "queryHint": "Product name, SKU: EX-123, or https://…",
@@ -91,7 +91,7 @@
     "mcpEnabled": "Enable MCP access",
     "mcpSettings": "MCP settings",
     "mcpOffDrawer": "External MCP access is off.",
-    "mcpOffHint": "External MCP access is off. Turn it on to connect an external client or pair one from the Filament Research drawer.",
+    "mcpOffHint": "External MCP access is off. Turn it on to connect an external client or pair one from the FilaBrain drawer.",
     "mcpSaveFailed": "Could not save MCP access. Try again.",
     "standaloneMcpHint": "Add this URL to an MCP client using Streamable HTTP. Use a FilaMan API key as the bearer token. Connect over HTTPS from another device.",
     "pair": "Pair a client",

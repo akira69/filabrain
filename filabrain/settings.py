@@ -15,12 +15,12 @@ from .db import FilamentResearchSettings
 from .model import request_extraction
 from .sources import Evidence
 
-router = APIRouter(tags=["Filament Research"])
+router = APIRouter(tags=["FilaBrain"])
 admin = RequirePermission("admin:plugins_manage")
 
 
 async def lock_research_plugin(db: DBSession) -> bool:
-    query = select(InstalledPlugin.is_active).where(InstalledPlugin.plugin_key == "filament_research")
+    query = select(InstalledPlugin.is_active).where(InstalledPlugin.plugin_key == "filabrain")
     if db.get_bind().dialect.name == "sqlite":
         await db.execute(text("BEGIN IMMEDIATE"))
     else:
@@ -89,18 +89,18 @@ class McpSettingsInput(BaseModel):
 
 
 def _deployment_model_url() -> str:
-    return _model_base_url(getenv("FILAMENT_RESEARCH_MODEL_URL", ""))
+    return _model_base_url(getenv("FILABRAIN_MODEL_URL", ""))
 
 
 def _deployment_search_url() -> str:
-    return getenv("FILAMENT_RESEARCH_SEARCH_URL", "").strip().rstrip("/")
+    return getenv("FILABRAIN_SEARCH_URL", "").strip().rstrip("/")
 
 
 async def config_record(db: DBSession) -> tuple[FilamentResearchSettings | None, dict]:
     row = await db.get(FilamentResearchSettings, 1)
     fallback = {
         "model_url": _deployment_model_url(),
-        "model_id": getenv("FILAMENT_RESEARCH_MODEL_ID", "").strip(),
+        "model_id": getenv("FILABRAIN_MODEL_ID", "").strip(),
         "search_url": _deployment_search_url(),
     }
     config = fallback | (row.config or {} if row else {})
@@ -113,7 +113,7 @@ def model_key(config: dict) -> str:
     if config.get("encrypted_key"):
         return decrypt_secret(config["encrypted_key"])
     if config["model_url"] and config["model_url"] == _deployment_model_url():
-        return getenv("FILAMENT_RESEARCH_API_KEY", "")
+        return getenv("FILABRAIN_API_KEY", "")
     return ""
 
 
@@ -127,7 +127,7 @@ def public_config(config: dict, mcp_enabled: bool) -> dict:
         or bool(
             config["model_url"]
             and config["model_url"] == _deployment_model_url()
-            and getenv("FILAMENT_RESEARCH_API_KEY", "")
+            and getenv("FILABRAIN_API_KEY", "")
         ),
     }
 

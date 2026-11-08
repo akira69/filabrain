@@ -1,32 +1,32 @@
 <section class="research-chat fm-card" aria-labelledby="research-chat-title">
     <header class="chat-header">
       <svg aria-hidden="true" width="28" height="28"><use href="/icons.svg?v=3#icon-research-brain" /></svg>
-      <h2 id="research-chat-title" data-i18n="filamentResearch.title">Filament Research</h2>
+      <h2 id="research-chat-title" data-i18n="filaBrain.title">FilaBrain</h2>
       <nav data-chat-actions hidden>
-        <button type="button" class="fm-btn fm-btn-outline" data-chat-new data-i18n="filamentResearch.chatNew" disabled>New chat</button>
+        <button type="button" class="fm-btn fm-btn-outline" data-chat-new data-i18n="filaBrain.chatNew" disabled>New chat</button>
         <a href="?tab=batches" class="fm-btn fm-btn-outline" data-chat-batches hidden data-i18n="researchBatches.title">Research batches</a>
-        <a href="?tab=settings" class="fm-btn fm-btn-outline" data-chat-settings hidden data-i18n="filamentResearch.settings">Model settings</a>
+        <a href="?tab=settings" class="fm-btn fm-btn-outline" data-chat-settings hidden data-i18n="filaBrain.settings">Model settings</a>
       </nav>
     </header>
 
-    <div class="chat-transcript" data-chat-transcript tabindex="0" role="region" data-i18n-aria-label="filamentResearch.chatTranscript">
+    <div class="chat-transcript" data-chat-transcript tabindex="0" role="region" data-i18n-aria-label="filaBrain.chatTranscript">
       <div class="chat-prompts" data-chat-prompts hidden>
-        <h2 data-i18n="filamentResearch.chatWelcome">What are you printing?</h2>
-        <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptMaterial" data-i18n="filamentResearch.chatChipMaterial">Compare materials</button>
-        <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptDrying" data-i18n="filamentResearch.chatChipDrying">Drying filament</button>
-        <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptQuality" data-i18n="filamentResearch.chatChipQuality">Troubleshoot a print</button>
-        <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptAdd" data-i18n="filamentResearch.chatChipAdd">Add a filament</button>
+        <h2 data-i18n="filaBrain.chatWelcome">What are you printing?</h2>
+        <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptMaterial" data-i18n="filaBrain.chatChipMaterial">Compare materials</button>
+        <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptDrying" data-i18n="filaBrain.chatChipDrying">Drying filament</button>
+        <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptQuality" data-i18n="filaBrain.chatChipQuality">Troubleshoot a print</button>
+        <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptAdd" data-i18n="filaBrain.chatChipAdd">Add a filament</button>
       </div>
-      <div class="chat-log" data-chat-log role="log" data-i18n-aria-label="filamentResearch.chatTranscript"></div>
+      <div class="chat-log" data-chat-log role="log" data-i18n-aria-label="filaBrain.chatTranscript"></div>
     </div>
 
     <div class="chat-composer">
       <p data-chat-status class="fm-field-hint" role="status" data-i18n="common.loading">Loading…</p>
       <form data-chat-form hidden>
-        <textarea class="fm-input" name="message" rows="2" maxlength="2000" placeholder="Ask FilaMan…" data-i18n-aria-label="filamentResearch.chatQuestion" data-i18n-placeholder="filamentResearch.chatPlaceholder"></textarea>
+        <textarea class="fm-input" name="message" rows="2" maxlength="2000" placeholder="Ask FilaMan…" data-i18n-aria-label="filaBrain.chatQuestion" data-i18n-placeholder="filaBrain.chatPlaceholder"></textarea>
         <div class="chat-toolbar">
           <span data-chat-model></span>
-          <button type="submit" class="fm-btn fm-btn-primary chat-send" disabled data-i18n-aria-label="filamentResearch.chatSend">
+          <button type="submit" class="fm-btn fm-btn-primary chat-send" disabled data-i18n-aria-label="filaBrain.chatSend">
             <svg data-send-icon aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6" /></svg>
             <svg data-stop-icon aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3" /></svg>
           </button>

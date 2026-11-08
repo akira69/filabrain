@@ -15,7 +15,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 pytest_plugins = ("tests.conftest",)
 pytestmark = pytest.mark.asyncio
-BASE = "/api/v1/filament-research"
+BASE = "/api/v1/filabrain"
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -25,8 +25,8 @@ async def installed(auth_client, db_session, monkeypatch):
     browser.base_url = "https://filaman.test"
     browser.headers["X-CSRF-Token"] = csrf
     plugin = InstalledPlugin(
-        plugin_key="filament_research",
-        name="Filament Research",
+        plugin_key="filabrain",
+        name="FilaBrain",
         version="1.0",
         plugin_type="integration",
         is_active=True,
@@ -38,7 +38,7 @@ async def installed(auth_client, db_session, monkeypatch):
     monkeypatch.setattr(app.router, "routes", list(app.router.routes))
     monkeypatch.setattr(app.router, "lifespan_context", app.router.lifespan_context)
     assert mount_plugin_router_on_app(app, plugin.plugin_key)
-    from filament_research.db import Base as PluginBase
+    from filabrain.db import Base as PluginBase
 
     try:
         yield browser
@@ -59,8 +59,8 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
                 field["name"] for field in inspect(conn).get_columns("app_settings")
             }
         )
-    assert "filament_research_settings" in tables
-    assert "filament_research_mcp_enabled" not in settings_columns
+    assert "filabrain_settings" in tables
+    assert "filabrain_mcp_enabled" not in settings_columns
 
     config = {"model_url": "http://model.test", "model_id": "example"}
     assert (await installed.put(f"{BASE}/settings", json=config)).status_code == 200
@@ -137,12 +137,12 @@ async def test_mcp_requires_a_configured_proxy_for_forwarded_https(
         transport=ASGITransport(app=proxy, client=("127.0.0.1", 10000)),
         base_url="http://filaman.test",
     ) as external:
-        monkeypatch.delenv("FILAMENT_RESEARCH_MCP_TRUSTED_PROXY_IPS", raising=False)
+        monkeypatch.delenv("FILABRAIN_MCP_TRUSTED_PROXY_IPS", raising=False)
         assert (
             await external.post(f"{BASE}/mcp", headers=headers, json=payload)
         ).status_code == 403
 
-        monkeypatch.setenv("FILAMENT_RESEARCH_MCP_TRUSTED_PROXY_IPS", "192.0.2.20")
+        monkeypatch.setenv("FILABRAIN_MCP_TRUSTED_PROXY_IPS", "192.0.2.20")
         assert (
             await external.post(f"{BASE}/mcp", headers=headers, json=payload)
         ).status_code == 200
@@ -159,7 +159,7 @@ async def test_mcp_requires_a_configured_proxy_for_forwarded_https(
 async def test_stock_host_session_pairing_and_built_in_proposals(
     installed, monkeypatch
 ):
-    from filament_research import research
+    from filabrain import research
 
     async def proposal(_db, _identity, **_hints):
         return {"suggestions": [], "issues": []}
@@ -185,7 +185,7 @@ async def test_stock_host_session_pairing_and_built_in_proposals(
 async def test_stock_host_batch_claim_and_apply(
     installed, db_engine, db_session, monkeypatch
 ):
-    from filament_research import batch_api, batch_worker
+    from filabrain import batch_api, batch_worker
 
     async def propose(_db, _snapshot, _mode, **_hints):
         return {
@@ -244,7 +244,7 @@ async def test_stock_host_batch_claim_and_apply(
 
 
 async def test_stock_filamentdb_partial_fuzzy_search_is_incomplete(monkeypatch):
-    from filament_research.catalog import lookup_filaments
+    from filabrain.catalog import lookup_filaments
 
     monkeypatch.delattr(filamentdb_proxy, "lookup_filaments", raising=False)
     monkeypatch.setattr(

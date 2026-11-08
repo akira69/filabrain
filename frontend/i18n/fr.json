@@ -1,5 +1,5 @@
 {
-  "filamentResearch": {
+  "filaBrain": {
     "chatChipAdd": "Ajouter un filament",
     "chatPromptAdd": "Ouvre le formulaire d’ajout d’un filament.",
     "chatNew": "Nouvelle discussion",
@@ -18,13 +18,13 @@
     "chatStopped": "Arrêté. Vous pouvez modifier votre question et la renvoyer.",
     "chatWorking": "Réflexion en cours…",
     "chatFailed": "Le modèle n’a pas pu répondre. Réessayez.",
-    "chatUnavailable": "La recherche de filaments est indisponible pour ce compte.",
-    "chatSetup": "Sélectionnez un modèle dans les paramètres de recherche de filaments pour démarrer.",
+    "chatUnavailable": "FilaBrain est indisponible pour ce compte.",
+    "chatSetup": "Sélectionnez un modèle dans les paramètres de FilaBrain pour démarrer.",
     "archived_page": "Copie archivée consultée : {name}",
     "followUp": "Instructions complémentaires",
     "followUpHint": "Essayer une fiche technique, une autre boutique ou cibler le poids de la bobine vide",
     "searchAgain": "Relancer la recherche",
-    "title": "Recherche de filament",
+    "title": "FilaBrain",
     "description": "Recherchez un filament et vérifiez les sources avant d’appliquer les suggestions.",
     "query": "Nom du produit, référence ou URL du produit",
     "queryHint": "Nom du produit, SKU: EX-123 ou https://…",
@@ -93,7 +93,7 @@
     "mcpEnabled": "Activer l’accès MCP",
     "mcpSettings": "Paramètres MCP",
     "mcpOffDrawer": "L’accès MCP externe est désactivé.",
-    "mcpOffHint": "L’accès MCP externe est désactivé. Activez-le pour connecter un client externe ou l’associer depuis le panneau de recherche de filament.",
+    "mcpOffHint": "L’accès MCP externe est désactivé. Activez-le pour connecter un client externe ou l’associer depuis le panneau FilaBrain.",
     "mcpSaveFailed": "Impossible d’enregistrer le réglage d’accès MCP. Réessayez.",
     "standaloneMcpHint": "Ajoutez cette URL à un client MCP en utilisant Streamable HTTP. Utilisez une clé API FilaMan comme jeton Bearer. Connectez-vous en HTTPS depuis un autre appareil.",
     "mcpUrl": "URL MCP",

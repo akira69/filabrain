@@ -1,13 +1,13 @@
 {
-  "plugin_key": "filament_research",
+  "plugin_key": "filabrain",
   "plugin_type": "integration",
-  "name": "Filament Research",
-  "version": "0.1.0",
+  "name": "FilaBrain",
+  "version": "0.1.1",
   "description": "Research filament specifications and review source-backed proposals in FilaMan.",
   "author": "akira69",
-  "homepage": "https://github.com/akira69/filaman-filament-research",
+  "homepage": "https://github.com/akira69/filabrain",
   "license": "MIT",
-  "page_url": "/plugin-page/filament-research",
+  "page_url": "/plugin-page/filabrain",
   "show_in_nav": true,
   "capabilities": {
     "filament_ui": {

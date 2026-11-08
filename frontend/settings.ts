@@ -1,12 +1,12 @@
 import { initI18n, t } from './shared/i18n'
-import { researchHeaders } from './shared/filament-research'
+import { researchHeaders } from './shared/filabrain'
 
 export async function mountSettings() {
   await initI18n()
   document.querySelector<HTMLInputElement>('#research-mcp-url')!.value =
-    new URL('/api/v1/filament-research/mcp', location.origin).href
-  const route = '/api/v1/filament-research/settings'
-  const form = document.querySelector<HTMLFormElement>('#filament-research-settings')!
+    new URL('/api/v1/filabrain/mcp', location.origin).href
+  const route = '/api/v1/filabrain/settings'
+  const form = document.querySelector<HTMLFormElement>('#filabrain-settings')!
   const message = document.getElementById('research-settings-message')!
   const keyState = document.getElementById('research-key-state')!
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement
@@ -53,7 +53,7 @@ export async function mountSettings() {
       showMcp(data.mcp_enabled)
     } catch {
       mcpSwitch.checked = mcpEnabled
-      mcpMessage.textContent = t('filamentResearch.mcpSaveFailed')
+      mcpMessage.textContent = t('filaBrain.mcpSaveFailed')
     } finally {
       mcpSwitch.disabled = false
       if (hadFocus && document.activeElement === document.body) mcpSwitch.focus({ preventScroll: true })
@@ -75,7 +75,7 @@ export async function mountSettings() {
   function showModels() {
     const selected = values().model_id
     const options = [...new Set([...models, ...(selected ? [selected] : [])])]
-    modelList.replaceChildren(new Option(t('filamentResearch.chooseModel'), ''),
+    modelList.replaceChildren(new Option(t('filaBrain.chooseModel'), ''),
       ...options.map(model => new Option(model, model)))
     modelList.value = selected
   }
@@ -84,7 +84,7 @@ export async function mountSettings() {
     for (const key of ['model_url', 'model_id', 'search_url'] as const) field(key).value = config[key]
     field('api_key').value = ''
     field('clear_key').checked = false
-    keyState.textContent = t(config.has_key ? 'filamentResearch.keyConfigured' : 'filamentResearch.keyOptional')
+    keyState.textContent = t(config.has_key ? 'filaBrain.keyConfigured' : 'filaBrain.keyOptional')
     saved = JSON.stringify(values())
     showModels()
   }
@@ -105,18 +105,18 @@ export async function mountSettings() {
         body: JSON.stringify(payload),
       })
       const data = await response.json()
-      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : t('filamentResearch.failed'))
+      if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : t('filaBrain.failed'))
       if (action === 'models') {
         if (requestedConnection !== connection()) return
         models = data.models
         showModels()
-        message.textContent = t(data.models.length ? 'filamentResearch.modelsLoaded' : 'filamentResearch.noModels')
+        message.textContent = t(data.models.length ? 'filaBrain.modelsLoaded' : 'filaBrain.noModels')
         return
       }
       if (action === 'save') fill(data)
-      message.textContent = t(action === 'test' ? 'filamentResearch.testPassed' : 'filamentResearch.settingsSaved')
+      message.textContent = t(action === 'test' ? 'filaBrain.testPassed' : 'filaBrain.settingsSaved')
     } catch (error) {
-      message.textContent = error instanceof Error ? error.message : t('filamentResearch.failed')
+      message.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
     } finally {
       inputs.forEach(input => { input.disabled = false })
       busy = false
@@ -153,7 +153,7 @@ export async function mountSettings() {
     })
     if (values().model_url) void send('models')
   } catch {
-    message.textContent = t('filamentResearch.failed')
-    mcpMessage.textContent = t('filamentResearch.failed')
+    message.textContent = t('filaBrain.failed')
+    mcpMessage.textContent = t('filaBrain.failed')
   }
 }

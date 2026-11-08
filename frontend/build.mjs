@@ -18,4 +18,4 @@ for (const section of ['chat', 'settings', 'batches']) {
   html = html.replace(`<!-- ${section} -->`, () => fragment)
 }
 html = html.replace('<!-- script -->', () => result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script'))
-await writeFile(new URL('../filament_research/page.html', import.meta.url), html)
+await writeFile(new URL('../filabrain/page.html', import.meta.url), html)

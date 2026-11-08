@@ -37,19 +37,19 @@ async def smoke(host: Path, archive: Path, directory: Path) -> None:
             plugin, upgrade = await PluginInstallService(db).install_from_zip(
                 archive.read_bytes(), installed_by=user.id,
             )
-            assert not upgrade and plugin.plugin_key == "filament_research"
+            assert not upgrade and plugin.plugin_key == "filabrain"
 
         assert mount_plugin_router_on_app(app, plugin.plugin_key)
-        root = "/api/v1/filament-research"
+        root = "/api/v1/filabrain"
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="https://test") as browser:
             csrf = generate_token_secret()
             browser.cookies.update({"session_id": f"sess.{session.id}.{secret}", "csrf_token": csrf})
             headers = {"X-CSRF-Token": csrf}
-            page = await browser.get("/plugin-page/filament-research")
-            assert page.status_code == 200 and "Filament Research" in page.text
+            page = await browser.get("/plugin-page/filabrain")
+            assert page.status_code == 200 and "FilaBrain" in page.text
             nav = (await browser.get("/api/v1/plugin-nav")).json()
-            assert any(item["plugin_key"] == "filament_research" for item in nav)
+            assert any(item["plugin_key"] == "filabrain" and item["name"] == "FilaBrain" for item in nav)
             assert (await browser.get(f"{root}/status")).json()["enabled"] is True
             assert (await browser.get(f"{root}/batches")).json() == []
 
@@ -93,7 +93,7 @@ if __name__ == "__main__":
     if len(sys.argv) != 3:
         raise SystemExit("Usage: python scripts/smoke_install.py FILAMAN_CHECKOUT PLUGIN_ZIP")
     checkout, package = (Path(path).resolve(strict=True) for path in sys.argv[1:])
-    with TemporaryDirectory(prefix="filament-research-install-") as scratch:
+    with TemporaryDirectory(prefix="filabrain-install-") as scratch:
         os.chdir(scratch)
         asyncio.run(smoke(checkout, package, Path(scratch)))
     print("Installed plugin and verified sidebar, standalone MCP creation, and the off switch.")

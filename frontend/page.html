@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FilaMan - Filament Research</title>
+  <title>FilaBrain · FilaMan</title>
   <style><!-- styles --></style>
 </head>
 <body>
 <main>
   <header id="plugin-header">
-    <h1 data-i18n="filamentResearch.title">Filament Research</h1>
-    <nav aria-label="Filament Research">
+    <h1 data-i18n="filaBrain.title">FilaBrain</h1>
+    <nav aria-label="FilaBrain">
       <button type="button" data-tab="chat" hidden>Chat</button>
       <button type="button" data-tab="new" hidden>Research new filament</button>
       <button type="button" data-tab="library" hidden>Research library</button>
@@ -45,16 +45,16 @@
         </div>
       </form>
       <details id="research-pairing" hidden>
-        <summary data-i18n="filamentResearch.externalClient">External MCP client</summary>
-        <p class="fm-field-hint" id="pair-off" data-i18n="filamentResearch.mcpOffDrawer" hidden>External MCP access is off.</p>
+        <summary data-i18n="filaBrain.externalClient">External MCP client</summary>
+        <p class="fm-field-hint" id="pair-off" data-i18n="filaBrain.mcpOffDrawer" hidden>External MCP access is off.</p>
         <div class="actions">
-          <button type="button" class="fm-btn fm-btn-outline" id="pair-client" data-i18n="filamentResearch.pair">Pair a client</button>
-          <a id="pair-settings" href="?tab=settings#mcp-settings" target="_blank" rel="noopener noreferrer" data-i18n="filamentResearch.mcpSettings" hidden>MCP settings</a>
+          <button type="button" class="fm-btn fm-btn-outline" id="pair-client" data-i18n="filaBrain.pair">Pair a client</button>
+          <a id="pair-settings" href="?tab=settings#mcp-settings" target="_blank" rel="noopener noreferrer" data-i18n="filaBrain.mcpSettings" hidden>MCP settings</a>
         </div>
         <div class="field-grid" id="pair-credentials" hidden>
-          <label><span data-i18n="filamentResearch.mcpUrl">MCP URL</span><input id="pair-url" readonly></label>
-          <label><span data-i18n="filamentResearch.mcpToken">Bearer token (expires in 15 minutes)</span><input id="pair-token" readonly></label>
-          <div><button class="fm-btn fm-btn-outline" type="button" id="pair-revoke" data-i18n="filamentResearch.revoke">Disconnect</button></div>
+          <label><span data-i18n="filaBrain.mcpUrl">MCP URL</span><input id="pair-url" readonly></label>
+          <label><span data-i18n="filaBrain.mcpToken">Bearer token (expires in 15 minutes)</span><input id="pair-token" readonly></label>
+          <div><button class="fm-btn fm-btn-outline" type="button" id="pair-revoke" data-i18n="filaBrain.revoke">Disconnect</button></div>
         </div>
       </details>
       <p id="research-status" class="fm-field-hint" role="status"></p>

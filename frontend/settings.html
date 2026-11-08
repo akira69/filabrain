@@ -1,59 +1,59 @@
 <div class="fm-admin-page fm-admin-page-compact">
-    <h2 data-i18n="filamentResearch.settings">Model settings</h2>
-    <section class="fm-card fm-section"><h3 data-i18n="filamentResearch.settings">Model settings</h3><div class="fm-section-body">
-      <form id="filament-research-settings" class="fm-compact-form">
+    <h2 data-i18n="filaBrain.settings">Model settings</h2>
+    <section class="fm-card fm-section"><h3 data-i18n="filaBrain.settings">Model settings</h3><div class="fm-section-body">
+      <form id="filabrain-settings" class="fm-compact-form">
         <label>
-          <span data-i18n="filamentResearch.modelUrl">Model server URL</span>
+          <span data-i18n="filaBrain.modelUrl">Model server URL</span>
           <input name="model_url" type="url" class="fm-input" maxlength="500" placeholder="http://ollama:11434" aria-describedby="research-model-url-hint" />
-          <small id="research-model-url-hint" class="fm-field-hint" data-i18n="filamentResearch.modelUrlHint">Use an Ollama server or an OpenAI-compatible base URL.</small>
+          <small id="research-model-url-hint" class="fm-field-hint" data-i18n="filaBrain.modelUrlHint">Use an Ollama server or an OpenAI-compatible base URL.</small>
         </label>
         <div class="research-model-picker">
-          <label for="research-available-model" data-i18n="filamentResearch.availableModels">Available models</label>
+          <label for="research-available-model" data-i18n="filaBrain.availableModels">Available models</label>
           <div>
             <select id="research-available-model" name="available_model" class="fm-input" disabled>
-              <option value="" data-i18n="filamentResearch.chooseModel">Choose a model</option>
+              <option value="" data-i18n="filaBrain.chooseModel">Choose a model</option>
             </select>
-            <button type="button" id="research-load-models" class="fm-btn fm-btn-outline" data-i18n="filamentResearch.loadModels" disabled>Load models</button>
+            <button type="button" id="research-load-models" class="fm-btn fm-btn-outline" data-i18n="filaBrain.loadModels" disabled>Load models</button>
           </div>
         </div>
         <label>
-          <span data-i18n="filamentResearch.modelId">Model ID</span>
+          <span data-i18n="filaBrain.modelId">Model ID</span>
           <input name="model_id" class="fm-input" maxlength="150" />
         </label>
         <label>
-          <span data-i18n="filamentResearch.apiKey">API key (optional)</span>
+          <span data-i18n="filaBrain.apiKey">API key (optional)</span>
           <input name="api_key" type="password" class="fm-input" maxlength="1000" autocomplete="new-password" />
         </label>
         <p id="research-key-state" class="fm-field-hint"></p>
-        <label><input name="clear_key" type="checkbox" /> <span data-i18n="filamentResearch.clearKey">Remove stored key</span></label>
+        <label><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
         <label>
-          <span data-i18n="filamentResearch.searchUrl">SearXNG URL (optional)</span>
+          <span data-i18n="filaBrain.searchUrl">SearXNG URL (optional)</span>
           <input name="search_url" type="url" class="fm-input" maxlength="500" />
         </label>
         <div class="research-settings-actions">
-          <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-i18n="filamentResearch.testConnection" disabled>Test connection</button>
+          <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-i18n="filaBrain.testConnection" disabled>Test connection</button>
           <button type="submit" class="fm-btn fm-btn-outline" data-i18n="common.save" disabled>Save</button>
           <p id="research-settings-message" class="fm-field-hint" role="status"></p>
         </div>
       </form>
     </div></section>
     <div class="research-mcp-section">
-      <section class="fm-card fm-section"><h3 id="mcp-settings" data-i18n="filamentResearch.standaloneMcp">External MCP connection</h3><div class="fm-section-body">
+      <section class="fm-card fm-section"><h3 id="mcp-settings" data-i18n="filaBrain.standaloneMcp">External MCP connection</h3><div class="fm-section-body">
         <div class="research-mcp-toggle">
-          <label id="research-mcp-label" for="research-mcp-enabled" data-i18n="filamentResearch.mcpEnabled">Enable MCP access</label>
+          <label id="research-mcp-label" for="research-mcp-enabled" data-i18n="filaBrain.mcpEnabled">Enable MCP access</label>
           <span id="research-mcp-state" class="fm-field-hint" role="status"></span>
           <label class="fm-toggle">
             <input id="research-mcp-enabled" type="checkbox" role="switch" aria-labelledby="research-mcp-label" disabled />
             <span class="fm-toggle-slider" aria-hidden="true"></span>
           </label>
         </div>
-        <p id="research-mcp-off" class="fm-field-hint" data-i18n="filamentResearch.mcpOffHint" hidden>External MCP access is off. Turn it on to connect an external client or pair one from the Filament Research drawer.</p>
+        <p id="research-mcp-off" class="fm-field-hint" data-i18n="filaBrain.mcpOffHint" hidden>External MCP access is off. Turn it on to connect an external client or pair one from the FilaBrain drawer.</p>
         <div id="research-mcp-setup" class="fm-compact-form" hidden>
           <label>
-            <span data-i18n="filamentResearch.mcpUrl">MCP URL</span>
+            <span data-i18n="filaBrain.mcpUrl">MCP URL</span>
             <input id="research-mcp-url" class="fm-input" readonly />
           </label>
-          <p class="fm-field-hint" data-i18n="filamentResearch.standaloneMcpHint">Add this URL to an MCP client using Streamable HTTP. Use a FilaMan API key as the bearer token. Connect over HTTPS from another device.</p>
+          <p class="fm-field-hint" data-i18n="filaBrain.standaloneMcpHint">Add this URL to an MCP client using Streamable HTTP. Use a FilaMan API key as the bearer token. Connect over HTTPS from another device.</p>
           <div>
             <a href="/settings/api-keys" class="fm-btn fm-btn-outline" data-i18n="settings.apiKeys">API Keys</a>
           </div>
