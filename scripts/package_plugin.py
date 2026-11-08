@@ -6,7 +6,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "filabrain"
-REQUIRED = {"__init__.py", "page.html", "plugin.json", "router.py"}
+REQUIRED = {"__init__.py", "icon.svg", "page.html", "plugin.json", "router.py"}
 
 
 def main() -> None:

@@ -14,7 +14,9 @@ Upload the ZIP from `dist/` under **Admin → System → Plugins**. Enable **Fil
 
 The standalone plugin page uses FilaMan's existing plugin loader. The initial compatibility target is FilaMan's `devel` revision `c8c76c4f`. FilaMan’s optional editor and selected-filament actions are part of the proposed host extensions in [FilaMan PR #204](https://github.com/Fire-Devils/filaman-system/pull/204).
 
-Rebuild the bundled page after editing files in `frontend/`.
+The brain-and-reel mark is bundled as `filabrain/icon.svg`. Hosts with [FilaMan PR #205’s plugin icon support](https://github.com/Fire-Devils/filaman-system/pull/205) use it in the sidebar.
+
+Rebuild the bundled page after editing the icon or files in `frontend/`.
 
 ```sh
 npm ci
@@ -43,7 +45,7 @@ Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for F
 Run the smoke test with the Python environment from a stock FilaMan checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.1.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.2.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database.

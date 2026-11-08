@@ -1,30 +1,40 @@
 :root {
-  color-scheme: light;
-  --bg: #faf7f0;
-  --bg-elevated: #fffef9;
-  --bg-soft: #f0eadf;
-  --input-bg: #fffefa;
-  --text: #28241d;
-  --text-muted: #665c4d;
-  --border: #cfc4b4;
-  --accent: #854522;
-  --accent-text: #fff;
-  --radius-sm: .45rem;
-  --font-sans: system-ui, sans-serif;
-  --font-serif: Georgia, serif;
-}
-:root[data-theme="light"] { --bg: #f5f6f7; --bg-elevated: #fff; --bg-soft: #eef0f2; --input-bg: #fff; --accent: #23547c; }
-:root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #17191d;
-  --bg-elevated: #20232a;
-  --bg-soft: #282d37;
-  --input-bg: #181b21;
-  --text: #f5f2eb;
-  --text-muted: #bdc5ce;
-  --border: #526071;
-  --accent: #ffb78e;
-  --accent-text: #231a14;
+  --bg: #0c1612;
+  --bg-elevated: #13261d;
+  --bg-soft: #183225;
+  --input-bg: var(--bg-soft);
+  --text: #e9f3ec;
+  --text-muted: #b5c7bd;
+  --border: #30463b;
+  --accent: #4ee3a2;
+  --accent-text: #0b120e;
+  --radius-sm: .75rem;
+  --font-sans: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-serif: "Fraunces", Georgia, serif;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f8f6f1;
+  --bg-elevated: #fff;
+  --bg-soft: #f1ece3;
+  --text: #1a231e;
+  --text-muted: #53645a;
+  --border: #cbd3cd;
+  --accent: #14694b;
+  --accent-text: #fff;
+}
+:root[data-theme="light"] .filabrain-mark [stroke="#4ee3a2"] { stroke: #168355; }
+:root[data-theme="light"] .filabrain-mark [stroke="#c7adff"] { stroke: #6941a5; }
+:root[data-theme="light"] .filabrain-mark [fill="#c7adff"] { fill: #6941a5; }
+:root[data-theme="dark"] {
+  --bg: #0b0d12;
+  --bg-elevated: #141825;
+  --bg-soft: #1a2032;
+  --text: #eef1f7;
+  --text-muted: #9aa4b7;
+  --border: #374052;
+  --accent: #73d1ff;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -33,6 +43,11 @@ main { max-width: 76rem; margin: auto; padding: clamp(.65rem, 2vw, 1.25rem); }
 #plugin-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1.5rem; margin-bottom: 1rem; }
 h1, h2, h3 { line-height: 1.2; }
 #plugin-header h1 { margin: 0; font: 700 clamp(1.5rem, 5vw, 2rem) var(--font-serif); }
+.filabrain-heading { display: flex; align-items: center; gap: .7rem; }
+.filabrain-mark { width: 2.5rem; height: 2.5rem; flex: none; }
+.filabrain-heading h2 { margin: 0; }
+#research-heading { font-size: 1.25rem; }
+
 #plugin-header nav, .actions { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
 #plugin-header nav button { background: var(--bg-elevated); }
 #plugin-header nav button[aria-current] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }

@@ -9,7 +9,7 @@
 <body>
 <main>
   <header id="plugin-header">
-    <h1 data-i18n="filaBrain.title">FilaBrain</h1>
+    <h1 class="filabrain-heading"><!-- mark --><span data-i18n="filaBrain.title">FilaBrain</span></h1>
     <nav aria-label="FilaBrain">
       <button type="button" data-tab="chat" hidden>Chat</button>
       <button type="button" data-tab="new" hidden>Research new filament</button>
@@ -22,7 +22,10 @@
   <section data-view="chat" hidden><!-- chat --></section>
   <section data-view="new" hidden>
     <div class="fm-card">
-      <h2 id="research-heading">Research a new filament</h2>
+      <div class="filabrain-heading">
+        <!-- mark -->
+        <h2 id="research-heading">Research a new filament</h2>
+      </div>
       <p id="research-target" class="fm-field-hint" hidden></p>
       <form id="product-research">
         <div class="field-grid" id="draft-fields">

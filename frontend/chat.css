@@ -12,7 +12,6 @@
     display: flex; align-items: center; flex-wrap: wrap; gap: .65rem;
     padding: .85rem 1rem; border-bottom: 1px solid var(--border);
   }
-  .chat-header > svg { color: var(--accent); flex: none; }
   .chat-header h2 { flex: 1; margin: 0; font: 700 1.25rem/1.2 var(--font-serif); }
   .chat-header nav { display: flex; flex-wrap: wrap; gap: .4rem; }
   .chat-header .fm-btn { padding: .45rem .75rem; }
