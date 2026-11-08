@@ -52,14 +52,17 @@ try {
           }
         })
       </script>` })
-    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: 'Fixture model',
+    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: 'fixture:default',
       can_create: true, can_update: true, can_configure: true, mcp_enabled: mcpEnabled } })
+    if (path.endsWith('/models')) return route.fulfill({ json: { models: ['fixture:default', 'fixture:alternate'] } })
     if (path.endsWith('/chat')) {
       assert.equal(req.postDataJSON().messages[0].content, 'Compare these materials')
+      assert.equal(req.postDataJSON().model_id, 'fixture:alternate')
       return route.fulfill({ json: { reply: 'PLA is easier to print.', action: null } })
     }
     if (path.endsWith('/proposals')) {
       const target = req.postDataJSON()
+      if (target.filament_id === 10 && target.action === 'fill') assert.equal(target.model_id, 'fixture:alternate')
       if (target.guidance) {
         assert.equal(target.action, 'standardize')
         assert.equal(target.filament_id, 10)
@@ -115,9 +118,13 @@ try {
   })
 
   await page.goto(url)
+  const chatModel = page.getByRole('combobox', { name: 'Model for this conversation' })
+  await chatModel.selectOption('fixture:alternate')
   await page.getByRole('textbox', { name: 'Your question' }).fill('Compare these materials')
   await page.getByRole('button', { name: 'Send message' }).click()
   await page.getByText('PLA is easier to print.').waitFor()
+  await page.getByRole('button', { name: 'New chat' }).click()
+  assert.equal(await chatModel.inputValue(), '')
 
   await page.getByRole('button', { name: 'Research new filament' }).click()
   await page.getByLabel('Manufacturer', { exact: true }).selectOption('7')
@@ -155,7 +162,8 @@ try {
   await page.goto('https://fila.test/editor-fixture')
   const frame = page.frameLocator('iframe')
   const followUp = frame.getByRole('textbox', { name: 'Follow up on this search' })
-  await frame.getByText('Fixture model', { exact: true }).waitFor()
+  const researchModel = frame.getByRole('combobox', { name: 'Model for this conversation' })
+  await researchModel.selectOption('fixture:alternate')
   await frame.getByText('Advanced options', { exact: true }).waitFor()
   assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).isVisible(), false)
   assert.equal(await followUp.isVisible(), false)

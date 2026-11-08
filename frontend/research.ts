@@ -2,6 +2,7 @@ import { element, errorText, hostRequest, type Status } from './main'
 import { api, fetchAllPages, getCsrfToken } from './shared/api'
 import { researchFieldLabel, researchOptionValue, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
+import { mountModelPicker } from './shared/model-picker'
 
 type Value = ResearchOption['value'] | boolean | null
 type Fields = Record<string, Value>
@@ -76,13 +77,14 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   const buttons = [...form.querySelectorAll<HTMLButtonElement>('button[type=submit]')]
   const followUp = element<HTMLFormElement>('research-follow-up')
   const guidance = element<HTMLTextAreaElement>('research-guidance')
-  const sendFollowUp = followUp.querySelector('button')!
+  const guidanceLabel = element('research-guidance-label')
+  const sendFollowUp = followUp.querySelector<HTMLButtonElement>('button[type=submit]')!
+  const modelPicker = mountModelPicker(followUp, status.chat_model)
   const searchOptions = element<HTMLDetailsElement>('research-options')
   const optionsSummary = searchOptions.querySelector('summary')!
   const conversation = element('research-conversation')
   const transcript = element('research-transcript')
   const reply = element('research-reply')
-  const model = element('research-model')
   const mcpTarget = (context: EditorContext) => ({
     mode: context.mode, filament_id: context.filament_id, identity: identity(context.fields),
   })
@@ -95,11 +97,11 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   let busy = false
   let lastAction = 'fill'
   let formRevision = 0
-  function showModel() {
-    model.textContent = status.chat_model || t('filaBrain.researchNoModel')
+  function showFollowUp(visible: boolean) {
+    guidanceLabel.hidden = guidance.hidden = sendFollowUp.hidden = !visible
+    guidance.required = visible
   }
-  showModel()
-  document.addEventListener('filaman:model-change', showModel)
+  document.addEventListener('filaman:model-change', () => { void modelPicker.setDefault(status.chat_model) })
 
   if (editor) {
     document.documentElement.dataset.researchEditor = ''
@@ -263,7 +265,9 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     const revision = formRevision
     const previous = bound
     const saveWasDisabled = save.disabled
+    const selectedModel = modelPicker.selected
     busy = true
+    modelPicker.setBusy(true)
     buttons.forEach(button => { button.disabled = true })
     sendFollowUp.disabled = save.disabled = true
     saved.hidden = true
@@ -286,6 +290,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
         product_url: String(formData.get('product_url') || '').trim() || undefined,
         sku_hint: String(formData.get('sku_hint') || '').trim(),
         guidance: prompt,
+        model_id: action === 'fill' ? selectedModel : undefined,
       })
       if (revision !== formRevision) return
       render(proposal, context)
@@ -296,11 +301,12 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     } finally {
       if (revision === formRevision) {
         lastAction = action
-        followUp.hidden = false
+        showFollowUp(true)
         if (bound && bound === previous) save.disabled = saveWasDisabled
       }
       buttons.forEach(button => { button.disabled = false })
       sendFollowUp.disabled = false
+      modelPicker.setBusy(false)
       busy = false
     }
   }
@@ -323,7 +329,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
 
   form.addEventListener('input', () => {
     formRevision++
-    followUp.hidden = true
+    showFollowUp(false)
     guidance.value = ''
     transcript.replaceChildren()
     conversation.hidden = true
@@ -435,8 +441,10 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     if (form.closest<HTMLElement>('[data-view]')?.hidden) return
     try {
       const current = await api.get<Status>(route + '/status', { cache: 'no-store' })
-      status.chat_model = current.chat_model
-      showModel()
+      if (status.chat_model !== current.chat_model) {
+        status.chat_model = current.chat_model
+        void modelPicker.setDefault(current.chat_model)
+      }
       showPairing(current.mcp_enabled)
     } catch { /* Pairing endpoints enforce current access. */ }
   })

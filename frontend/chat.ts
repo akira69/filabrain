@@ -1,5 +1,6 @@
 import { initI18n, t } from './shared/i18n'
 import { researchHeaders } from './shared/filabrain'
+import { mountModelPicker } from './shared/model-picker'
 
 export async function mountChat() {
   await initI18n()
@@ -22,6 +23,7 @@ export async function mountChat() {
   }
   let messages: Message[] = []
   let request: AbortController | undefined
+  let modelPicker: ReturnType<typeof mountModelPicker> | undefined
   status.removeAttribute('data-i18n')
   submit.removeAttribute('data-i18n-aria-label')
 
@@ -31,6 +33,7 @@ export async function mountChat() {
     submit.title = submit.getAttribute('aria-label')!
     submit.toggleAttribute('data-busy', !!request)
     input.readOnly = !!request
+    modelPicker?.setBusy(!!request)
     newChat.disabled = !request && !messages.length && !input.value
     prompts.hidden = !!request || messages.length > 0
   }
@@ -62,6 +65,7 @@ export async function mountChat() {
     request?.abort()
     request = undefined
     messages = []
+    modelPicker?.reset()
     log.replaceChildren()
     input.value = ''
     status.textContent = ''
@@ -85,7 +89,7 @@ export async function mountChat() {
     try {
       const response = await fetch(`${api}/chat`, {
         method: 'POST', credentials: 'include', headers: researchHeaders(), signal: controller.signal,
-        body: JSON.stringify({ messages: [...messages.slice(-10), question] }),
+        body: JSON.stringify({ messages: [...messages.slice(-10), question], model_id: modelPicker?.selected }),
       })
       if (!response.ok) throw new Error()
       const { reply, action } = await response.json() as {
@@ -131,12 +135,18 @@ export async function mountChat() {
     document.querySelector<HTMLElement>('[data-chat-settings]')!.hidden = !availability.can_configure
     if (!availability.can_chat) {
       status.textContent = t('filaBrain.chatUnavailable')
-    } else if (!availability.chat_model) {
-      status.textContent = t('filaBrain.chatSetup')
     } else {
-      document.querySelector<HTMLElement>('[data-chat-model]')!.textContent = availability.chat_model
-      form.hidden = false
-      status.textContent = ''
+      modelPicker = mountModelPicker(form, availability.chat_model)
+      function showComposer(model?: string) {
+        form.hidden = !model
+        status.textContent = model ? '' : t('filaBrain.chatSetup')
+      }
+      showComposer(availability.chat_model)
+      document.addEventListener('filaman:model-change', event => {
+        const model = (event as CustomEvent<string>).detail
+        void modelPicker?.setDefault(model)
+        showComposer(model)
+      })
       updateControls()
     }
   } catch {

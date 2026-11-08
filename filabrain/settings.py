@@ -195,17 +195,12 @@ def _connection_key(data: SettingsInput, old: dict) -> str:
     return model_key(old if data.model_url == old["model_url"] else {"model_url": data.model_url})
 
 
-@router.post("/settings/models")
-async def list_models(data: SettingsInput, db: DBSession, _principal=admin):
-    if not data.model_url:
-        raise HTTPException(422, "Enter the model server URL")
-    _, old = await config_record(db)
+async def model_ids(url: str, key: str) -> list[str]:
     try:
-        key = _connection_key(data, old)
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         async with (
             httpx.AsyncClient(timeout=5, trust_env=False) as client,
-            client.stream("GET", f"{data.model_url}/models", headers=headers) as response,
+            client.stream("GET", f"{url}/models", headers=headers) as response,
         ):
             response.raise_for_status()
             raw = bytearray()
@@ -221,13 +216,36 @@ async def list_models(data: SettingsInput, db: DBSession, _principal=admin):
         raise HTTPException(
             502, "Could not load models from this server. Check the URL or enter the model ID manually."
         ) from None
-    return {
-        "models": sorted({
-            entry["id"] for entry in entries
-            if isinstance(entry, dict) and isinstance(entry.get("id"), str)
-            and 0 < len(entry["id"]) <= 150 and not any(ch.isspace() for ch in entry["id"])
-        })
-    }
+    return sorted({
+        entry["id"] for entry in entries
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str)
+        and 0 < len(entry["id"]) <= 150 and not any(ch.isspace() for ch in entry["id"])
+    })
+
+
+async def configured_models(config: dict) -> list[str]:
+    url = config["model_url"]
+    return await model_ids(url, model_key(config)) if url else []
+
+
+async def resolve_model(config: dict, requested: str | None) -> str:
+    if requested is None or requested == config["model_id"]:
+        return config["model_id"]
+    if requested not in await configured_models(config):
+        raise HTTPException(422, "Select a model available on the configured server")
+    return requested
+
+
+@router.post("/settings/models")
+async def list_models(data: SettingsInput, db: DBSession, _principal=admin):
+    if not data.model_url:
+        raise HTTPException(422, "Enter the model server URL")
+    _, old = await config_record(db)
+    try:
+        key = _connection_key(data, old)
+    except (ValueError, RuntimeError):
+        raise HTTPException(502, "Could not read the model server key") from None
+    return {"models": await model_ids(data.model_url, key)}
 
 
 @router.post("/settings/test")

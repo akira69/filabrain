@@ -25,10 +25,7 @@
       <div class="fm-card">
         <div class="filabrain-heading">
           <!-- mark -->
-          <div>
-            <h2 id="research-heading">Research a new filament</h2>
-            <span id="research-model" class="fm-field-hint"></span>
-          </div>
+          <h2 id="research-heading">Research a new filament</h2>
         </div>
         <p id="research-target" class="fm-field-hint" hidden></p>
         <details id="research-pairing" hidden>
@@ -78,11 +75,12 @@
         </div>
       </section>
     </div>
-    <form id="research-follow-up" class="fm-card" hidden>
-      <label for="research-guidance" data-i18n="filaBrain.followUp">Follow up on this search</label>
-      <div class="research-composer">
-        <textarea id="research-guidance" rows="2" maxlength="400" required data-i18n-placeholder="filaBrain.followUpHint" placeholder="Try a datasheet, a different store, or focus on empty spool weight"></textarea>
-        <button type="submit" class="fm-btn fm-btn-primary chat-send" aria-label="Send follow-up" data-i18n-aria-label="filaBrain.sendFollowUp">
+    <form id="research-follow-up" class="fm-card">
+      <label id="research-guidance-label" for="research-guidance" data-i18n="filaBrain.followUp" hidden>Follow up on this search</label>
+      <textarea id="research-guidance" rows="2" maxlength="400" data-i18n-placeholder="filaBrain.followUpHint" placeholder="Try a datasheet, a different store, or focus on empty spool weight" hidden></textarea>
+      <div class="chat-toolbar">
+        <!-- model-picker -->
+        <button type="submit" class="fm-btn fm-btn-primary chat-send" aria-label="Send follow-up" data-i18n-aria-label="filaBrain.sendFollowUp" hidden>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
         </button>
       </div>

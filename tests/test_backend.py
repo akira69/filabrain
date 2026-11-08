@@ -73,6 +73,36 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
     assert saved["mcp_enabled"] is False
 
 
+async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
+    from filabrain import research, settings
+
+    config = {"model_url": "http://model.test", "model_id": "fixture:default"}
+    assert (await installed.put(f"{BASE}/settings", json=config)).status_code == 200
+    calls = []
+
+    async def models(url, _key):
+        assert url == config["model_url"]
+        return ["fixture:alternate"]
+
+    async def complete(url, model, _key, _messages, **_options):
+        assert url == config["model_url"]
+        calls.append(model)
+        return "PLA is easier to print."
+
+    monkeypatch.setattr(settings, "model_ids", models)
+    monkeypatch.setattr(research, "request_completion", complete)
+    response = await installed.get(f"{BASE}/models")
+    assert response.json() == {"models": ["fixture:alternate"]}
+    chat = {"messages": [{"role": "user", "content": "Which filament is easier to print?"}]}
+    response = await installed.post(f"{BASE}/chat", json=chat | {"model_id": "fixture:alternate"})
+    assert response.status_code == 200
+    response = await installed.post(f"{BASE}/chat", json=chat | {"model_id": "unlisted"})
+    assert response.status_code == 422
+    assert (await installed.post(f"{BASE}/chat", json=chat)).status_code == 200
+    assert calls == ["fixture:alternate", "fixture:default"]
+    assert (await installed.get(f"{BASE}/settings")).json()["model_id"] == "fixture:default"
+
+
 async def test_stock_host_api_key_authenticates_standalone_mcp(installed, db_session):
     maker = Manufacturer(name="Stock host maker")
     db_session.add(maker)

@@ -89,7 +89,6 @@ dialog dd { margin: 0; overflow-wrap: anywhere; }
 #research-pairing { margin-block: .65rem 1rem; }
 #research-pairing summary { cursor: pointer; color: var(--text-muted); font-size: .875rem; }
 #research-pairing button, #pair-credentials { margin-block-start: .5rem; }
-#research-model { overflow-wrap: anywhere; }
 #research-options > summary { color: var(--text-muted); cursor: pointer; margin-block: .6rem; }
 #research-conversation { margin-block: 1rem; }
 #research-transcript { gap: .65rem; }
@@ -101,8 +100,7 @@ dialog dd { margin: 0; overflow-wrap: anywhere; }
   gap: .4rem;
   flex: none;
 }
-.research-composer { display: flex; align-items: end; gap: .5rem; }
-.research-composer textarea { flex: 1; resize: vertical; }
+#research-follow-up textarea { width: 100%; resize: vertical; }
 @media (min-height: 420px) {
   :root[data-research-editor] main { display: flex; flex-direction: column; height: 100dvh; }
   :root[data-research-editor] [data-view="new"] { display: flex; flex-direction: column; flex: 1; min-height: 0; }

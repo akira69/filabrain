@@ -17,6 +17,8 @@ for (const section of ['chat', 'settings', 'batches']) {
   const fragment = await read(section + '.html')
   html = html.replace(`<!-- ${section} -->`, () => fragment)
 }
+const modelPicker = await read('model-picker.html')
+html = html.replaceAll('<!-- model-picker -->', () => modelPicker)
 const mark = (await read('../filabrain/icon.svg')).replace('<svg ', '<svg class="filabrain-mark" aria-hidden="true" ')
 html = html.replaceAll('<!-- mark -->', () => mark)
 html = html.replace('<!-- script -->', () => result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script'))

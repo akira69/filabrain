@@ -25,7 +25,7 @@ from .model import (
     extract_proposal,
     request_extraction,
 )
-from .settings import config_record, model_key
+from .settings import config_record, model_key, resolve_model
 from .sources import (
     SHARED_SPEC,
     Evidence,
@@ -1018,7 +1018,7 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
 
 async def research_products(
     db: DBSession, identity: Identity, *, product_url=None, sku_hint="", snapshot=None,
-    guidance="", release_read=False,
+    guidance="", release_read=False, model_id: str | None = None,
 ) -> dict:
     proposal = {"suggestions": [], "issues": []}
     issues = proposal["issues"]
@@ -1565,12 +1565,13 @@ async def research_products(
         first_by_site.setdefault(_site_host(source.url), source)
     extraction_evidence = [*first_by_site.values(), *(source for source in evidence if source not in first_by_site.values())]
 
-    if evidence and config["model_url"] and config["model_id"]:
+    if evidence and config["model_url"] and (config["model_id"] or model_id):
+        model = await resolve_model(config, model_id)
         try:
             extracted, model_issues = await asyncio.wait_for(
                 request_extraction(
                     config["model_url"],
-                    config["model_id"],
+                    model,
                     model_key(config),
                     supplier_identity.model_dump() | ({
                         field: snapshot[field] for field in ("finish_type", "material_subgroup", "color_mode")
@@ -1685,7 +1686,7 @@ async def research_products(
 
 async def batch_proposal(
     db: DBSession, snapshot: dict, mode: str, *, sku_hint="", product_url=None,
-    guidance="", release_read=True,
+    guidance="", release_read=True, model_id: str | None = None,
 ) -> dict:
     if mode == "standardize":
         return await _local_conventions(db, snapshot)
@@ -1697,7 +1698,7 @@ async def batch_proposal(
         return {**result, "issues": [{"code": "needs_match", "field": "manufacturer_sku"}]}
     raw = await research_products(
         db, identity, product_url=product_url, sku_hint=sku_hint, snapshot=snapshot,
-        guidance=guidance, release_read=release_read,
+        guidance=guidance, release_read=release_read, model_id=model_id,
     )
     for suggestion in raw["suggestions"]:
         field = suggestion["field"]

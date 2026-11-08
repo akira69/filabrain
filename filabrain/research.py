@@ -23,8 +23,10 @@ from .proposals import (
 )
 from .settings import (
     config_record,
+    configured_models,
     mcp_access_enabled,
     model_key,
+    resolve_model,
 )
 
 router = APIRouter(tags=["FilaBrain"])
@@ -37,6 +39,7 @@ CHAT_PAGES = {
     "model_settings": ("/admin/system/filabrain", "admin:plugins_manage"),
 }
 PAGE_MARKER = re.compile(r"(?m)^\[\[open:([a-z_]+)(?:\|([^\]\r\n]{1,255}))?\]\][ \t]*$")
+ModelId = Annotated[str, StringConstraints(min_length=1, max_length=150, pattern=r"^\S+$")]
 
 
 class ProposalRequest(BaseModel):
@@ -47,6 +50,7 @@ class ProposalRequest(BaseModel):
     sku_hint: Text = ""
     guidance: Annotated[str, Field(max_length=400)] = ""
     action: Literal["fill", "standardize"] = "fill"
+    model_id: ModelId | None = None
 
 
 class ChatMessage(BaseModel):
@@ -56,6 +60,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: Annotated[list[ChatMessage], Field(min_length=1, max_length=11)]
+    model_id: ModelId | None = None
 
 
 async def is_enabled(db: DBSession) -> bool:
@@ -123,6 +128,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     if not (config["model_url"] and config["model_id"]):
         raise HTTPException(503, "Configure a model in FilaBrain settings")
     await db.rollback()
+    model = await resolve_model(config, data.model_id)
     messages = [
         {"role": "system", "content": (
             "You are the FilaMan assistant. Help with general questions, especially 3D printing, "
@@ -140,7 +146,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     try:
         async with asyncio.timeout(50):
             answer = await request_completion(
-                config["model_url"], config["model_id"], model_key(config), messages, timeout=45,
+                config["model_url"], model, model_key(config), messages, timeout=45,
             )
         if not answer.strip():
             raise ValueError("Empty model response")
@@ -157,6 +163,18 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     if not answer.strip():
         answer = "Select the page to continue." if action else "That page is unavailable."
     return {"reply": answer.strip()[:8000], "action": action}
+
+
+@router.get("/models")
+async def research_models(db: DBSession, principal: PrincipalDep):
+    if not await is_enabled(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    if principal.auth_type != "session":
+        raise HTTPException(403, "A browser session is required")
+    await ensure_any_permission(db, principal, "filaments:read", "filaments:create", "filaments:update")
+    _, config = await config_record(db)
+    await db.rollback()
+    return {"models": await configured_models(config)}
 
 
 async def get_edit_filament(db: DBSession, filament_id: int) -> Filament:
@@ -204,13 +222,15 @@ async def research(db: DBSession, data: ProposalRequest) -> dict:
         return {
             "target": target,
             **await research_products(
-                db, identity, product_url=data.product_url, sku_hint=data.sku_hint, guidance=data.guidance,
+                db, identity, product_url=data.product_url, sku_hint=data.sku_hint,
+                guidance=data.guidance, model_id=data.model_id,
             ),
         }
     snapshot = filament_snapshot(filament)
     result = await batch_proposal(
         db, snapshot, data.action,
-        sku_hint=data.sku_hint, product_url=data.product_url, guidance=data.guidance, release_read=False,
+        sku_hint=data.sku_hint, product_url=data.product_url, guidance=data.guidance,
+        release_read=False, model_id=data.model_id,
     )
     if data.action == "standardize":
         return {

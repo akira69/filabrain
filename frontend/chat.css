@@ -35,7 +35,16 @@
   .chat-composer textarea { display: block; width: 100%; height: auto; border: 0; box-shadow: none; background: transparent; resize: none; }
   .chat-composer textarea:focus { outline: none; box-shadow: none; }
   .chat-toolbar { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: 0 .2rem; }
-  .chat-toolbar span { color: var(--text-muted); font-size: .8rem; overflow-wrap: anywhere; }
+  .chat-model-picker { min-width: 0; }
+  .chat-model-picker select {
+    max-width: 100%;
+    padding: .35rem .5rem;
+    font-size: .875rem;
+    border-color: transparent;
+    background: var(--bg-soft);
+  }
+  .chat-model-picker select:not(:disabled) { cursor: pointer; }
+  .chat-model-picker small { display: block; margin-block-start: .25rem; }
   .chat-send { display: grid; flex: none; place-items: center; width: 42px; height: 42px; padding: 0; }
   .chat-send[data-busy] [data-send-icon], .chat-send:not([data-busy]) [data-stop-icon] { display: none; }
   .chat-send:disabled { color: var(--text-muted); background: var(--bg-soft); border-color: var(--border); box-shadow: none; transform: none; cursor: default; }
