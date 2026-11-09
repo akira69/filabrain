@@ -1,6 +1,7 @@
 import json
 import math
 import re
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -231,6 +232,7 @@ async def request_completion(
     base_url: str, model: str, key: str, messages: list[dict[str, str]], *, timeout: float = 15,
 ) -> str:
     headers = {"Authorization": f"Bearer {key}"} if key else {}
+    token_limit = "max_completion_tokens" if urlsplit(base_url).hostname == "api.openai.com" else "max_tokens"
     async with (
         httpx.AsyncClient(timeout=timeout, trust_env=False) as client,
         client.stream(
@@ -240,7 +242,7 @@ async def request_completion(
             json={
                 "model": model,
                 "messages": messages,
-                "max_tokens": 1500,
+                token_limit: 1500,
             },
         ) as response,
     ):

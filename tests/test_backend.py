@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,7 @@ from app.main import app
 from app.models import Filament, InstalledPlugin, Manufacturer, Spool
 from app.services import plugin_service
 from fastapi import HTTPException
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, MockTransport
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -101,6 +102,31 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     assert (await installed.post(f"{BASE}/chat", json=chat)).status_code == 200
     assert calls == ["fixture:alternate", "fixture:default"]
     assert (await installed.get(f"{BASE}/settings")).json()["model_id"] == "fixture:default"
+
+
+@pytest.mark.parametrize(("base_url", "limit"), [
+    ("https://api.openai.com/v1", "max_completion_tokens"),
+    ("https://api.anthropic.com/v1", "max_tokens"),
+    ("http://ollama:11434/v1", "max_tokens"),
+])
+async def test_model_completion_provider_request(monkeypatch, base_url, limit):
+    from filabrain import model
+    from httpx import Response
+
+    messages = [{"role": "user", "content": "Hi"}]
+
+    def upstream(request):
+        assert str(request.url) == f"{base_url}/chat/completions"
+        assert request.headers["Authorization"] == "Bearer fixture-key"
+        payload = json.loads(request.content)
+        assert set(payload) == {"model", "messages", limit}
+        assert payload["messages"] == messages
+        return Response(200, json={"choices": [{"message": {"content": "Hello"}}]})
+
+    monkeypatch.setattr(model.httpx, "AsyncClient", lambda **kwargs: AsyncClient(
+        transport=MockTransport(upstream), **kwargs,
+    ))
+    assert await model.request_completion(base_url, "fixture-model", "fixture-key", messages) == "Hello"
 
 
 async def test_stock_host_api_key_authenticates_standalone_mcp(installed, db_session):
