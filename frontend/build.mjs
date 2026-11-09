@@ -11,12 +11,14 @@ const result = await build({
   write: false,
   target: ['es2022'],
 })
-const css = await Promise.all(['page', 'chat', 'settings', 'batches'].map(name => read(name + '.css')))
+const css = await Promise.all(['page', 'chat', 'settings', 'batches', 'docs'].map(name => read(name + '.css')))
 let html = (await read('page.html')).replace('<!-- styles -->', () => css.join('\n'))
-for (const section of ['chat', 'settings', 'batches']) {
+for (const section of ['chat', 'settings', 'batches', 'docs']) {
   const fragment = await read(section + '.html')
   html = html.replace(`<!-- ${section} -->`, () => fragment)
 }
+const docsButton = await read('docs-button.html')
+html = html.replaceAll('<!-- docs-button -->', () => docsButton)
 const modelPicker = await read('model-picker.html')
 html = html.replaceAll('<!-- model-picker -->', () => modelPicker)
 const mark = (await read('../filabrain/icon.svg')).replace('<svg ', '<svg class="filabrain-mark" aria-hidden="true" ')

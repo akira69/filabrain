@@ -1,4 +1,5 @@
 import { mountChat } from './chat'
+import { mountDocs } from './docs'
 import { mountSettings } from './settings'
 import { mountResearch, type EditorContext, type SelectionContext } from './research'
 import { api } from './shared/api'
@@ -206,6 +207,7 @@ async function main() {
       return
     }
     message.textContent = ''
+    mountDocs()
     const tab = params.get('tab') || available
     show(Object.hasOwn(mount, tab) && mount[tab] ? tab : available)
   } catch (error) {

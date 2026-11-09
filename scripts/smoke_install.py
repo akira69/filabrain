@@ -52,6 +52,9 @@ async def smoke(host: Path, archive: Path, directory: Path) -> None:
             assert any(item["plugin_key"] == "filabrain" and item["name"] == "FilaBrain" for item in nav)
             assert (await browser.get(f"{root}/status")).json()["enabled"] is True
             assert (await browser.get(f"{root}/batches")).json() == []
+            art = await browser.get(f"{root}/guide-art.webp")
+            assert art.status_code == 200 and art.headers["content-type"] == "image/webp"
+            assert art.content[8:12] == b"WEBP"
 
             key = await browser.post(
                 "/api/v1/me/api-keys", headers=headers, json={"name": "Plugin smoke test"},

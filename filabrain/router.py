@@ -1,7 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from app.api.deps import PrincipalDep
 from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse
 
 from . import batch_api, mcp, research, settings
 from .batch_worker import start_worker
@@ -26,3 +29,8 @@ router = APIRouter(
 )
 for routes in (research.router, settings.router, mcp.router, batch_api.router):
     router.include_router(routes)
+
+
+@router.get("/guide-art.webp", include_in_schema=False)
+async def guide_art(_principal: PrincipalDep):
+    return FileResponse(Path(__file__).with_name("guide-art.webp"), media_type="image/webp")

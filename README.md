@@ -1,5 +1,7 @@
 # FilaBrain for FilaMan
 
+![FilaBrain AI connected to FilaMan over Ethernet](assets/filabrain-wide.webp)
+
 FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the FilaMan library, checks manufacturer and catalog sources, and presents proposals for review. It supports an OpenAI-compatible model server, including Ollama, and can expose its tools to a separate MCP client.
 
 ## Install
@@ -10,7 +12,7 @@ Build the plugin ZIP with Python 3.
 python3 scripts/package_plugin.py
 ```
 
-Upload the ZIP from `dist/` under **Admin → System → Plugins**. Enable **FilaBrain**, then open it from the FilaMan sidebar. Configure the model and optional search server in the plugin's settings.
+Upload the ZIP from `dist/` under **Admin → System → Plugins**. Enable **FilaBrain**, then open it from the FilaMan sidebar. Configure the model and optional search server in the plugin's settings. Open **Guide** from the FilaBrain page or chat for Ollama, OpenAI and Claude model setup, research workflows, and external MCP connections.
 
 The standalone plugin page uses FilaMan's existing plugin loader. The initial compatibility target is FilaMan's `devel` revision `c8c76c4f`. FilaMan’s optional editor and selected-filament actions are part of the proposed host extensions in [FilaMan PR #204](https://github.com/Fire-Devils/filaman-system/pull/204).
 
@@ -45,7 +47,7 @@ Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for F
 Run the smoke test with the Python environment from a stock FilaMan checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.5.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.6.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database.
