@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
+from xml.etree import ElementTree
 
 import httpx
 from app.core.cache import TTLCache
@@ -20,6 +21,7 @@ MAX_BODY = 4 * 1024 * 1024  # Storefront HTML includes scripts that the parser d
 MAX_TEXT = 12_000
 SHARED_SPEC = re.compile(r"\b(?:applies to all variants|same for all variants|all variants share)\b", re.IGNORECASE)
 _supplier_cooldowns = TTLCache()
+_product_sitemaps = TTLCache()
 
 
 class SupplierRateLimited(ValueError):
@@ -379,6 +381,35 @@ async def fetch_archived_supplier(url: str) -> Evidence | None:
     evidence = await asyncio.wait_for(asyncio.to_thread(_fetch_supplier, f"https://{path}", archive=True), timeout=8)
     date = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
     return replace(evidence, archived_at=date, datasheets=())
+
+
+async def paramount_product_urls() -> tuple[str, ...]:
+    origin = "https://www.paramount-3d.com"
+    sitemap = f"{origin}/store-products-sitemap.xml"
+    cached = _product_sitemaps.get(sitemap)
+    if cached is not None:
+        return cached
+    body = bytearray()
+    try:
+        async with (
+            asyncio.timeout(5),
+            httpx.AsyncClient(timeout=5, trust_env=False) as client,
+            client.stream("GET", sitemap) as response,
+        ):
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes(chunk_size=32_768):
+                body.extend(chunk)
+                if len(body) > 512 * 1024:
+                    return ()
+        root = ElementTree.fromstring(body)
+    except (httpx.HTTPError, TimeoutError, ElementTree.ParseError):
+        return ()
+    urls = tuple(dict.fromkeys(
+        loc.text for loc in root.findall("./{*}url/{*}loc")
+        if loc.text and re.fullmatch(rf"{re.escape(origin)}/product-page/[a-zA-Z0-9_-]+", loc.text)
+    ))
+    _product_sitemaps.set(sitemap, urls, ttl=3600)
+    return urls
 
 
 async def search_web(origin: str, query: str) -> list[str]:

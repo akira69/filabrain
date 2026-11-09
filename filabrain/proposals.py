@@ -32,6 +32,7 @@ from .sources import (
     fetch_archived_supplier,
     fetch_supplier,
     ofd_candidates,
+    paramount_product_urls,
     search_web,
     supplier_page_url,
 )
@@ -535,6 +536,56 @@ def _filament_diameters(text):
     }
 
 
+def _paramount_variant_matches(identity: Identity, page: Evidence, name: str) -> bool:
+    if not page.manufacturer_page or _site_host(page.url) != "paramount-3d.com":
+        return False
+    match = re.fullmatch(r"([A-Z]+) \(([^()]+)\)", name, re.IGNORECASE)
+    if not match or _norm(match[1]) != _material_family(identity.material):
+        return False
+    if identity.color_mode == "multi" or _norm(identity.finish_type) not in ("", "solid"):
+        return False
+
+    color = _product_key(match[2])
+    ral = next((m for line in page.scopes or () if (
+        m := re.fullmatch(r"RAL Color:\s*(\d{4})\s+(.+)", line, re.IGNORECASE)
+    )), None)
+    hardness = next((m[1].casefold() for line in page.scopes or () if (
+        m := re.fullmatch(r"Shore Hardness:\s*(\d{2,3}[ad])", line, re.IGNORECASE)
+    )), "")
+    words = set(_product_key(identity.designation))
+    stored_color = _product_key(identity.color)
+    matching_ral = bool(ral and (ral[1] in stored_color or ral[1] in words))
+    achromatic_hex = {("black",): ("000000",), ("white",): ("ffffff",)}.get(color)
+    if stored_color and stored_color not in (color, achromatic_hex) and not matching_ral:
+        return False
+    if not set(color) <= words and not matching_ral:
+        return False
+    allowed = {*color, _norm(match[1]), "basic"}
+    if ral:
+        allowed.update(("ral", ral[1], *_product_key(ral[2])))
+    if hardness:
+        allowed.add(hardness)
+    return words <= allowed and _norm(identity.material_subgroup) in ("", "basic", hardness)
+
+
+async def _paramount_candidates(identity: Identity, sku: str) -> list[str]:
+    material = _material_family(identity.material)
+    if not material:
+        return []
+    keywords = set(_product_key(identity.designation) + _product_key(identity.color)) - {material, "basic", "ral"}
+    candidates = []
+    for url in await paramount_product_urls():
+        slug = urlsplit(url).path.rsplit("/", 1)[-1].casefold().removeprefix("paramount-3d-")
+        if not slug.startswith(material):
+            continue
+        terms = set(_product_key(slug.removeprefix(material)))
+        overlap = len(terms & keywords)
+        sku_match = bool(sku and _norm(sku) in terms)
+        if overlap or sku_match:
+            candidates.append(((sku_match, overlap, -len(terms - keywords)), url))
+    return [url for _, url in sorted(candidates, reverse=True)[:3]]
+
+
 def _packaged_product(identity: Identity, page: Evidence, snapshot):
     product = page.product or {}
     title = product.get("designation") or re.split(r"\s*[|–]\s*", page.title, maxsplit=1)[0]
@@ -546,6 +597,10 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
         return None
     name, diameter, weight, unit, sku, suffix = match.groups()
     name_key = _product_key(name)
+    paramount_alias = _paramount_variant_matches(identity, page, name)
+    nominal_weight = float(weight) * (1000 if unit.lower() == "kg" else 1)
+    # A saved weight can reflect a measurement. Allow a small variance only on the linked, verified package.
+    linked_weight = paramount_alias and (snapshot or {}).get("shop_url") == page.url
     part = _norm(sku)
     context = _variant_context(identity, snapshot)
     finish = _finish(identity.designation, context.get("finish_type"), identity.material)
@@ -553,7 +608,7 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
     search_hint = _norm((snapshot or {}).get("shop_url"))
     article_match = bool(part and (part in {_norm(identity.sku), search_hint} or _literal_in(part, identity.designation)))
     if (
-        (name_key != _product_key(identity.designation) and not article_match)
+        (name_key != _product_key(identity.designation) and not (article_match or paramount_alias))
         or (product.get("manufacturer") and _product_key(product["manufacturer"]) != _product_key(identity.manufacturer))
         or (product.get("color") and identity.color and not _swatch_code(identity.color)
             and _product_key(product["color"]) != _product_key(identity.color))
@@ -562,14 +617,19 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
         or not _literal_in(_material_family(identity.material), name)
         or (identity.sku and _norm(identity.sku) not in {part, _norm(product.get("sku"))})
         or (identity.diameter_mm is not None and float(diameter) != identity.diameter_mm)
-        or (identity.weight_g is not None and float(weight) * (1000 if unit.lower() == "kg" else 1) != identity.weight_g)
+        or (identity.weight_g is not None and nominal_weight != identity.weight_g
+            and not (linked_weight and abs(nominal_weight - identity.weight_g) <= nominal_weight * 0.02))
         or (found_finish and finish and found_finish != {finish})
         or (finish in FINISHES and finish not in found_finish and not article_match)
-        or (identity.color and not _swatch_code(identity.color)
+        or (identity.color and not (paramount_alias or _swatch_code(identity.color))
             and not set(_product_key(identity.color)).issubset(name_key))
     ):
         return None
-    return title, sku, float(diameter), float(weight) * (1000 if unit.lower() == "kg" else 1)
+    if paramount_alias and not sku and product.get("sku") and any(
+        _LABELLED_SKU.findall(line) == [product["sku"]] for line in page.scopes or ()
+    ):
+        sku = product["sku"]
+    return title, sku, float(diameter), nominal_weight
 
 
 def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[Evidence]:
@@ -1233,14 +1293,20 @@ async def research_products(
     imported_sku = (snapshot or {}).get("shop_url") or ""
     if not re.fullmatch(r"(?=[\w.-]*[A-Z])(?=[\w.-]*\d)[A-Z0-9][\w.-]{5,40}", imported_sku, re.IGNORECASE):
         imported_sku = ""
-    initial_query = search_terms(identity.sku.strip() or sku_hint.strip() or imported_sku)
+    lookup_sku = identity.sku.strip() or sku_hint.strip() or imported_sku
+    initial_query = search_terms(lookup_sku)
     early_web = not manufacturer_domain and bool(identity.manufacturer and initial_query)
     web_urls = []
-    if manufacturer_domain and not any(
-        page and not (page.manual or page.datasheet) and _on_manufacturer_site(page.url, manufacturer_domain)
-        and _supplier_scopes(identity, replace(page, manufacturer_page=True), snapshot)
-        for page in first_pages.values()
-    ):
+    def official_match():
+        return any(
+            page and not (page.manual or page.datasheet) and _on_manufacturer_site(page.url, manufacturer_domain)
+            and _supplier_scopes(identity, replace(page, manufacturer_page=True), snapshot)
+            for page in first_pages.values()
+        )
+
+    if manufacturer_domain == "paramount-3d.com" and not official_match():
+        first_pages.update(await check_pages(await _paramount_candidates(identity, lookup_sku)))
+    if manufacturer_domain and not official_match():
         official_results = await search(f"site:{manufacturer_domain} {initial_query}")
         first_pages.update(await check_pages(
             [url for url in official_results if _on_manufacturer_site(url, manufacturer_domain)]
@@ -1545,7 +1611,10 @@ async def research_products(
                 add("shop_url", page.url, cite(page.title), primary=True)
             if product := _packaged_product(supplier_identity, page, snapshot):
                 title, part, diameter, weight = product
-                add("manufacturer_sku", part, cite(title), primary=True)
+                sku_quote = next((
+                    line for line in page.scopes or () if part and _LABELLED_SKU.findall(line) == [part]
+                ), title)
+                add("manufacturer_sku", part, cite(sku_quote), primary=True)
                 add("diameter_mm", diameter, cite(title), primary=True)
                 add("raw_material_weight_g", weight, cite(title), primary=True)
                 if not page.archived_at and (image := public_link((page.product or {}).get("image_url"))):

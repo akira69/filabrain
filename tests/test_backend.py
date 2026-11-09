@@ -319,3 +319,78 @@ async def test_stock_filamentdb_partial_fuzzy_search_is_incomplete(monkeypatch):
     result = await lookup_filaments("Galaxy Ultra PLA", report_incomplete=True)
     assert [item["id"] for item in result["items"]] == [1]
     assert result["incomplete"] is True
+
+
+@pytest.mark.parametrize(("designation", "material", "color", "weight", "slug", "title", "label", "sku", "discovered"), [
+    ("Black", "ABS", "RAL 9005 Jet Black", 1000, "absblack", "ABS (Black)", "RAL Color: 9005 Signal Black", "852297007060", True),
+    ("PLA Basic Pure White", "PLA", "9010 Pure White", 989, "pla-3", "PLA (White)", "RAL Color: 9010 Pure White", "852297007008", False),
+    ("RAL 9010 (Pure White)", "PETG", "White", None, "petg-white-1-75mm-1kg-filament", "PETG (White)", "RAL Color: 9010 Pure White", None, False),
+    ("TPU 92A Black", "TPU", "000000", 1000, "tpu-black-1-75mm-1kg-filament", "TPU (Black)", "Shore Hardness: 92A", None, True),
+])
+async def test_paramount_product_from_its_own_catalog(
+    installed, db_session, monkeypatch, designation, material, color, weight,
+    slug, title, label, sku, discovered,
+):
+    from filabrain import proposals
+    from filabrain.sources import Evidence
+
+    site = "https://www.paramount-3d.com"
+    product_url = f"{site}/product-page/{slug}"
+    master_url = f"{site}/product-page/abs-master-spool"
+    heading = f"{title} 1.75mm 1kg Filament"
+    options = {"designation": heading}
+    if sku:
+        options["sku"] = sku
+    product = Evidence(product_url, heading, heading, options, scopes=(
+        heading, *([f"SKU: {sku}"] if sku else []), label,
+        'Spool Size: 2.25" ID / 7.75" OD / 2.25" Depth',
+    ))
+
+    async def pages(url):
+        if url == product_url:
+            return product
+        return Evidence(url, "ABS (Master Spool) 1.75mm 1kg Filament", "Multi-color kit")
+
+    async def sitemap():
+        return (master_url, product_url)
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", pages)
+    monkeypatch.setattr(proposals, "paramount_product_urls", sitemap, raising=False)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+
+    maker = Manufacturer(name="Paramount 3D", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation=designation, material_type=material,
+        manufacturer_color_name=color, diameter_mm=1.75, raw_material_weight_g=weight,
+        shop_url=master_url if discovered and material == "ABS" else None if discovered else product_url,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.status_code == 200
+    data = response.json()
+    suggestions = {item["field"]: item for item in data["suggestions"]}
+    assert suggestions["spool_outer_diameter_mm"]["value"] == 196.85
+    assert suggestions["spool_width_mm"]["value"] == 57.15
+    assert suggestions["spool_width_mm"]["sources"][0]["url"] == product_url
+    assert "no_match" not in {issue["code"] for issue in data["issues"]}
+    if sku:
+        assert suggestions["manufacturer_sku"]["value"] == sku
+        assert suggestions["manufacturer_sku"]["sources"][0]["evidence"] == f"SKU: {sku}"
+    if weight is not None:
+        assert "raw_material_weight_g" not in suggestions
+    assert not proposals._packaged_product(
+        proposals.Identity(designation=designation, material=material, color=color, diameter_mm=3.0),
+        proposals.replace(product, manufacturer_page=True), None,
+    )
