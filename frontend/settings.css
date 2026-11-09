@@ -9,3 +9,6 @@
   .research-mcp-toggle > label:first-child { flex: 1; }
   .fm-toggle input:focus-visible + .fm-toggle-slider { outline: 2px solid var(--accent); outline-offset: 3px; }
   #research-mcp-setup[hidden], #research-mcp-message:empty { display: none; }
+.research-web-search { border-block-start: 1px solid var(--border); padding-block-start: .75rem; }
+.research-web-search h4 { margin: 0; }
+.research-web-search p { margin-block: .25rem .65rem; }

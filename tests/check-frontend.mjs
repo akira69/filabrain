@@ -27,6 +27,7 @@ try {
   page.setDefaultTimeout(5_000)
   const writes = []
   let mcpEnabled = false
+  let searchUrl = ''
   await page.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
@@ -87,9 +88,12 @@ try {
       mcpEnabled = req.postDataJSON().mcp_enabled
       return route.fulfill({ json: { mcp_enabled: mcpEnabled } })
     }
-    if (path.endsWith('/settings')) return route.fulfill({ json: {
-      model_url: '', model_id: '', search_url: '', has_key: false, mcp_enabled: mcpEnabled,
-    } })
+    if (path.endsWith('/settings')) {
+      if (req.method() === 'PUT') searchUrl = req.postDataJSON().search_url
+      return route.fulfill({ json: {
+        model_url: '', model_id: '', search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
+      } })
+    }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
     if (path.endsWith('/colors')) return route.fulfill({ json: { items: [], total: 0 } })
     if (path.endsWith('/filaments') && req.method() === 'GET') return route.fulfill({ json: { items: [filament], total: 1 } })
@@ -196,6 +200,22 @@ try {
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   const settings = page.locator('#mcp-settings').locator('..').locator('..')
   await settings.getByText('Off', { exact: true }).waitFor()
+  const enableSearch = page.getByRole('button', { name: 'Enable web search' })
+  const searchField = page.getByRole('textbox', { name: 'SearXNG URL (optional)' })
+  await page.getByText(/Some suppliers can be researched using/).waitFor()
+  assert.equal(await searchField.isVisible(), false)
+  await enableSearch.click()
+  assert.equal(await searchField.evaluate(el => el === document.activeElement), true)
+  await page.getByRole('link', { name: 'SearXNG Docker setup' }).waitFor()
+  await searchField.fill('http://searxng:8080')
+  await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByText('Settings saved.').waitFor()
+  assert.equal(searchUrl, 'http://searxng:8080')
+  await page.reload()
+  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await searchField.waitFor()
+  assert.equal(await searchField.inputValue(), searchUrl)
+  assert.equal(await enableSearch.isVisible(), false)
   assert.equal(await settings.getByRole('textbox', { name: 'MCP URL' }).isVisible(), false)
   await settings.getByRole('switch').press('Space')
   await settings.getByText('On', { exact: true }).waitFor()

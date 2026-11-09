@@ -11,6 +11,8 @@ export async function mountSettings() {
   const keyState = document.getElementById('research-key-state')!
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement
   const save = form.querySelector<HTMLButtonElement>('button[type=submit]')!
+  const enableSearch = document.getElementById('research-enable-search')!
+  const searchSetup = document.getElementById('research-search-setup')!
   const load = form.querySelector<HTMLButtonElement>('#research-load-models')!
   const test = form.querySelector<HTMLButtonElement>('#research-test-model')!
   const modelList = form.elements.namedItem('available_model') as HTMLSelectElement
@@ -72,6 +74,12 @@ export async function mountSettings() {
     modelList.disabled = busy || !ready
   }
 
+  enableSearch.addEventListener('click', () => {
+    enableSearch.hidden = true
+    searchSetup.hidden = false
+    field('search_url').focus()
+  })
+
   function showModels() {
     const selected = values().model_id
     const options = [...new Set([...models, ...(selected ? [selected] : [])])]
@@ -82,6 +90,8 @@ export async function mountSettings() {
 
   function fill(config: { model_url: string; model_id: string; search_url: string; has_key: boolean }) {
     for (const key of ['model_url', 'model_id', 'search_url'] as const) field(key).value = config[key]
+    enableSearch.hidden = !!config.search_url
+    searchSetup.hidden = !config.search_url
     field('api_key').value = ''
     field('clear_key').checked = false
     keyState.textContent = t(config.has_key ? 'filaBrain.keyConfigured' : 'filaBrain.keyOptional')

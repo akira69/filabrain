@@ -26,10 +26,18 @@
         </label>
         <p id="research-key-state" class="fm-field-hint"></p>
         <label><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
-        <label>
-          <span data-i18n="filaBrain.searchUrl">SearXNG URL (optional)</span>
-          <input name="search_url" type="url" class="fm-input" maxlength="500" />
-        </label>
+        <section class="research-web-search" aria-labelledby="research-search-title">
+          <h4 id="research-search-title" data-i18n="filaBrain.webSearch">Web search (optional)</h4>
+          <p class="fm-field-hint" data-i18n="filaBrain.searchHint">Some suppliers can be researched using known manufacturer links and filament catalogs. Enable web search to find additional product pages and datasheets.</p>
+          <button type="button" id="research-enable-search" class="fm-btn fm-btn-outline" aria-controls="research-search-setup" data-i18n="filaBrain.enableWebSearch" hidden>Enable web search</button>
+          <div id="research-search-setup" class="form-field" hidden>
+            <label for="research-search-url" data-i18n="filaBrain.searchUrl">SearXNG URL (optional)</label>
+            <input id="research-search-url" name="search_url" type="url" class="fm-input" maxlength="500" placeholder="http://searxng:8080" aria-describedby="research-search-instructions research-search-provider" />
+            <small id="research-search-instructions" class="fm-field-hint" data-i18n="filaBrain.searchInstructions">Use a SearXNG address that FilaMan can reach. Enable JSON results in SearXNG, then enter the address here and click Save.</small>
+            <small id="research-search-provider" class="fm-field-hint" data-i18n="filaBrain.searchProvider">FilaBrain uses SearXNG for broad web search with any model. Claude and OpenAI offer native search APIs that FilaBrain has yet to integrate.</small>
+            <div><a href="https://docs.searxng.org/admin/installation-docker" target="_blank" rel="noopener noreferrer" data-i18n="filaBrain.searchInstall">SearXNG Docker setup</a></div>
+          </div>
+        </section>
         <div class="research-settings-actions">
           <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-i18n="filaBrain.testConnection" disabled>Test connection</button>
           <button type="submit" class="fm-btn fm-btn-outline" data-i18n="common.save" disabled>Save</button>
