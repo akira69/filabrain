@@ -79,6 +79,7 @@
     "unavailableSources": "Sources that could not be opened ({count})",
     "corroborated": "Sources differ on {name}.",
     "corroboratedPreferred": "Supported by more sources",
+    "manufacturer_color_reference": "Manufacturer color reference: {name}",
     "color_reference": "Saved color and {source} swatch differ ({name}).",
     "manufacturerPreferred": "Manufacturer value",
     "leaveBlank": "Leave blank",

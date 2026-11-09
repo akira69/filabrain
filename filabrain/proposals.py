@@ -527,6 +527,54 @@ _REEL_SIZE = re.compile(
     re.IGNORECASE,
 )
 _LABELLED_SKU = re.compile(r"\b(?:sku|article number)\s*[:#]\s*([\w.+-]+)", re.IGNORECASE)
+_COLOR_CODES = (
+    ("RAL", re.compile(r"RAL(?: Colou?r)?\s*:?\s+(\d{4})(?:\s+(.{1,90}))?", re.IGNORECASE)),
+    ("Pantone", re.compile(
+        r"Pantone(?: Colou?r)?\s*:?\s+((?:[a-z][a-z ]{0,23}\s+)?\d{2,4}(?:-\d{4})?(?:\s*[a-z]{1,4})?)",
+        re.IGNORECASE,
+    )),
+)
+_PACKAGED_NAME = re.compile(r"([A-Z][A-Z0-9+ -]{0,19}) \(([^()]+)\)", re.IGNORECASE)
+_SHORE = re.compile(r"Shore Hardness:\s*(\d{2,3}[ad])", re.IGNORECASE)
+_PARAMOUNT_TEMPERATURE = re.compile(
+    r"(\d{1,3})(?:\s*°?\s*C)?\s*[-–]\s*(\d{1,3})\s*°?\s*C(?:\s*\([^()]*\))?",
+    re.IGNORECASE,
+)
+_PARAMOUNT_TEMP_LABELS = (
+    ("bed_temp_range_c", re.compile(r"Bed Temp(?:erature)?\s*:?\s+(.+)", re.IGNORECASE)),
+    ("extruder_temp_range_c", re.compile(r"(?:Nozzle|Print) Temp(?:erature)?\s*:?\s+(.+)", re.IGNORECASE)),
+)
+
+
+def _published_colors(text: str) -> list[tuple[str, str]]:
+    return list(dict.fromkeys(
+        (" ".join((system, *(part for part in match.groups() if part))), line)
+        for system, pattern in _COLOR_CODES
+        for line in text.splitlines()
+        if (match := pattern.fullmatch(line))
+    ))
+
+
+def _paramount_specs(text: str):
+    for line in text.splitlines():
+        if shore := _SHORE.fullmatch(line):
+            yield "material_subgroup", shore[1].upper(), line
+        if line.casefold() == "compatible with bambu ams":
+            yield "ams_compatibility", ["ams"], line
+        if combined := re.fullmatch(r"Bed / Print Temperature:\s*(.+?)\s*/\s*(.+)", line, re.IGNORECASE):
+            temperatures = zip(("bed_temp_range_c", "extruder_temp_range_c"), combined.groups())
+        else:
+            temperatures = (
+                (field, match[1]) for field, pattern in _PARAMOUNT_TEMP_LABELS
+                if (match := pattern.fullmatch(line))
+            )
+        for field, value in temperatures:
+            if match := _PARAMOUNT_TEMPERATURE.fullmatch(value.replace("℃", "°C")):
+                low, high = map(int, match.groups())
+                minimum, maximum = LIMITS[field]
+                if minimum <= low <= high <= maximum:
+                    yield field, {"min": low, "max": high}, line
+
 
 
 def _filament_diameters(text):
@@ -539,7 +587,7 @@ def _filament_diameters(text):
 def _paramount_variant_matches(identity: Identity, page: Evidence, name: str) -> bool:
     if not page.manufacturer_page or _site_host(page.url) != "paramount-3d.com":
         return False
-    match = re.fullmatch(r"([A-Z]+) \(([^()]+)\)", name, re.IGNORECASE)
+    match = _PACKAGED_NAME.fullmatch(name)
     if not match or _norm(match[1]) != _material_family(identity.material):
         return False
     if identity.color_mode == "multi" or _norm(identity.finish_type) not in ("", "solid"):
@@ -547,10 +595,10 @@ def _paramount_variant_matches(identity: Identity, page: Evidence, name: str) ->
 
     color = _product_key(match[2])
     ral = next((m for line in page.scopes or () if (
-        m := re.fullmatch(r"RAL Color:\s*(\d{4})\s+(.+)", line, re.IGNORECASE)
+        m := _COLOR_CODES[0][1].fullmatch(line)
     )), None)
     hardness = next((m[1].casefold() for line in page.scopes or () if (
-        m := re.fullmatch(r"Shore Hardness:\s*(\d{2,3}[ad])", line, re.IGNORECASE)
+        m := _SHORE.fullmatch(line)
     )), "")
     words = set(_product_key(identity.designation))
     stored_color = _product_key(identity.color)
@@ -631,6 +679,26 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
     return title, sku, float(diameter), nominal_weight
 
 
+def _paramount_url_identity(page: Evidence) -> Identity | None:
+    if _site_host(page.url) != "paramount-3d.com" or not urlsplit(page.url).path.startswith("/product-page/"):
+        return None
+    product = page.product or {}
+    heading = product.get("designation") or page.title.split("|", 1)[0].strip()
+    package = _PACKAGED_TITLE.fullmatch(heading)
+    if not package or not (name := _PACKAGED_NAME.fullmatch(package["name"])):
+        return None
+    material, color = name.groups()
+    if material.upper() not in MATERIAL_ACRONYMS or _norm(color) == "master spool":
+        return None
+    candidate = Identity(
+        manufacturer="Paramount 3D", designation=package["name"], material=material.upper(),
+        color=color, diameter_mm=float(package["diameter"]),
+    )
+    if verified := _packaged_product(candidate, replace(page, manufacturer_page=True), None):
+        return candidate.model_copy(update={"sku": verified[1] or "", "weight_g": verified[3]})
+    return None
+
+
 def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[Evidence]:
     product = page.product or {}
     title = product.get("designation") or re.split(r"\s*[|–]\s*", page.title, maxsplit=1)[0]
@@ -654,8 +722,12 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
                 diameters = _filament_diameters(scope)
                 if diameters and diameters != {diameter}:
                     break
-            if re.match(r"^(?:material:|spool\b|density\b)", scope, re.IGNORECASE) or any(
-                re.search(label, scope, re.IGNORECASE) for label in SPEC_LABELS.values()
+            if (
+                re.match(r"^(?:material:|spool\b|density\b)", scope, re.IGNORECASE)
+                or any(re.search(label, scope, re.IGNORECASE) for label in SPEC_LABELS.values())
+                or any(pattern.fullmatch(scope) for _, pattern in _COLOR_CODES)
+                or page.manufacturer_page and _site_host(page.url) == "paramount-3d.com"
+                and any(_paramount_specs(scope))
             ):
                 specs.append(scope)
         return [replace(page, text="\n".join([heading, *specs])[:3000])]
@@ -1141,7 +1213,7 @@ async def research_products(
         if primary and field in field_options:
             primary_fields.add(field)
 
-    async def add_draft_identity(candidate: Identity, cite):
+    async def add_draft_identity(candidate: Identity, cite, *, include_color=True):
         if duplicates := await duplicate_ids(db, candidate):
             issues.extend(
                 {"code": "duplicate", "filament_id": ident} for ident in duplicates
@@ -1167,7 +1239,7 @@ async def research_products(
             ("designation", candidate.designation),
             ("material_type", candidate.material),
             ("diameter_mm", candidate.diameter_mm),
-            ("manufacturer_color_name", candidate.color),
+            ("manufacturer_color_name", candidate.color if include_color else None),
             ("raw_material_weight_g", candidate.weight_g),
             ("manufacturer_sku", candidate.sku),
         ):
@@ -1234,6 +1306,7 @@ async def research_products(
 
     # Resolve a pasted product URL first so its brand and SKU can drive both catalogs.
     pasted_page = None
+    verified_paramount_url = False
     resolve_pasted_url = (
         snapshot is None
         and product_url
@@ -1242,8 +1315,9 @@ async def research_products(
     )
     if resolve_pasted_url and product_url:
         pasted_page = await supplier(product_url)
-        if pasted_page and pasted_page.product:
-            product = Identity(**pasted_page.product)
+        paramount = _paramount_url_identity(pasted_page) if pasted_page else None
+        if pasted_page and (paramount or pasted_page.product):
+            product = paramount or Identity(**pasted_page.product)
             fields = ("material", "color", "diameter_mm", "weight_g")
             constraints = {
                 key: getattr(identity, key) for key in fields if getattr(identity, key)
@@ -1254,7 +1328,8 @@ async def research_products(
             ) and (
                 not constraints
                 or supplier_matches(
-                    product.model_copy(update={**constraints, "sku": ""}), pasted_page
+                    product.model_copy(update={**constraints, "sku": ""}),
+                    replace(pasted_page, manufacturer_page=True) if paramount else pasted_page,
                 )
             ):
 
@@ -1267,10 +1342,12 @@ async def research_products(
                         }
                     ]
 
-                if not await add_draft_identity(product, cite_product):
+                if not await add_draft_identity(product, cite_product, include_color=not paramount):
                     return proposal
                 identity = product.model_copy(update=constraints)
-                evidence.extend(_supplier_scopes(identity, pasted_page))
+                verified_paramount_url = bool(paramount)
+                if not verified_paramount_url:
+                    evidence.extend(_supplier_scopes(identity, pasted_page))
 
     manufacturer_site = (snapshot or {}).get("manufacturer_url")
     if snapshot is None and identity.manufacturer:
@@ -1279,7 +1356,7 @@ async def research_products(
                 func.lower(Manufacturer.name) == _norm(identity.manufacturer)
             ).limit(1)
         )
-    manufacturer_domain = _site_host(manufacturer_site)
+    manufacturer_domain = "paramount-3d.com" if verified_paramount_url else _site_host(manufacturer_site)
     direct_urls = [
         supplier_page_url(link) for url in (
             product_url if not resolve_pasted_url else None,
@@ -1289,6 +1366,8 @@ async def research_products(
     ]
     first_urls = [url for url in direct_urls if _on_manufacturer_site(url, manufacturer_domain)]
     first_pages = await check_pages(first_urls)
+    if verified_paramount_url:
+        first_pages[pasted_page.url] = pasted_page
     imported_sku = (snapshot or {}).get("shop_url") or ""
     if not re.fullmatch(r"(?=[\w.-]*[A-Z])(?=[\w.-]*\d)[A-Z0-9][\w.-]{5,40}", imported_sku, re.IGNORECASE):
         imported_sku = ""
@@ -1596,11 +1675,13 @@ async def research_products(
         for issue in sheet_conflicts:
             remember_conflict(issue, primary=True)
 
+    has_published_color = False
     if not unresolved_variants:
         for page, citation_title, scopes in official_scopes:
             for spec in _bundle_temperatures(supplier_identity, replace(page, title=citation_title), snapshot):
                 add(spec["field"], spec["value"], spec["sources"], primary=True)
-            if not any(not scope.shared for scope in scopes):
+            verified_scopes = [scope for scope in scopes if not scope.shared]
+            if not verified_scopes:
                 continue
 
             def cite(quote, url=page.url, title=citation_title):
@@ -1608,6 +1689,17 @@ async def research_products(
 
             if not page.archived_at:
                 add("shop_url", page.url, cite(page.title), primary=True)
+            colors = dict.fromkeys(
+                item for scope in verified_scopes for item in _published_colors(scope.text)
+            )
+            for color, _ in colors:
+                issue = {"code": "manufacturer_color_reference", "name": color, "url": page.url}
+                if issue not in issues:
+                    issues.append(issue)
+            if colors:
+                has_published_color = True
+                color, quote = next(iter(colors))
+                add("manufacturer_color_name", color, cite(quote), primary=True)
             if product := _packaged_product(supplier_identity, page, snapshot):
                 title, part, diameter, weight = product
                 sku_quote = next((
@@ -1618,7 +1710,15 @@ async def research_products(
                 add("raw_material_weight_g", weight, cite(title), primary=True)
                 if not page.archived_at and (image := public_link((page.product or {}).get("image_url"))):
                     add("image_url", image, cite(title), primary=True)
-                for scope in scopes:
+                if _site_host(page.url) == "paramount-3d.com":
+                    if not colors and (heading := _PACKAGED_TITLE.fullmatch(title)) and (
+                        name := _PACKAGED_NAME.fullmatch(heading["name"])
+                    ):
+                        add("manufacturer_color_name", name[2], cite(title), primary=True)
+                    for scope in verified_scopes:
+                        for field, value, quote in _paramount_specs(scope.text):
+                            add(field, value, cite(quote), primary=True)
+                for scope in verified_scopes:
                     if size := _REEL_SIZE.search(scope.text):
                         for field, value in zip(("spool_outer_diameter_mm", "spool_width_mm"), size.groups()):
                             add(field, round(float(value) * 25.4, 2), cite(size[0]), primary=True)
@@ -1650,12 +1750,16 @@ async def research_products(
                 timeout=22,
             )
             for issue in model_issues:
+                if has_published_color and issue["field"] == "manufacturer_color_name":
+                    continue
                 remember_conflict(issue, primary=any(
                     primary_source(citation["url"])
                     for option in issue.get("options", []) for citation in option["sources"]
                 ))
             for result in extracted:
                 field = result["field"]
+                if has_published_color and field == "manufacturer_color_name":
+                    continue
                 primary = any(primary_source(citation["url"]) for citation in result["sources"])
                 add(field, result["value"], result["sources"], primary=primary)
                 for option in result.get("options", []):

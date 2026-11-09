@@ -82,7 +82,9 @@ try {
       return route.fulfill({ json: { target, suggestions: [
         { field: 'density_g_cm3', value: 1.24, sources: evidence },
         { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
-      ], issues: [] } })
+      ], issues: target.mode === 'edit' ? [
+        { code: 'manufacturer_color_reference', name: 'RAL 9005 Signal Black', url: evidence[0].url },
+      ] : [] } })
     }
     if (path.endsWith('/settings/mcp')) {
       mcpEnabled = req.postDataJSON().mcp_enabled
@@ -239,6 +241,8 @@ try {
   await frame.getByRole('checkbox', { name: /Density/ }).check()
   await followUp.waitFor()
   await frame.getByRole('log').getByText('Find specifications', { exact: true }).waitFor()
+  const colorReference = frame.getByText('Manufacturer color reference: RAL 9005 Signal Black')
+  assert.equal(await colorReference.getByRole('link', { name: 'Open source' }).getAttribute('href'), evidence[0].url)
   await frame.getByRole('button', { name: 'Stage in FilaMan editor' }).click()
   await frame.getByText('1 field staged.', { exact: false }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.staged), [{ density_g_cm3: { old: null, value: 1.24 } }])

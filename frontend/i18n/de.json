@@ -79,6 +79,7 @@
     "unavailableSources": "Nicht erreichbare Quellen ({count})",
     "corroborated": "Die Quellen geben unterschiedliche Werte für {name} an.",
     "corroboratedPreferred": "Von mehr Quellen bestätigt",
+    "manufacturer_color_reference": "Farbreferenz des Herstellers: {name}",
     "color_reference": "Gespeicherte Farbe und Farbmuster von {source} unterscheiden sich ({name}).",
     "manufacturerPreferred": "Herstellerwert",
     "leaveBlank": "Leer lassen",

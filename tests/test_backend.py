@@ -327,19 +327,21 @@ async def test_stock_filamentdb_partial_fuzzy_search_is_incomplete(monkeypatch):
     ("RAL 9010 (Pure White)", "PETG", "White", None, "petg-white-1-75mm-1kg-filament", "PETG (White)", "RAL Color: 9010 Pure White", None, False),
     ("TPU 92A Black", "TPU", "000000", 1000, "tpu-black-1-75mm-1kg-filament", "TPU (Black)", "Shore Hardness: 92A", None, True),
     ("Silk Bi-Color PLA Aztec Gold", "PLA", "", 1000, "paramount-3d-aztec-gold", "PLA (Aztec Gold)", "", "GOCOP2SC", True),
+    ("ABS (Graphite Gray)", "ABS", "", 1000, "graphite", "ABS (Graphite Gray)", "PANTONE Color: 425C", "GRAY425C", False),
 ])
-async def test_paramount_product_from_its_own_catalog(
+async def test_manufacturer_product_from_its_own_catalog(
     installed, db_session, monkeypatch, designation, material, color, weight,
     slug, title, label, sku, discovered,
 ):
     from filabrain import proposals
     from filabrain.sources import Evidence
 
-    site = "https://www.paramount-3d.com"
+    paramount = slug != "graphite"
+    site = "https://www.paramount-3d.com" if paramount else "https://manufacturer.example"
     product_url = f"{site}/product-page/{slug}"
     master_url = f"{site}/product-page/abs-master-spool"
     heading = f"{title} 1.75mm 1kg Filament"
-    if sku == "GOCOP2SC":
+    if sku and (sku == "GOCOP2SC" or not paramount):
         heading += f" [{sku}]"
     options = {"designation": heading}
     if sku:
@@ -347,6 +349,8 @@ async def test_paramount_product_from_its_own_catalog(
     product = Evidence(product_url, heading, heading, options, scopes=(
         heading, *([f"SKU: {sku}"] if sku else []), label,
         'Spool Size: 2.25" ID / 7.75" OD / 2.25" Depth',
+        'Bed / Print Temperature: 60-80 C / 220 - 260 C (428 - 500 F)',
+
     ))
 
     async def pages(url):
@@ -370,11 +374,11 @@ async def test_paramount_product_from_its_own_catalog(
     monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
 
-    maker = Manufacturer(name="Paramount 3D", url=site)
+    maker = Manufacturer(name="Paramount 3D" if paramount else "Fixture Manufacturer", url=site)
     db_session.add(maker)
     await db_session.flush()
     saved_link = None if discovered else product_url
-    if material == "ABS":
+    if paramount and material == "ABS":
         saved_link = master_url
     if sku == "GOCOP2SC":
         saved_link = sku
@@ -393,6 +397,22 @@ async def test_paramount_product_from_its_own_catalog(
     assert suggestions["spool_width_mm"]["value"] == 57.15
     assert suggestions["spool_width_mm"]["sources"][0]["url"] == product_url
     assert "no_match" not in {issue["code"] for issue in data["issues"]}
+    if paramount:
+        assert suggestions["bed_temp_range_c"]["value"] == {"min": 60, "max": 80}
+        assert suggestions["extruder_temp_range_c"]["value"] == {"min": 220, "max": 260}
+    else:
+        reference = next(issue for issue in data["issues"] if issue["code"] == "manufacturer_color_reference")
+        assert reference["name"] == "Pantone 425C"
+        assert suggestions["manufacturer_color_name"]["value"] == "Pantone 425C"
+        assert suggestions["manufacturer_color_name"]["sources"][0]["url"] == product_url
+    if label.startswith("RAL Color:"):
+        reference = next(issue for issue in data["issues"] if issue["code"] == "manufacturer_color_reference")
+        assert reference["name"] == label.replace("RAL Color:", "RAL")
+        assert reference["url"] == product_url
+        assert "manufacturer_color_name" not in suggestions
+    if material == "TPU":
+        assert suggestions["material_subgroup"]["value"] == "92A"
+
     if sku:
         assert suggestions["manufacturer_sku"]["value"] == sku
         assert suggestions["manufacturer_sku"]["sources"][0]["evidence"] == f"SKU: {sku}"
@@ -402,3 +422,67 @@ async def test_paramount_product_from_its_own_catalog(
         proposals.Identity(designation=designation, material=material, color=color, diameter_mm=3.0),
         proposals.replace(product, manufacturer_page=True), None,
     )
+
+
+@pytest.mark.parametrize(("label", "expected_color"), [
+    ("RAL Color: 9010 Pure White", "RAL 9010 Pure White"),
+    ("PANTONE Color: 425C", "Pantone 425C"),
+])
+async def test_paramount_pasted_url_proposes_identity_and_published_specs(
+    installed, db_session, monkeypatch, label, expected_color,
+):
+    from filabrain import proposals
+    from filabrain.sources import Evidence
+
+    site = "https://www.paramount-3d.com"
+    url = site + "/product-page/pla-3"
+    heading = "PLA (White) 1.75mm 1kg Filament"
+    page = Evidence(url, heading, heading, {"designation": heading, "sku": "852297007008"}, scopes=(
+        heading, "SKU: 852297007008", label,
+        'Spool Size: 2.25" ID / 7.75" OD / 2.25" Depth',
+        "Bed / Print Temperature: None / 195 - 210 C (383 - 410 F)",
+        "Compatible with Bambu AMS",
+    ))
+
+    async def fetch(requested):
+        assert requested == url
+        return page
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    async def extract(*_args, **_kwargs):
+        return [{
+            "field": "manufacturer_color_name", "value": "White",
+            "sources": [{"url": url, "title": heading, "evidence": "Color: White"}],
+        }], []
+
+    monkeypatch.setattr(proposals, "request_extraction", extract)
+    monkeypatch.setenv("FILABRAIN_MODEL_URL", "http://model.test/v1")
+    monkeypatch.setenv("FILABRAIN_MODEL_ID", "fixture")
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Paramount 3D", url=site)
+    db_session.add(maker)
+    await db_session.commit()
+
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "create", "product_url": url})
+    assert response.status_code == 200
+    data = response.json()
+    values = {item["field"]: item["value"] for item in data["suggestions"]}
+    assert values["manufacturer_id"] == maker.id
+    assert values["designation"] == "PLA (White)"
+    assert values["material_type"] == "PLA"
+    assert values["manufacturer_color_name"] == expected_color
+    assert values["manufacturer_sku"] == "852297007008"
+    assert values["shop_url"] == url
+    assert values["spool_width_mm"] == 57.15
+    assert values["extruder_temp_range_c"] == {"min": 195, "max": 210}
+    assert values["ams_compatibility"] == ["ams"]
+    assert "bed_temp_range_c" not in values
+    assert "default_spool_weight_g" not in values

@@ -47,7 +47,7 @@ Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for F
 Run the smoke test with the Python environment from a stock FilaMan checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.10.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.11.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database.

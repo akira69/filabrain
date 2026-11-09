@@ -79,6 +79,7 @@
     "unavailableSources": "Sources inaccessibles ({count})",
     "corroborated": "Les sources donnent des valeurs différentes pour {name}.",
     "corroboratedPreferred": "Confirmé par davantage de sources",
+    "manufacturer_color_reference": "Référence couleur du fabricant : {name}",
     "color_reference": "La couleur enregistrée diffère de celle de {source} ({name}).",
     "manufacturerPreferred": "Valeur du fabricant",
     "leaveBlank": "Laisser vide",
