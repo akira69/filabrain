@@ -326,6 +326,7 @@ async def test_stock_filamentdb_partial_fuzzy_search_is_incomplete(monkeypatch):
     ("PLA Basic Pure White", "PLA", "9010 Pure White", 989, "pla-3", "PLA (White)", "RAL Color: 9010 Pure White", "852297007008", False),
     ("RAL 9010 (Pure White)", "PETG", "White", None, "petg-white-1-75mm-1kg-filament", "PETG (White)", "RAL Color: 9010 Pure White", None, False),
     ("TPU 92A Black", "TPU", "000000", 1000, "tpu-black-1-75mm-1kg-filament", "TPU (Black)", "Shore Hardness: 92A", None, True),
+    ("Silk Bi-Color PLA Aztec Gold", "PLA", "", 1000, "paramount-3d-aztec-gold", "PLA (Aztec Gold)", "", "GOCOP2SC", True),
 ])
 async def test_paramount_product_from_its_own_catalog(
     installed, db_session, monkeypatch, designation, material, color, weight,
@@ -338,6 +339,8 @@ async def test_paramount_product_from_its_own_catalog(
     product_url = f"{site}/product-page/{slug}"
     master_url = f"{site}/product-page/abs-master-spool"
     heading = f"{title} 1.75mm 1kg Filament"
+    if sku == "GOCOP2SC":
+        heading += f" [{sku}]"
     options = {"designation": heading}
     if sku:
         options["sku"] = sku
@@ -370,10 +373,15 @@ async def test_paramount_product_from_its_own_catalog(
     maker = Manufacturer(name="Paramount 3D", url=site)
     db_session.add(maker)
     await db_session.flush()
+    saved_link = None if discovered else product_url
+    if material == "ABS":
+        saved_link = master_url
+    if sku == "GOCOP2SC":
+        saved_link = sku
     filament = Filament(
         manufacturer_id=maker.id, designation=designation, material_type=material,
         manufacturer_color_name=color, diameter_mm=1.75, raw_material_weight_g=weight,
-        shop_url=master_url if discovered and material == "ABS" else None if discovered else product_url,
+        shop_url=saved_link,
     )
     db_session.add(filament)
     await db_session.commit()

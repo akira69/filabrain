@@ -576,13 +576,12 @@ async def _paramount_candidates(identity: Identity, sku: str) -> list[str]:
     candidates = []
     for url in await paramount_product_urls():
         slug = urlsplit(url).path.rsplit("/", 1)[-1].casefold().removeprefix("paramount-3d-")
-        if not slug.startswith(material):
-            continue
         terms = set(_product_key(slug.removeprefix(material)))
         overlap = len(terms & keywords)
         sku_match = bool(sku and _norm(sku) in terms)
-        if overlap or sku_match:
-            candidates.append(((sku_match, overlap, -len(terms - keywords)), url))
+        exact_name = len(terms) >= 2 and terms <= keywords
+        if sku_match or exact_name or (slug.startswith(material) and overlap):
+            candidates.append(((sku_match, exact_name, overlap, -len(terms - keywords)), url))
     return [url for _, url in sorted(candidates, reverse=True)[:3]]
 
 
