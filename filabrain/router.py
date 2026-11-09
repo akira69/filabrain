@@ -31,6 +31,6 @@ for routes in (research.router, settings.router, mcp.router, batch_api.router):
     router.include_router(routes)
 
 
-@router.get("/guide-art.webp", include_in_schema=False)
+@router.get("/guide-art", include_in_schema=False)
 async def guide_art(_principal: PrincipalDep):
     return FileResponse(Path(__file__).with_name("guide-art.webp"), media_type="image/webp")
