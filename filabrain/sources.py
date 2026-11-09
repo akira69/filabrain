@@ -75,11 +75,21 @@ class _ProductPage(HTMLParser):
         self._in_title = False
         self._structured: list[str] | None = None
         self.scopes: list[str] = []
+        self.main_scopes: list[str] = []
+        self._main_tag: str | None = None
+        self._main_depth = 0
         self._row: list[str] | None = None
         self._section: list[str] = []
         self._section_depth = 0
 
     def handle_starttag(self, tag, attrs):
+        if self._skip is None:
+            if tag == self._main_tag:
+                self._main_depth += 1
+            elif self._main_tag is None and (tag == "main" or dict(attrs).get("role") == "main"):
+                self._finish_section()
+                self._main_tag = tag
+                self._main_depth = 1
         if tag == "a" and self._skip is None:
             href = dict(attrs).get("href") or ""
             # Keep only PDF links. The supplier fetcher validates every URL and redirect.
@@ -117,22 +127,33 @@ class _ProductPage(HTMLParser):
         elif tag == "title":
             self._in_title = False
         elif tag == "tr" and self._row is not None:
-            self.scopes.append(" ".join(" ".join(self._row).split()))
+            self._save_scope(self._row)
             self._row = None
         elif self._skip is None and self._row is None:
             if tag in ("section", "div", "article", "li", "option") or tag == "p" and not self._section_depth:
                 self._finish_section()
             if tag == "section":
                 self._section_depth = max(0, self._section_depth - 1)
+        if self._skip is None and tag == self._main_tag:
+            if self._main_depth == 1:
+                self._finish_section()
+                self._main_tag = None
+            self._main_depth -= 1
 
     def _separates_scope(self, tag):
         return tag in (
             "h1", "h2", "h3", "h4", "section", "div", "article", "li", "option"
         ) or tag == "p" and not self._section_depth
 
+    def _save_scope(self, parts):
+        text = " ".join(" ".join(parts).split())
+        self.scopes.append(text)
+        if self._main_tag is not None:
+            self.main_scopes.append(text)
+
     def _finish_section(self):
         if self._section:
-            self.scopes.append(" ".join(" ".join(self._section).split()))
+            self._save_scope(self._section)
             self._section.clear()
 
     def close(self):
@@ -337,17 +358,21 @@ def _fetch_supplier(url: str, *, archive: bool = False) -> Evidence:
         parser = _ProductPage()
         parser.feed(text)
         parser.close()
+        title = " ".join(" ".join(parser.title).split())
+        if title.casefold().rstrip(".") in {"just a moment", "access denied", "robot check", "attention required! | cloudflare"}:
+            raise ValueError("Automated access blocked")
         products = [p for p in parser.products if p.get("designation")]
         product = products[0] if len(products) == 1 else None
-        visible = " ".join(" ".join(parser.words).split())
+        scopes = list(dict.fromkeys([*parser.main_scopes, *parser.scopes])) if parser.main_scopes else parser.scopes
+        visible = " ".join(" ".join(scopes if parser.main_scopes else parser.words).split())
         # Put structured identity first so evidence still contains it on long pages.
         prefix = " ".join(product.values()) + " " if product else ""
         return Evidence(
             url,
-            " ".join(parser.title)[:150] or parsed.hostname,
+            title[:150] or parsed.hostname,
             (prefix + visible)[:MAX_TEXT],
             product,
-            scopes=tuple(scope[:MAX_TEXT] for scope in parser.scopes if scope)[:100],
+            scopes=tuple(scope[:MAX_TEXT] for scope in scopes if scope)[:100],
             datasheets=tuple(dict.fromkeys(urljoin(url, link) for link in parser.datasheets))[:4],
             origin="openfilamentdatabase.org" if re.search(r"open filament database", visible, re.IGNORECASE) else "",
         )
@@ -458,6 +483,11 @@ async def ofd_candidates(manufacturer: str) -> tuple[list[dict], str]:
         product = products.get(variant.get("filament_id"), {})
         if not product:
             continue
+        name = product.get("name")
+        material = product.get("material")
+        plus = re.fullmatch(r"PLA\+(?:\s+(\d+(?:\.\d+)+))?", name.strip(), re.IGNORECASE) if (
+            isinstance(name, str) and isinstance(material, str) and material.casefold() == "pla"
+        ) else None
         colors = variant.get("color_hex")
         traits = variant.get("traits")
         traits = traits if isinstance(traits, dict) else {}
@@ -468,9 +498,10 @@ async def ofd_candidates(manufacturer: str) -> tuple[list[dict], str]:
         items.append(
             {
                 "id": size.get("id"),
-                "name": product.get("name"),
+                "name": name,
                 "manufacturer": {"name": brands[0]["name"]},
-                "material": {"key": product.get("material")},
+                "material": {"key": "PLA+" if plus else material},
+                "material_subgroup": plus[1] if plus else None,
                 "manufacturer_color_name": variant.get("name"),
                 "color_hex": colors,
                 "color_mode": "multi" if isinstance(colors, list) and len(colors) > 1 else "single",

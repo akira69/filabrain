@@ -44,6 +44,7 @@
     "failed": "Die Recherche konnte nicht abgeschlossen werden. Versuche es erneut.",
     "identityChanged": "Die Filamentdaten haben sich geändert. Speichere oder lade die Seite neu.",
     "noSuggestions": "Für die übrigen leeren Felder wurden keine belegten Werte gefunden.",
+    "no_verified_values": "Produktbelege gefunden. Für die übrigen leeren Felder liegen keine bestätigten Werte vor.",
     "no_match": "Kein genau passendes Produkt gefunden.",
     "ambiguous_match": "Mehrere Produkte oder Varianten kommen infrage. Prüfe Name, Artikelnummer oder Produkt-URL.",
     "unavailable_source": "Quelle nicht verfügbar: {name}",

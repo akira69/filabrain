@@ -104,3 +104,11 @@ async def lookup_filaments(
     ):
         result["incomplete"] = True
     return result
+
+
+
+async def linked_spool_profile(profile_id: int) -> dict:
+    profile = await upstream._proxy_get(f"/spool-profiles/{profile_id}")
+    if isinstance(profile, dict) and profile.get("id") == profile_id and profile.get("is_active") is not False:
+        return profile
+    return {}

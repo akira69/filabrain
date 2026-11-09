@@ -486,3 +486,174 @@ async def test_paramount_pasted_url_proposes_identity_and_published_specs(
     assert values["ams_compatibility"] == ["ams"]
     assert "bed_temp_range_c" not in values
     assert "default_spool_weight_g" not in values
+
+
+@pytest.mark.parametrize("profile_id", [732, 731])
+async def test_research_uses_only_the_linked_spool_profile(installed, db_session, monkeypatch, profile_id):
+    from filabrain import proposals
+
+    async def profile(path, params=None):
+        assert path == "/spool-profiles/732"
+        return {
+            "id": profile_id, "is_active": True, "name": "250g Spool", "empty_weight_g": 250.0,
+            "outer_diameter_mm": 200.0, "width_mm": 68.0, "spool_material": "Plastic",
+        }
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(filamentdb_proxy, "_proxy_get", profile)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Bambu Lab")
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation="Bambu Green", material_type="PLA",
+        diameter_mm=1.75, filamentdb_spool_profile_id=732, default_spool_weight_g=250.0,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.status_code == 200
+    values = {s["field"]: s for s in response.json()["suggestions"]}
+    if profile_id == 732:
+        assert values["spool_outer_diameter_mm"]["value"] == 200.0
+        assert values["spool_width_mm"]["value"] == 68.0
+        assert values["spool_material"]["value"] == "Plastic"
+        assert values["spool_width_mm"]["sources"][0]["url"].endswith("/api/v1/spool-profiles/732")
+    else:
+        assert not values
+    assert "default_spool_weight_g" not in values
+
+
+@pytest.mark.parametrize(("error", "should_archive"), [
+    ("HTTP 403 (access denied)", True),
+    ("HTTP 429 (rate limited)", True),
+    ("Automated access blocked", True),
+    ("HTTP 401", False),
+])
+async def test_blocked_manufacturer_page_can_use_a_dated_capture(
+    installed, db_session, monkeypatch, error, should_archive,
+):
+    from filabrain import proposals
+    from filabrain.sources import Evidence
+
+    site = "https://manufacturer.example"
+    url = site + "/product"
+    archive = f"https://web.archive.org/web/20250101000000/{url}"
+    heading = "ABS (Black) 1.75mm 1kg Filament [AB-42]"
+    calls = []
+
+    async def fetch(requested):
+        assert requested == url
+        raise ValueError(error)
+
+    async def archived(requested):
+        calls.append(requested)
+        return Evidence(archive, heading, heading, {"designation": heading}, scopes=(
+            heading, 'Spool Size: 2.25" ID / 7.75" OD / 2.25" Depth',
+        ), archived_at="2025-01-01")
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "fetch_archived_supplier", archived)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Fixture Manufacturer", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation="ABS (Black)", material_type="ABS",
+        diameter_mm=1.75, shop_url=url,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.status_code == 200
+    result = response.json()
+    if should_archive:
+        assert calls == [url]
+        width = next(s for s in result["suggestions"] if s["field"] == "spool_width_mm")
+        assert width["value"] == 57.15
+        assert width["sources"][0]["url"] == archive
+        assert "2025-01-01" in width["sources"][0]["title"]
+        assert "shop_url" not in {s["field"] for s in result["suggestions"]}
+    else:
+        assert not calls
+        assert not result["suggestions"]
+
+
+async def test_bundle_product_specs_survive_storefront_navigation(monkeypatch):
+    from filabrain import proposals, sources
+
+    menu = "<div>Unrelated storefront navigation with links and offers.</div>" * 240
+    html = f"""<title>Fixture CMYK Lithophane PLA Bundle</title>
+    <nav>{menu}</nav>
+    <div role="main">
+      <p>This set includes Cyan, Magenta, Yellow, and White PLA filaments.</p>
+      <div>Technical Specifications: 1.75mm diameter, Printing Temperature 200-240°C,
+        Bed Temperature 25-60°C, Net Weight 1kg per spool</div>
+    </div>"""
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "203.0.113.10")
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_: (200, "", "text/html", html.encode()))
+    page = sources._fetch_supplier("https://manufacturer.example/bundle")
+    identity = proposals.Identity(
+        designation="PLA CMYK Yellow", material="PLA", color="CMYK Yellow",
+        diameter_mm=1.75, weight_g=1000, finish_type="solid", color_mode="single",
+    )
+    result = {item["field"]: item["value"] for item in proposals._bundle_temperatures(identity, page)}
+    assert result == {
+        "extruder_temp_range_c": {"min": 200, "max": 240},
+        "bed_temp_range_c": {"min": 25, "max": 60},
+    }
+    assert not proposals._bundle_temperatures(
+        identity.model_copy(update={"designation": "PLA CMYK Black", "color": "CMYK Black"}), page,
+    )
+
+
+async def test_catalog_matches_explicit_pla_plus_version_color_and_package(monkeypatch):
+    from filabrain import proposals, sources
+    from httpx import Response
+
+    def upstream(request):
+        if request.url.path.endswith("/brands/index.json"):
+            return Response(200, json={"brands": [{"name": "SUNLU", "slug": "sunlu"}]})
+        return Response(200, json={
+            "filaments": [{"id": "line", "name": "PLA+ 2.0", "material": "PLA", "density": 1.21}],
+            "variants": [
+                {"id": "black", "filament_id": "line", "name": "Black", "color_hex": "#000000"},
+                {"id": "midnight", "filament_id": "line", "name": "Midnight Black", "color_hex": "#111111"},
+            ],
+            "sizes": [
+                {"id": "exact", "variant_id": "black", "diameter": 1.75, "filament_weight": 1000},
+                {"id": "small", "variant_id": "black", "diameter": 1.75, "filament_weight": 500},
+                {"id": "other", "variant_id": "midnight", "diameter": 1.75, "filament_weight": 1000},
+            ],
+        })
+
+    monkeypatch.setattr(sources.httpx, "AsyncClient", lambda **kwargs: AsyncClient(
+        transport=MockTransport(upstream), **kwargs,
+    ))
+    items, _ = await sources.ofd_candidates("SUNLU")
+    identity = proposals.Identity(
+        manufacturer="SUNLU", designation="Black PLA+ 2.0", material="PLA+", color="Black",
+        diameter_mm=1.75, weight_g=1000, material_subgroup="2.0", finish_type="solid", color_mode="single",
+    )
+    matches = [item for item in items if proposals.same_variant(
+        identity, proposals._catalog_variant(identity, item), item=item,
+    )]
+    assert [item["id"] for item in matches] == ["exact"]
+    assert proposals.catalog_values(matches[0])["density_g_cm3"] == 1.21

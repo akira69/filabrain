@@ -44,6 +44,7 @@
     "failed": "La recherche n’a pas abouti. Réessayez.",
     "identityChanged": "L’identité du filament a changé. Enregistrez ou rechargez la page.",
     "noSuggestions": "Aucune valeur vérifiée pour les champs encore vides.",
+    "no_verified_values": "Sources produit trouvées. Aucune valeur vérifiée pour les champs encore vides.",
     "no_match": "Aucun produit correspondant exactement.",
     "ambiguous_match": "Plusieurs produits ou variantes correspondent. Vérifiez le nom, la référence ou l’URL.",
     "unavailable_source": "Source indisponible : {name}",

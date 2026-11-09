@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from sqlalchemy import func, or_, select
 
-from .catalog import lookup_filaments
+from .catalog import linked_spool_profile, lookup_filaments
 from .model import (
     LIMITS,
     SPEC_LABELS,
@@ -56,7 +56,7 @@ class Identity(BaseModel):
 IDENTITY_FIELDS = (
     "manufacturer_id", "manufacturer_name", "designation", "material_type",
     "material_subgroup", "manufacturer_color_name", "color_mode", "finish_type",
-    "diameter_mm", "raw_material_weight_g", "manufacturer_sku",
+    "diameter_mm", "raw_material_weight_g", "manufacturer_sku", "filamentdb_spool_profile_id",
 )
 MODE_FIELDS = {
     "fill": (
@@ -73,11 +73,12 @@ MODE_FIELDS = {
 
 
 def filament_snapshot(filament: Filament) -> dict:
-    fields = set(IDENTITY_FIELDS + MODE_FIELDS["fill"] + ("shop_url",)) - {"manufacturer_name"}
+    fields = set(IDENTITY_FIELDS + MODE_FIELDS["fill"]) - {"manufacturer_name", "filamentdb_spool_profile_id"}
     return {
         "id": filament.id,
         "manufacturer_name": filament.manufacturer.name,
         "manufacturer_url": filament.manufacturer.url,
+        "filamentdb_spool_profile_id": getattr(filament, "filamentdb_spool_profile_id", None),
         **{field: getattr(filament, field) for field in fields},
     }
 
@@ -408,7 +409,7 @@ def _catalog_variant(identity: Identity, item: dict) -> Identity:
     name = _product_key(candidate.color)
     line = _product_key(candidate.designation)
     if (
-        name and line and _product_key(identity.designation) == (*line, *name)
+        name and line and _product_key(identity.designation) in ((*line, *name), (*name, *line))
         and (not identity.color or _product_key(identity.color) == name or _swatch_code(identity.color))
     ):
         return candidate.model_copy(update={"designation": identity.designation, "color": identity.color or candidate.color})
@@ -880,7 +881,7 @@ def _bundle_temperatures(identity: Identity, page: Evidence, snapshot=None) -> l
     if not any(
         color[-1] in _product_key(member)
         and (not _norm(identity.sku) or _literal_in(identity.sku, member))
-        and (not finish or _literal_in(finish, member) or _literal_in(finish, page.title))
+        and (finish in (None, "", "solid") or _literal_in(finish, member) or _literal_in(finish, page.title))
         and (not subgroup or _literal_in(subgroup, member) or _literal_in(subgroup, page.title))
         for member in re.split(r"\s*,\s*|\s+and\s+", members)
     ):
@@ -1446,8 +1447,28 @@ async def research_products(
         elif matches or (name == "FilaManDB" and items):
             issues.append({"code": "ambiguous_match", "source": name})
 
+    async def from_linked_spool():
+        profile_id = (snapshot or {}).get("filamentdb_spool_profile_id")
+        fields = ("default_spool_weight_g", "spool_outer_diameter_mm", "spool_width_mm", "spool_material")
+        if type(profile_id) is not int or profile_id <= 0 or not any(
+            is_missing(field, snapshot.get(field)) for field in fields
+        ):
+            return
+        try:
+            profile = await linked_spool_profile(profile_id)
+        except (HTTPException, httpx.HTTPError, ValueError):
+            issues.append({"code": "unavailable_source", "source": "Linked FilamentDB spool profile"})
+            return
+        values = catalog_values({"spool_profile": profile})
+        url = f"{settings.filamentdb_url.rstrip('/')}/api/v1/spool-profiles/{profile_id}"
+        for field in fields:
+            value = values[field]
+            if field in LIMITS and (value is None or not LIMITS[field][0] <= value <= LIMITS[field][1]):
+                continue
+            add(field, value, [{"url": url, "title": "Linked FilamentDB spool profile", "evidence": str(value)}], primary=True)
+
     await asyncio.gather(
-        from_catalog("FilaManDB"), from_catalog("Open Filament Database")
+        from_catalog("FilaManDB"), from_catalog("Open Filament Database"), from_linked_spool()
     )
     all_matches = [row for matches, _, _ in catalog_matches for row in matches]
     candidates = [candidate for _, candidate in all_matches]
@@ -1588,7 +1609,7 @@ async def research_products(
     if sum(bool(page and not _on_manufacturer_site(page.url, manufacturer_domain)) for page in pages.values()) < 2:
         pages.update(await check_pages(supplier_urls))
     await check_datasheets(pages)
-    if not authoritative_docs and not any(
+    if not any(
         page and _on_manufacturer_site(page.url, manufacturer_domain)
         and (
             _supplier_scopes(identity, replace(page, manufacturer_page=True), snapshot)
@@ -1598,10 +1619,10 @@ async def research_products(
     ):
         originals = [
             url for url in dict.fromkeys([*direct_urls, *pages])
-            if fetch_errors.get(url, "").startswith("HTTP 429") and urlsplit(url).path not in ("", "/")
-            and (url in direct_urls or _on_manufacturer_site(url, manufacturer_domain))
+            if fetch_errors.get(url, "").startswith(("HTTP 403", "HTTP 429", "HTTP 503", "Automated access blocked"))
+            and urlsplit(url).path not in ("", "/") and not urlsplit(url).query
         ]
-        originals.sort(key=lambda url: not _on_manufacturer_site(url, manufacturer_domain))
+        originals.sort(key=lambda url: (not _on_manufacturer_site(url, manufacturer_domain), url not in direct_urls))
         try:
             async with asyncio.timeout(15):
                 for original in originals[:3]:
@@ -1611,10 +1632,15 @@ async def research_products(
                         continue
                     if not archived:
                         continue
-                    pages[archived.url] = replace(archived, origin=archived.origin or _publisher(original))
-                    if _on_manufacturer_site(original, manufacturer_domain):
+                    official = _on_manufacturer_site(original, manufacturer_domain)
+                    archived = replace(archived, origin=archived.origin or _publisher(original), manufacturer_page=official)
+                    pages[archived.url] = archived
+                    if official:
                         archived_official_urls.add(archived.url)
-                    break
+                        if _sheet_matches(archived, titles, identity, snapshot):
+                            authoritative_docs[archived.url] = archived
+                    if archived.url in authoritative_docs or _supplier_scopes(identity, archived, snapshot):
+                        break
         except TimeoutError:
             pass
     supplier_identity = identity
@@ -1841,8 +1867,8 @@ async def research_products(
         for field in sorted(suggestions, key=lambda field: field not in primary_fields)
         if field not in conflict
     ]
-    if not proposal["suggestions"] and not (all_matches or evidence or authoritative_docs):
-        issues.append({"code": "no_match"})
+    if not proposal["suggestions"]:
+        issues.append({"code": "no_verified_values" if all_matches or evidence or authoritative_docs else "no_match"})
     if not all_matches or unresolved_variants or ambiguous_identity:
         for source in ("FilaManDB", "Open Filament Database"):
             issues.extend(possible_matches.get(source, []))
@@ -1899,6 +1925,6 @@ async def batch_proposal(
         result["issues"].append(issue)
     if not result["proposals"] and any(
         issue["code"] == "ambiguous_match" for issue in result["issues"]
-    ) and not any(issue["code"] == "needs_match" for issue in result["issues"]):
+    ) and not any(issue["code"] in ("needs_match", "no_verified_values") for issue in result["issues"]):
         result["issues"].append({"code": "needs_match"})
     return result

@@ -34,7 +34,7 @@ Attach the search container to the Docker network used by FilaMan and enter `htt
 FILAMAN_NETWORK=your-filaman-network docker compose -f compose.searxng.yml up -d
 ```
 
-The search service stays on that Docker network and serves JSON results. PDF extraction uses `pdftotext` when it is available on the FilaMan host.
+The search service stays on that Docker network and serves JSON results. When a public product page blocks access, FilaBrain can check a dated Wayback Machine capture if one is available. PDF extraction uses `pdftotext` when it is available on the FilaMan host.
 
 ## External MCP connections
 
@@ -47,7 +47,7 @@ Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for F
 Run the smoke test with the Python environment from a stock FilaMan checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.11.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.12.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database.

@@ -44,6 +44,7 @@
     "failed": "Research could not be completed. Try again.",
     "identityChanged": "The filament identity changed. Save or reload before researching again.",
     "noSuggestions": "There are no supported values for the remaining blanks.",
+    "no_verified_values": "Product evidence found. No verified values for the remaining blanks.",
     "no_match": "No exact product match was found.",
     "ambiguous_match": "Several products or variants could match. Confirm the name, SKU, or product URL.",
     "unavailable_source": "Source unavailable: {name}",
