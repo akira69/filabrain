@@ -6,7 +6,7 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 ## Install
 
-**Development preview.** This package targets FilaMan 2.0.5. Review researched values before applying them to your inventory.
+**Development preview.** This package targets FilaMan 2.0.5+. Review researched values before applying them to your inventory.
 
 To build the preview ZIP from source, run the packaging script with Python 3. Published preview ZIPs appear under GitHub Releases.
 
