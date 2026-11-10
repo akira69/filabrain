@@ -128,6 +128,7 @@ try {
   const chatMenu = page.getByRole('menu', { name: 'Model for this conversation' })
   await page.locator('[data-chat-form] [data-model-trigger]:not(:disabled)').waitFor()
   await chatModel.press('Enter')
+  await page.locator('[data-chat-form] [data-model-trigger][aria-expanded="true"]').waitFor()
   const defaultModel = chatMenu.getByRole('menuitemradio', { name: 'fixture:default Default' })
   await defaultModel.waitFor()
   assert.equal(await defaultModel.getAttribute('aria-checked'), 'true')

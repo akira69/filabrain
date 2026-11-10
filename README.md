@@ -6,7 +6,9 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 ## Install
 
-Build the plugin ZIP with Python 3.
+**Development preview.** This package targets FilaMan 2.0.5. Review researched values before applying them to your inventory.
+
+To build the preview ZIP from source, run the packaging script with Python 3. Published preview ZIPs appear under GitHub Releases.
 
 ```sh
 python3 scripts/package_plugin.py
@@ -14,9 +16,7 @@ python3 scripts/package_plugin.py
 
 Upload the ZIP from `dist/` under **Admin → System → Plugins**. Enable **FilaBrain**, then open it from the FilaMan sidebar. Configure the model and optional search server in the plugin's settings. Open **Guide** from the FilaBrain page or chat for Ollama, OpenAI and Claude model setup, research workflows, and external MCP connections.
 
-The standalone plugin page uses FilaMan's existing plugin loader. The initial compatibility target is FilaMan's `devel` revision `c8c76c4f`. FilaMan’s optional editor and selected-filament actions are part of the proposed host extensions in [FilaMan PR #204](https://github.com/Fire-Devils/filaman-system/pull/204).
-
-The brain-and-reel mark is bundled as `filabrain/icon.svg`. Hosts with [FilaMan PR #205’s plugin icon support](https://github.com/Fire-Devils/filaman-system/pull/205) use it in the sidebar.
+The package includes the FilaBrain sidebar icon and uses FilaMan’s filament editor and selected-filament integration hooks.
 
 Rebuild the bundled page after editing the icon or files in `frontend/`.
 
@@ -47,7 +47,7 @@ Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for F
 Run the smoke test with the Python environment from a stock FilaMan checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.12.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.13.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database.
