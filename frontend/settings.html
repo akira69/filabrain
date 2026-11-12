@@ -1,6 +1,6 @@
 <div class="fm-admin-page fm-admin-page-compact">
-    <h2 data-i18n="filaBrain.settings">Model settings</h2>
-    <section class="fm-card fm-section"><h3 data-i18n="filaBrain.settings">Model settings</h3><div class="fm-section-body">
+    <h2 id="model-settings-title" data-i18n="filaBrain.settings">Model settings</h2>
+    <section class="fm-card fm-section" aria-labelledby="model-settings-title"><div class="fm-section-body">
       <form id="filabrain-settings" class="fm-compact-form">
         <label>
           <span data-i18n="filaBrain.modelUrl">Model server URL</span>
@@ -16,10 +16,13 @@
             <button type="button" id="research-load-models" class="fm-btn fm-btn-outline" data-i18n="filaBrain.loadModels" disabled>Load models</button>
           </div>
         </div>
-        <label>
-          <span data-i18n="filaBrain.modelId">Model ID</span>
-          <input name="model_id" class="fm-input" maxlength="150" />
-        </label>
+        <details class="research-manual-model">
+          <summary data-i18n="filaBrain.modelManual">Enter a model ID manually</summary>
+          <label>
+            <span data-i18n="filaBrain.modelId">Model ID</span>
+            <input name="model_id" class="fm-input" maxlength="150" />
+          </label>
+        </details>
         <label>
           <span data-i18n="filaBrain.apiKey">API key (optional)</span>
           <input name="api_key" type="password" class="fm-input" maxlength="1000" autocomplete="new-password" />
@@ -27,7 +30,7 @@
         <p id="research-key-state" class="fm-field-hint"></p>
         <label><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
         <section class="research-web-search" aria-labelledby="research-search-title">
-          <h4 id="research-search-title" data-i18n="filaBrain.webSearch">Web search (optional)</h4>
+          <h3 id="research-search-title" data-i18n="filaBrain.webSearch">Web search (optional)</h3>
           <p class="fm-field-hint" data-i18n="filaBrain.searchHint">Some suppliers can be researched using known manufacturer links and filament catalogs. Enable web search to find additional product pages and datasheets.</p>
           <button type="button" id="research-enable-search" class="fm-btn fm-btn-outline" aria-controls="research-search-setup" data-i18n="filaBrain.enableWebSearch" hidden>Enable web search</button>
           <div id="research-search-setup" class="form-field" hidden>

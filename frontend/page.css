@@ -67,6 +67,7 @@ form, .field-grid, .fm-compact-form { display: grid; gap: .75rem; }
 .field-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); }
 label, .form-field { display: grid; gap: .25rem; }
 input:not([type=checkbox]), select, textarea { max-width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .45rem .6rem; background: var(--input-bg); }
+input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
 input[type=checkbox] { accent-color: var(--accent); }
 [data-view="settings"] .fm-section { max-width: 52rem; }
 .fm-toggle { display: inline-block; position: relative; width: 40px; height: 22px; flex: none; }
@@ -89,12 +90,16 @@ dialog dd { margin: 0; overflow-wrap: anywhere; }
 #research-pairing { margin-block: .65rem 1rem; }
 #research-pairing summary { cursor: pointer; color: var(--text-muted); font-size: .875rem; }
 #research-pairing button, #pair-credentials { margin-block-start: .5rem; }
-#research-options > summary { color: var(--text-muted); cursor: pointer; margin-block: .6rem; }
+.draft-fields { display: contents; }
+#research-options > summary, #research-advanced-fields > summary { color: var(--text-muted); cursor: pointer; margin-block: .6rem; }
+#research-start-actions { align-items: center; }
+#research-start-actions .chat-model-trigger { border-color: var(--border); }
 #research-conversation { margin-block: 1rem; }
 #research-transcript { gap: .65rem; }
 .research-assistant { padding-inline: .25rem; }
 #research-reply { margin-block-start: .75rem; }
 #research-reply #research-results { margin-block-start: 0; }
+#save-filament:disabled { background: var(--bg-soft); border-color: var(--border); color: var(--text-muted); }
 #research-follow-up {
   margin-block-start: .75rem;
   flex: none;

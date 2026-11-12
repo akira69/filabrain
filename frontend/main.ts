@@ -170,7 +170,7 @@ async function main() {
       return
     }
     const mount: Record<string, (() => void) | false> = {
-      chat: status.can_chat && mountChat,
+      chat: status.can_chat && (() => mountChat(status.can_configure ? openSettings : undefined)),
       new: status.can_create && (() => mountResearch(status)),
       library: status.can_update && (() => mountLibrary()),
       batches: status.can_update && (() => {
@@ -195,6 +195,10 @@ async function main() {
         visited.add(tab)
         run()
       }
+    }
+    function openSettings() {
+      show('settings')
+      element('filabrain-settings').querySelector<HTMLInputElement>('[name="model_url"]')!.focus()
     }
     for (const button of buttons) {
       const tab = button.dataset.tab!

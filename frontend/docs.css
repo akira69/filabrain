@@ -52,14 +52,14 @@
     border-radius: 0;
   }
 }
-.docs-art { position: relative; max-width: 18rem; margin: 0 auto 1rem; }
+.docs-art { position: relative; max-width: 14rem; margin: 0 auto .75rem; }
 .docs-art img { display: block; width: 100%; height: auto; border-radius: .65rem; }
 @media (prefers-reduced-motion: no-preference) {
   .docs-art::after {
     content: "";
     position: absolute;
-    left: 75%;
-    top: 34%;
+    left: 52%;
+    top: 57%;
     width: 9%;
     height: 7%;
     border-radius: 50%;

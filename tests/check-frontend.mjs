@@ -28,6 +28,8 @@ try {
   const writes = []
   let mcpEnabled = false
   let searchUrl = ''
+  let chatModelId = 'fixture:default'
+  let canConfigure = true
   await page.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
@@ -53,8 +55,8 @@ try {
           }
         })
       </script>` })
-    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: 'fixture:default',
-      can_create: true, can_update: true, can_configure: true, mcp_enabled: mcpEnabled } })
+    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: chatModelId,
+      can_create: true, can_update: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
     if (path.endsWith('/models')) return route.fulfill({ json: { models: ['fixture:default', 'fixture:alternate'] } })
     if (path.endsWith('/chat')) {
       assert.equal(req.postDataJSON().messages[0].content, 'Compare these materials')
@@ -91,9 +93,14 @@ try {
       return route.fulfill({ json: { mcp_enabled: mcpEnabled } })
     }
     if (path.endsWith('/settings')) {
-      if (req.method() === 'PUT') searchUrl = req.postDataJSON().search_url
+      const settings = req.method() === 'PUT' ? req.postDataJSON() : null
+      if (settings) {
+        searchUrl = settings.search_url
+        if (settings.model_id) chatModelId = settings.model_id
+      }
       return route.fulfill({ json: {
-        model_url: '', model_id: '', search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
+        model_url: settings?.model_url || '', model_id: settings?.model_id || '',
+        search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
       } })
     }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
@@ -123,7 +130,35 @@ try {
     return route.fulfill({ status: 404, json: {} })
   })
 
+  chatModelId = ''
   await page.goto(url)
+  const setupModel = page.getByRole('button', { name: 'Set up a model' })
+  await setupModel.waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Compare materials' }).isVisible(), false)
+  assert.equal(await page.getByRole('textbox', { name: 'Your question' }).isVisible(), false)
+  await setupModel.click()
+  const modelUrl = page.getByRole('textbox', { name: 'Model server URL' })
+  assert.equal(await modelUrl.evaluate(el => document.activeElement === el), true)
+  await modelUrl.fill('http://ollama:11434')
+  const modelId = page.getByRole('textbox', { name: 'Model ID', exact: true })
+  assert.equal(await modelId.isVisible(), false)
+  await page.locator('#filabrain-settings').getByText('Enter a model ID manually', { exact: true }).click()
+  await modelId.fill('fixture:default')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByText('Settings saved.').waitFor()
+  await page.getByRole('button', { name: 'Chat', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Your question' }).waitFor()
+  assert.equal(await setupModel.isVisible(), false)
+  assert.equal(await page.getByRole('button', { name: 'Guide', exact: true }).count(), 1)
+
+  chatModelId = ''
+  canConfigure = false
+  await page.reload()
+  await page.getByText('Ask a FilaMan administrator to set up a chat model.').waitFor()
+  assert.equal(await setupModel.isVisible(), false)
+  canConfigure = true
+  chatModelId = 'fixture:default'
+  await page.reload()
   const chatModel = page.getByRole('button', { name: /^Model for this conversation/ })
   const chatMenu = page.getByRole('menu', { name: 'Model for this conversation' })
   await page.locator('[data-chat-form] [data-model-trigger]:not(:disabled)').waitFor()
@@ -142,25 +177,29 @@ try {
   await page.getByRole('button', { name: 'Send message' }).click()
   await page.getByText('PLA is easier to print.').waitFor()
   const guide = page.getByRole('dialog', { name: 'FilaBrain guide' })
-  const chatGuide = page.locator('.chat-header').getByRole('button', { name: 'Guide' })
   const headerGuide = page.locator('#plugin-header').getByRole('button', { name: 'Guide' })
   const draft = page.getByRole('textbox', { name: 'Your question' })
   await draft.fill('Unsent follow-up')
   const chatCard = page.locator('.research-chat')
   const fullWidth = (await chatCard.boundingBox()).width
-  await chatGuide.click()
+  await headerGuide.click()
   await guide.waitFor()
-  assert.equal(await chatGuide.getAttribute('aria-expanded'), 'true')
+  assert.equal(await headerGuide.getAttribute('aria-expanded'), 'true')
   assert.ok((await chatCard.boundingBox()).width < fullWidth)
-  await guide.getByText('Model providers', { exact: true }).click()
-  await guide.getByRole('link', { name: 'Ollama setup' }).waitFor()
+  const providerLink = guide.getByRole('link', { name: 'Ollama setup' })
+  await providerLink.waitFor()
+  const artBounds = await guide.getByRole('img').boundingBox()
+  assert.ok(artBounds.y + artBounds.height < (await providerLink.boundingBox()).y)
   await guide.getByRole('button', { name: 'Close' }).press('Escape')
   await guide.waitFor({ state: 'hidden' })
-  assert.equal(await chatGuide.evaluate(el => el === document.activeElement), true)
+  assert.equal(await headerGuide.evaluate(el => el === document.activeElement), true)
   assert.equal(await draft.inputValue(), 'Unsent follow-up')
   await page.getByText('PLA is easier to print.').waitFor()
 
   await page.setViewportSize({ width: 390, height: 780 })
+  const composerBounds = await page.locator('[data-chat-form]').boundingBox()
+  assert.ok(composerBounds.y + composerBounds.height <= 780, 'the mobile composer fits in the viewport')
+  assert.ok((await chatModel.boundingBox()).height >= 44)
   await headerGuide.click()
   await guide.waitFor()
   assert.equal(await guide.evaluate(el => el.matches(':modal')), true)
@@ -177,11 +216,16 @@ try {
 
   await page.getByRole('button', { name: 'Research new filament' }).click()
   await page.getByLabel('Manufacturer', { exact: true }).selectOption('7')
-  await page.getByLabel('Designation', { exact: true }).fill('Fixture PLA')
+  await page.getByLabel('Product name', { exact: true }).fill('Fixture PLA')
+  const firstSearchPicker = page.locator('#product-research [data-model-trigger]')
+  await firstSearchPicker.waitFor()
+  assert.equal(await page.getByLabel('Material', { exact: true }).isVisible(), false)
+  await page.getByText('Search options', { exact: true }).click()
   await page.getByLabel('Material', { exact: true }).fill('PLA')
   await page.getByLabel('Diameter (mm)').fill('1.75')
   await page.getByRole('button', { name: 'Find specifications' }).click()
   await page.getByRole('link', { name: 'Fixture catalog' }).first().waitFor()
+  await page.locator('#research-follow-up [data-model-trigger]').waitFor()
   await page.getByRole('checkbox', { name: /Density/ }).check()
   assert.equal(writes.length, 0)
   await page.getByRole('button', { name: 'Save new filament' }).click()
@@ -239,15 +283,22 @@ try {
   assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).isVisible(), false)
   assert.equal(await followUp.isVisible(), false)
   await frame.getByRole('button', { name: 'Find specifications' }).click()
-  await frame.getByRole('checkbox', { name: /Density/ }).check()
+  const densityChoice = frame.getByRole('checkbox', { name: /Density/ })
+  await densityChoice.waitFor()
+  assert.equal(await frame.getByRole('button', { name: 'Stage fields in FilaMan editor' }).isDisabled(), true)
+  await densityChoice.check()
+  await frame.getByRole('button', { name: 'Stage 1 field' }).waitFor()
+  await densityChoice.uncheck()
+  assert.equal(await frame.getByRole('button', { name: 'Stage fields in FilaMan editor' }).isDisabled(), true)
+  await densityChoice.check()
   await followUp.waitFor()
   await frame.getByRole('log').getByText('Find specifications', { exact: true }).waitFor()
   const colorReference = frame.getByText('Manufacturer color reference: RAL 9005 Signal Black')
   assert.equal(await colorReference.getByRole('link', { name: 'Open source' }).getAttribute('href'), evidence[0].url)
-  await frame.getByRole('button', { name: 'Stage in FilaMan editor' }).click()
+  await frame.getByRole('button', { name: 'Stage 1 field' }).click()
   await frame.getByText('1 field staged.', { exact: false }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.staged), [{ density_g_cm3: { old: null, value: 1.24 } }])
-  await frame.getByText('Search options', { exact: true }).click()
+  await frame.locator('#research-options > summary').click()
   await frame.getByRole('button', { name: 'Standardize this filament' }).click()
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Matte/ }).check()
   await followUp.fill('Check an unavailable source')
@@ -260,7 +311,7 @@ try {
   await frame.getByRole('log').getByText('Focus on the material finish', { exact: true }).waitFor()
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).check()
   assert.equal(await followUp.inputValue(), '')
-  await frame.getByRole('button', { name: 'Stage in FilaMan editor' }).click()
+  await frame.getByRole('button', { name: 'Stage 2 fields' }).click()
   await frame.getByText('2 fields staged.', { exact: false }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.staged), [{
     designation: { old: 'Fixture PLA', value: 'Fixture-PLA' },

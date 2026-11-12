@@ -78,7 +78,10 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   const followUp = element<HTMLFormElement>('research-follow-up')
   const guidance = element<HTMLTextAreaElement>('research-guidance')
   const sendFollowUp = followUp.querySelector<HTMLButtonElement>('button[type=submit]')!
-  const modelPicker = mountModelPicker(followUp, status.chat_model)
+  const startActions = element('research-start-actions')
+  const picker = startActions.querySelector<HTMLElement>('.chat-model-picker')!
+  const advanced = element<HTMLDetailsElement>('research-advanced-fields')
+  const modelPicker = mountModelPicker(form, status.chat_model)
   const searchOptions = element<HTMLDetailsElement>('research-options')
   const optionsSummary = searchOptions.querySelector('summary')!
   const conversation = element('research-conversation')
@@ -94,24 +97,29 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   let pairGeneration = 0
   let pairPoll = 0
   let busy = false
+  let saving = false
+  let duplicate = false
   let lastAction = 'fill'
   let formRevision = 0
   function showFollowUp(visible: boolean) {
-    guidance.hidden = sendFollowUp.hidden = !visible
-    guidance.required = visible
+    if (visible) sendFollowUp.before(picker)
+    else buttons[0].before(picker)
+    followUp.hidden = !visible
   }
   document.addEventListener('filaman:model-change', () => { void modelPicker.setDefault(status.chat_model) })
 
   if (editor) {
     document.documentElement.dataset.researchEditor = ''
     element('draft-fields').hidden = true
+    advanced.hidden = true
+    element('research-identity').append(element('research-sku-hint'))
     element('research-heading').textContent = editor.mode === 'edit' ? 'Research this filament' : 'Research the new filament draft'
     const target = element('research-target')
     target.hidden = !editor.fields.designation
     target.textContent = [editor.fields.designation, editor.fields.manufacturer_name].filter(Boolean).join(' · ')
-    save.textContent = 'Stage in FilaMan editor'
     buttons[1].hidden = editor.mode !== 'edit'
   } else {
+    optionsSummary.textContent = t('filaBrain.editSearch')
     async function options(path: string, select: HTMLSelectElement) {
       try {
         const { items } = await fetchAllPages<{ id: number; name: string }>(path)
@@ -144,8 +152,8 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   function clearResults() {
     choices.clear()
     results.replaceChildren()
-    save.disabled = true
     bound = undefined
+    updateSave()
     reply.hidden = true
   }
 
@@ -160,6 +168,16 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     }
     return units
   }
+
+  function updateSave() {
+    const count = editor ? selected().reduce((total, unit) => total + Object.keys(unit).length, 0) : 0
+    save.disabled = !bound || duplicate || busy || saving || (!!editor && count === 0)
+    if (editor) {
+      save.textContent = t(count === 0 ? 'filaBrain.stageFields' : count === 1 ? 'filaBrain.stageOne' : 'filaBrain.stageMany', { count })
+    }
+  }
+
+  results.addEventListener('change', updateSave)
 
   function option(unit: Unit, sources: ResearchOption['sources'], reason?: string, group?: string) {
     const row = document.createElement('div')
@@ -191,7 +209,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     bound = context
     const fields = context.fields
     const unitFor = (field: string, value: Value): Unit => ({ [field]: { old: fields[field] ?? null, value } })
-    const duplicate = proposal.issues.some(issue => issue.code === 'duplicate')
+    duplicate = proposal.issues.some(issue => issue.code === 'duplicate')
     const alternatives = new Set<string>()
     for (const issue of proposal.issues) {
       const p = document.createElement('p')
@@ -247,7 +265,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       const sources = proposalUnit.sources.map(source => ({ title: source.title, url: source.url, evidence: source.quote }))
       results.append(option(unit, sources, proposalUnit.reason))
     }
-    save.disabled = duplicate || (!!editor && !choices.size)
+    updateSave()
     reply.hidden = !!editor && !results.childElementCount
   }
 
@@ -260,15 +278,14 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   }
 
   async function search(action: string, prompt = '') {
-    if (busy) return
+    if (busy || saving) return
     const revision = formRevision
-    const previous = bound
-    const saveWasDisabled = save.disabled
     const selectedModel = modelPicker.selected
     busy = true
     modelPicker.setBusy(true)
     buttons.forEach(button => { button.disabled = true })
-    sendFollowUp.disabled = save.disabled = true
+    sendFollowUp.disabled = true
+    updateSave()
     saved.hidden = true
     notice.textContent = ''
     conversation.hidden = false
@@ -301,12 +318,12 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       if (revision === formRevision) {
         lastAction = action
         showFollowUp(true)
-        if (bound && bound === previous) save.disabled = saveWasDisabled
       }
       buttons.forEach(button => { button.disabled = false })
       sendFollowUp.disabled = false
       modelPicker.setBusy(false)
       busy = false
+      updateSave()
     }
   }
 
@@ -339,10 +356,11 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   })
 
   save.addEventListener('click', async () => {
-    if (!bound || busy) return
+    if (!bound || save.disabled) return
     const snapshot = bound
     const units = selected()
-    save.disabled = true
+    saving = true
+    updateSave()
     try {
       const context = await target()
       if (bound !== snapshot || context.mode !== snapshot.mode || context.filament_id !== snapshot.filament_id ||
@@ -351,7 +369,6 @@ export function mountResearch(status: Status, editor?: EditorContext) {
         throw new Error(t('filaBrain.identityChanged'))
       }
       if (editor) {
-        if (!units.length) throw new Error('Choose the fields to stage first.')
         const { staged, skipped } = await hostRequest<{ staged: string[]; skipped: string[] }>('filaman:filament-stage', { units })
         clearResults()
         notice.textContent = `${staged.length} field${staged.length === 1 ? '' : 's'} staged. Save in the FilaMan editor to keep the changes.`
@@ -362,7 +379,9 @@ export function mountResearch(status: Status, editor?: EditorContext) {
         .map(field => [field, context.fields[field]]))
       for (const unit of units) for (const [field, change] of Object.entries(unit)) data[field] = change.value
       if (!Number(data.manufacturer_id) || !data.designation || !data.material_type || !(Number(data.diameter_mm) > 0)) {
-        throw new Error('Choose or enter a manufacturer, designation, material and diameter before saving.')
+        optionsSummary.hidden = false
+        searchOptions.open = advanced.open = true
+        throw new Error('Choose or enter a manufacturer, product name, material and diameter before saving.')
       }
       if (![...manufacturer.options].some(item => Number(item.value) === data.manufacturer_id) ||
           data.color_id && ![...palette.options].some(item => Number(item.value) === data.color_id)) {
@@ -384,7 +403,8 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     } catch (error) {
       notice.textContent = errorText(error)
     } finally {
-      if (bound === snapshot) save.disabled = false
+      saving = false
+      updateSave()
     }
   })
   element('create-cancel').addEventListener('click', () => confirm.close())

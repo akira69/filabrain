@@ -1,6 +1,6 @@
 # FilaBrain for FilaMan
 
-![FilaBrain AI connected to FilaMan over Ethernet](assets/filabrain-wide.webp)
+![FilaBrain AI connected to FilaMan over Ethernet](filabrain/guide-art.webp)
 
 FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the FilaMan library, checks manufacturer and catalog sources, and presents proposals for review. It supports an OpenAI-compatible model server, including Ollama, and can expose its tools to a separate MCP client.
 
@@ -47,7 +47,7 @@ Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for F
 Run the smoke test with the Python environment from a stock FilaMan checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.13.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.14.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database.

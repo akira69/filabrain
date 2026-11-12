@@ -1,17 +1,17 @@
 <section class="research-chat fm-card" aria-labelledby="research-chat-title">
     <header class="chat-header">
-      <h2 id="research-chat-title" data-i18n="filaBrain.title">FilaBrain</h2>
-      <nav data-chat-actions hidden>
-        <button type="button" class="fm-btn fm-btn-outline" data-chat-new data-i18n="filaBrain.chatNew" disabled>New chat</button>
-        <a href="?tab=batches" class="fm-btn fm-btn-outline" data-chat-batches hidden data-i18n="researchBatches.title">Research batches</a>
-        <a href="?tab=settings" class="fm-btn fm-btn-outline" data-chat-settings hidden data-i18n="filaBrain.settings">Model settings</a>
-      </nav>
-      <!-- docs-button -->
+      <h2 id="research-chat-title" data-i18n="filaBrain.chat">Chat</h2>
+      <button type="button" class="fm-btn fm-btn-outline" data-chat-new data-i18n="filaBrain.chatNew" disabled>New chat</button>
     </header>
 
     <div class="chat-transcript" data-chat-transcript tabindex="0" role="region" data-i18n-aria-label="filaBrain.chatTranscript">
+      <div class="chat-setup" data-chat-setup hidden>
+        <h3 data-i18n="filaBrain.chatConnectModel">Connect a chat model</h3>
+        <p data-chat-setup-hint></p>
+        <button type="button" class="fm-btn fm-btn-primary" data-chat-setup-button data-i18n="filaBrain.chatSetupButton" hidden>Set up a model</button>
+      </div>
       <div class="chat-prompts" data-chat-prompts hidden>
-        <h2 data-i18n="filaBrain.chatWelcome">What are you printing?</h2>
+        <h3 data-i18n="filaBrain.chatWelcome">What are you printing?</h3>
         <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptMaterial" data-i18n="filaBrain.chatChipMaterial">Compare materials</button>
         <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptDrying" data-i18n="filaBrain.chatChipDrying">Drying filament</button>
         <button type="button" class="fm-btn fm-btn-outline" data-chat-prompt="chatPromptQuality" data-i18n="filaBrain.chatChipQuality">Troubleshoot a print</button>
@@ -23,7 +23,7 @@
     <div class="chat-composer">
       <p data-chat-status class="fm-field-hint" role="status" data-i18n="common.loading">Loading…</p>
       <form class="message-composer" data-chat-form hidden>
-        <textarea class="fm-input" name="message" rows="2" maxlength="2000" placeholder="Ask FilaMan…" data-i18n-aria-label="filaBrain.chatQuestion" data-i18n-placeholder="filaBrain.chatPlaceholder"></textarea>
+        <textarea class="fm-input" name="message" rows="2" maxlength="2000" placeholder="Ask FilaBrain…" data-i18n-aria-label="filaBrain.chatQuestion" data-i18n-placeholder="filaBrain.chatPlaceholder"></textarea>
         <div class="chat-toolbar">
           <!-- model-picker -->
           <button type="submit" class="fm-btn fm-btn-primary chat-send" disabled data-i18n-aria-label="filaBrain.chatSend">

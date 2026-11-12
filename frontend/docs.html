@@ -5,27 +5,27 @@
   </header>
   <div class="docs-content" lang="en">
     <div class="docs-art">
-      <img src="/api/v1/filabrain/guide-art?v=1" width="1254" height="1254" loading="lazy" alt="FilaBrain AI, a cybernetic brain connected by Ethernet to the FilaMan spool">
+      <img src="/api/v1/filabrain/guide-art?v=2" width="1774" height="887" loading="lazy" alt="FilaBrain AI, a cybernetic brain connected by Ethernet to the FilaMan spool">
     </div>
+    <details open>
+      <summary>Model providers</summary>
+      <dl>
+        <dt><a href="https://docs.ollama.com/api/openai-compatibility" target="_blank" rel="noopener noreferrer">Ollama setup</a></dt>
+        <dd><code>http://&lt;ollama-host&gt;:11434/v1</code><br>Use an address the FilaMan server can reach and a model already installed on Ollama. Local Ollama typically uses no key.</dd>
+        <dt><a href="https://developers.openai.com/api/reference/overview" target="_blank" rel="noopener noreferrer">OpenAI API setup</a></dt>
+        <dd><code>https://api.openai.com/v1</code><br>Use an OpenAI project API key and a text model that supports Chat Completions.</dd>
+        <dt><a href="https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk" target="_blank" rel="noopener noreferrer">Claude compatibility setup</a></dt>
+        <dd><code>https://api.anthropic.com/v1</code><br>Use a workspace-scoped API key from Claude Console and a Claude model ID. Enter the ID manually if model discovery fails.</dd>
+      </dl>
+      <p>In <strong>Model &amp; MCP settings</strong>, enter the model server URL and API key if required. Use <strong>Load models</strong> or open <strong>Enter a model ID manually</strong>. Select <strong>Test connection</strong>, then <strong>Save</strong>.</p>
+      <p>The model selector in chat can switch models on the configured server for that conversation. For server-managed credentials, configure <code>FILABRAIN_MODEL_URL</code> and <code>FILABRAIN_API_KEY</code>. FilaMan uses <code>OIDC_ENC_KEY</code> to encrypt keys saved in the UI.</p>
+    </details>
     <section aria-labelledby="docs-start">
       <h3 id="docs-start">Start here</h3>
-      <p>Ask about materials or print problems in <strong>Chat</strong>. To add a filament, start with the brand, material and color, or paste a product URL in <strong>Research new filament</strong>.</p>
+      <p>Ask about materials or print problems in <strong>Chat</strong>. To add a filament, start with the manufacturer and product name, or paste a product URL in <strong>Research new filament</strong>.</p>
       <p>Review suggested fields and open their sources before saving. Use <strong>Research library</strong> to queue up to 50 existing filaments, then review and apply proposals in <strong>Research batches</strong>.</p>
       <p>Manufacturer sources take priority. A configured <strong>SearXNG</strong> server lets FilaBrain search more broadly for datasheets, catalogs and alternate sources.</p>
     </section>
-    <details>
-      <summary>Model providers</summary>
-      <p>In <strong>Model &amp; MCP settings</strong>, enter the model server URL and API key if required. Use <strong>Load models</strong> or enter the exact model ID. Select <strong>Test connection</strong>, then <strong>Save</strong>.</p>
-      <dl>
-        <dt>Ollama</dt>
-        <dd><code>http://&lt;ollama-host&gt;:11434/v1</code><br>Use an address the FilaMan server can reach and a model already installed on Ollama. Local Ollama typically uses no key. <a href="https://docs.ollama.com/api/openai-compatibility" target="_blank" rel="noopener noreferrer">Ollama setup</a></dd>
-        <dt>OpenAI</dt>
-        <dd><code>https://api.openai.com/v1</code><br>Use an OpenAI project API key and a text model that supports Chat Completions. <a href="https://developers.openai.com/api/reference/overview" target="_blank" rel="noopener noreferrer">OpenAI API setup</a></dd>
-        <dt>Anthropic Claude</dt>
-        <dd><code>https://api.anthropic.com/v1</code><br>Use a workspace-scoped API key from Claude Console and a Claude model ID. Enter the ID manually if model discovery fails. <a href="https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk" target="_blank" rel="noopener noreferrer">Claude compatibility setup</a></dd>
-      </dl>
-      <p>The model selector in chat can switch models on the configured server for that conversation. For server-managed credentials, configure <code>FILABRAIN_MODEL_URL</code> and <code>FILABRAIN_API_KEY</code>. FilaMan uses <code>OIDC_ENC_KEY</code> to encrypt keys saved in the UI.</p>
-    </details>
     <details>
       <summary>External MCP</summary>
       <p>Turn on <strong>Enable MCP access</strong> in settings and copy the MCP URL. Configure your client for Streamable HTTP on <code>/api/v1/filabrain/mcp</code>. Remote connections use HTTPS.</p>

@@ -2,7 +2,7 @@ import { initI18n, t } from './shared/i18n'
 import { researchHeaders } from './shared/filabrain'
 import { mountModelPicker } from './shared/model-picker'
 
-export async function mountChat() {
+export async function mountChat(openSettings?: () => void) {
   await initI18n()
   const api = '/api/v1/filabrain'
   const form = document.querySelector<HTMLFormElement>('[data-chat-form]')!
@@ -12,6 +12,9 @@ export async function mountChat() {
   const transcript = document.querySelector<HTMLElement>('[data-chat-transcript]')!
   const log = document.querySelector<HTMLElement>('[data-chat-log]')!
   const prompts = document.querySelector<HTMLElement>('[data-chat-prompts]')!
+  const setup = document.querySelector<HTMLElement>('[data-chat-setup]')!
+  const setupHint = document.querySelector<HTMLElement>('[data-chat-setup-hint]')!
+  const setupButton = document.querySelector<HTMLButtonElement>('[data-chat-setup-button]')!
   const newChat = document.querySelector<HTMLButtonElement>('[data-chat-new]')!
   type Message = { role: 'user' | 'assistant'; content: string }
   const pageLabels = {
@@ -35,7 +38,7 @@ export async function mountChat() {
     input.readOnly = !!request
     modelPicker?.setBusy(!!request)
     newChat.disabled = !request && !messages.length && !input.value
-    prompts.hidden = !!request || messages.length > 0
+    prompts.hidden = form.hidden || !!request || messages.length > 0
   }
 
   function append(message: Message) {
@@ -61,6 +64,9 @@ export async function mountChat() {
       input.focus()
     })
   }
+  setupButton.hidden = !openSettings
+  if (openSettings) setupButton.addEventListener('click', openSettings)
+  setupHint.textContent = t(openSettings ? 'filaBrain.chatSetup' : 'filaBrain.chatAskAdmin')
   newChat.addEventListener('click', () => {
     request?.abort()
     request = undefined
@@ -130,16 +136,15 @@ export async function mountChat() {
     const response = await fetch(`${api}/status`, { credentials: 'include' })
     if (!response.ok) throw new Error()
     const availability = await response.json()
-    document.querySelector<HTMLElement>('[data-chat-actions]')!.hidden = !availability.can_chat
-    document.querySelector<HTMLElement>('[data-chat-batches]')!.hidden = !availability.can_update
-    document.querySelector<HTMLElement>('[data-chat-settings]')!.hidden = !availability.can_configure
     if (!availability.can_chat) {
       status.textContent = t('filaBrain.chatUnavailable')
     } else {
       modelPicker = mountModelPicker(form, availability.chat_model)
       function showComposer(model?: string) {
         form.hidden = !model
-        status.textContent = model ? '' : t('filaBrain.chatSetup')
+        setup.hidden = !!model
+        status.textContent = ''
+        updateControls()
       }
       showComposer(availability.chat_model)
       document.addEventListener('filaman:model-change', event => {
@@ -147,7 +152,6 @@ export async function mountChat() {
         void modelPicker?.setDefault(model)
         showComposer(model)
       })
-      updateControls()
     }
   } catch {
     status.textContent = t('filaBrain.chatFailed')

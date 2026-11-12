@@ -42,20 +42,26 @@
         <details id="research-options" open>
           <summary data-i18n="filaBrain.researchOptions" hidden>Search options</summary>
           <form id="product-research">
-            <div class="field-grid" id="draft-fields">
-              <div class="form-field"><label for="draft-manufacturer">Manufacturer</label><select name="manufacturer_id" id="draft-manufacturer"><option value="">Choose an existing manufacturer</option></select></div>
-              <label>Designation<input name="designation" maxlength="255"></label>
-              <label>Material<input name="material_type" maxlength="50"></label>
-              <label>Diameter (mm)<input name="diameter_mm" type="number" step="any" min="0.01"></label>
-              <label>Manufacturer color<input name="manufacturer_color_name" maxlength="255"></label>
-              <div class="form-field"><label for="draft-palette">Palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select></div>
-              <label>Manufacturer SKU<input name="manufacturer_sku" maxlength="255"></label>
+            <div class="field-grid" id="research-identity">
+              <div id="draft-fields" class="draft-fields">
+                <div class="form-field"><label for="draft-manufacturer" data-i18n="filaBrain.manufacturer">Manufacturer</label><select name="manufacturer_id" id="draft-manufacturer"><option value="" data-i18n="filaBrain.chooseManufacturer">Choose a manufacturer</option></select></div>
+                <label><span data-i18n="filaBrain.designation">Product name</span><input name="designation" maxlength="255"></label>
+                <label><span data-i18n="filaBrain.color">Color name</span><input name="manufacturer_color_name" maxlength="255"></label>
+              </div>
+              <label><span data-i18n="filaBrain.productUrl">Product URL (optional)</span><input type="url" name="product_url" maxlength="2048" placeholder="https://…"></label>
             </div>
-            <div class="field-grid">
-              <label>Product URL<input type="url" name="product_url" maxlength="2048" placeholder="https://…"></label>
-              <label>SKU to look up<input name="sku_hint" maxlength="255"></label>
-            </div>
-            <div class="actions">
+            <details id="research-advanced-fields">
+              <summary data-i18n="filaBrain.researchOptions">Search options</summary>
+              <div class="field-grid">
+                <label><span data-i18n="filaBrain.material">Material</span><input name="material_type" maxlength="50"></label>
+                <label><span data-i18n="filaBrain.diameter">Diameter (mm)</span><input name="diameter_mm" type="number" step="any" min="0.01"></label>
+                <div class="form-field"><label for="draft-palette">FilaMan palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select></div>
+                <label>Manufacturer SKU<input name="manufacturer_sku" maxlength="255"></label>
+                <label id="research-sku-hint">SKU to look up<input name="sku_hint" maxlength="255"></label>
+              </div>
+            </details>
+            <div class="actions" id="research-start-actions">
+              <!-- model-picker -->
               <button class="fm-btn fm-btn-primary" type="submit" value="fill">Find specifications</button>
               <button class="fm-btn fm-btn-outline" type="submit" value="standardize" hidden>Standardize this filament</button>
             </div>
@@ -76,11 +82,10 @@
         </div>
       </section>
     </div>
-    <form id="research-follow-up" class="message-composer">
-      <textarea id="research-guidance" rows="2" maxlength="400" aria-label="Follow up on this search" data-i18n-aria-label="filaBrain.followUp" data-i18n-placeholder="filaBrain.followUpHint" placeholder="Try a datasheet, a different store, or focus on empty spool weight" hidden></textarea>
+    <form id="research-follow-up" class="message-composer" hidden>
+      <textarea id="research-guidance" rows="2" maxlength="400" aria-label="Follow up on this search" data-i18n-aria-label="filaBrain.followUp" data-i18n-placeholder="filaBrain.followUpHint" placeholder="Try a datasheet, a different store, or focus on empty spool weight" required></textarea>
       <div class="chat-toolbar">
-        <!-- model-picker -->
-        <button type="submit" class="fm-btn fm-btn-primary chat-send" aria-label="Send follow-up" data-i18n-aria-label="filaBrain.sendFollowUp" hidden>
+        <button type="submit" class="fm-btn fm-btn-primary chat-send" aria-label="Send follow-up" data-i18n-aria-label="filaBrain.sendFollowUp">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
         </button>
       </div>
