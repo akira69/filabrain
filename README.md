@@ -42,6 +42,10 @@ Enable MCP in the plugin settings. Configure the MCP client for Streamable HTTP 
 
 Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for FilaMan, configure the proxy to preserve the public `Host` and overwrite `X-Forwarded-Proto` with the scheme it received. Set `FILABRAIN_MCP_TRUSTED_PROXY_IPS` in the FilaMan process or container environment to the exact source IP of that proxy as seen by FilaMan. Separate multiple proxy IPs with commas. Keep direct clients off the proxy addresses.
 
+### Research through FilaMan's built-in MCP
+
+On a FilaMan build with plugin MCP tool support, enable the built-in MCP server and add `filabrain-research_filament` to the host's `MCP_PLUGIN_READ_TOOLS` environment setting. Restart FilaMan. Connect to `/mcp` with `Authorization: ApiKey <FilaMan API key>` and give the key `filaments:read` access. The tool returns suggestions and sources for review without saving them. It works with FilaBrain's separate endpoint switched off. Use the separate endpoint for pairing a client to an open editor.
+
 ## Verify a package
 
 Run the smoke test with the Python environment from a stock FilaMan checkout.

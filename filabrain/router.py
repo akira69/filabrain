@@ -31,6 +31,24 @@ for routes in (research.router, settings.router, mcp.router, batch_api.router):
     router.include_router(routes)
 
 
+async def _research_tool(args, db, principal):
+    await ensure_schema(db)
+    return await mcp.research_read_tool(args, db, principal)
+
+
+mcp_read_tools = {
+    "research_filament": {
+        "description": (
+            "Research filament specifications by existing filament ID, product identity, SKU, or public product URL. "
+            "Returns source-backed suggestions for review."
+        ),
+        "permission": "filaments:read",
+        "arguments": mcp.ResearchArguments,
+        "handler": _research_tool,
+    },
+}
+
+
 @router.get("/guide-art", include_in_schema=False)
 async def guide_art(_principal: PrincipalDep):
     return FileResponse(Path(__file__).with_name("guide-art.webp"), media_type="image/webp")
