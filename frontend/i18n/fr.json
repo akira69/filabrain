@@ -1,5 +1,7 @@
 {
   "filaBrain": {
+    "clearLibrarySelection": "Effacer la sélection",
+    "libraryInventoryChanged": "La bibliothèque de filaments a changé. Sélectionnez de nouveau vos filaments.",
     "docs": "Guide",
     "chatChipAdd": "Ajouter un filament",
     "chatPromptAdd": "Ouvre le formulaire d’ajout d’un filament.",

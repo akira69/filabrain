@@ -47,9 +47,17 @@ class BatchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ExpectedFilament(BatchInput):
+    id: ID
+    manufacturer_id: ID
+    designation: str
+    material_type: str
+
+
 class CreateBatch(BatchInput):
     filament_ids: Annotated[list[ID], Field(min_length=1, max_length=50)]
     mode: Literal["fill", "standardize"]
+    expected_filaments: Annotated[list[ExpectedFilament], Field(min_length=1, max_length=50)] | None = None
 
 
 class ItemVersion(BatchInput):
@@ -194,7 +202,25 @@ async def create_batch(data: CreateBatch, request: Request, db: DBSession, princ
         selection = selection.with_for_update()
     records = {filament.id: filament for filament in await db.scalars(selection)}
     if len(records) != len(data.filament_ids):
-        raise HTTPException(404, "A selected filament no longer exists")
+        if data.expected_filaments is None:
+            raise HTTPException(404, "A selected filament no longer exists")
+        raise HTTPException(404, {
+            "code": "filament_selection_changed",
+            "message": "A selected filament no longer exists",
+        })
+    if data.expected_filaments is not None:
+        expected_ids = {filament.id for filament in data.expected_filaments}
+        if expected_ids != records.keys() or len(expected_ids) != len(data.expected_filaments):
+            raise HTTPException(422, "Provide one identity per selected filament")
+        for expected in data.expected_filaments:
+            filament = records[expected.id]
+            if (expected.manufacturer_id, expected.designation, expected.material_type) != (
+                filament.manufacturer_id, filament.designation, filament.material_type,
+            ):
+                raise HTTPException(409, {
+                    "code": "filament_selection_changed",
+                    "message": "A selected filament changed. Reload the library and choose again.",
+                })
     batch = Batch(id=uuid4().hex, owner_id=owner_id, mode=data.mode, created_at=now())
     db.add(batch)
     await db.flush()

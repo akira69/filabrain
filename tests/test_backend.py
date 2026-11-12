@@ -271,9 +271,23 @@ async def test_stock_host_batch_claim_and_apply(
     )
     db_session.add(filament)
     await db_session.commit()
+    identity = {
+        "id": filament.id,
+        "manufacturer_id": maker.id,
+        "designation": filament.designation,
+        "material_type": filament.material_type,
+    }
+    stale = await installed.post(
+        f"{BASE}/batches",
+        json={"mode": "fill", "filament_ids": [filament.id],
+              "expected_filaments": [{**identity, "designation": "Old filament"}]},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "filament_selection_changed"
+    await db_session.rollback()
     response = await installed.post(
         f"{BASE}/batches",
-        json={"mode": "fill", "filament_ids": [filament.id]},
+        json={"mode": "fill", "filament_ids": [identity["id"]], "expected_filaments": [identity]},
     )
     assert response.status_code == 200, response.text
     path = f"{BASE}/batches/{response.json()['id']}"
