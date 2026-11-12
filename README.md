@@ -38,7 +38,11 @@ The search service stays on that Docker network and serves JSON results. When a 
 
 ## External MCP connections
 
-Enable MCP in the plugin settings. Configure the MCP client for Streamable HTTP at `/api/v1/filabrain/mcp` on the FilaMan origin. Use a FilaMan API key as the bearer token. The key inherits FilaMan permissions. The plugin checks those permissions for each tool.
+On FilaMan 2.1.0 or later, use the built-in MCP for general inventory work. Go to **Admin → App Settings → AI Assistants (MCP)** for client setup. The built-in endpoint is `/mcp` and uses `Authorization: ApiKey <FilaMan API key>`.
+
+Use FilaBrain's MCP to research filament specifications or send proposals to an open filament editor for review. Turn on **Enable MCP access** in FilaBrain's settings and configure your client for Streamable HTTP at `/api/v1/filabrain/mcp` on the FilaMan origin. Use a FilaMan API key as the bearer token. The plugin checks the key's permissions for each tool.
+
+FilaMan's **Allow write access** setting applies only to the built-in endpoint. FilaBrain's separate **Enable MCP access** switch controls its endpoint, where permitted keys can still create filaments and spools while the built-in server is read-only.
 
 Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for FilaMan, configure the proxy to preserve the public `Host` and overwrite `X-Forwarded-Proto` with the scheme it received. Set `FILABRAIN_MCP_TRUSTED_PROXY_IPS` in the FilaMan process or container environment to the exact source IP of that proxy as seen by FilaMan. Separate multiple proxy IPs with commas. Keep direct clients off the proxy addresses.
 

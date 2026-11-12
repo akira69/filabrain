@@ -28,8 +28,10 @@
     </section>
     <details>
       <summary>External MCP</summary>
-      <p>Turn on <strong>Enable MCP access</strong> in settings and copy the MCP URL. Configure your client for Streamable HTTP on <code>/api/v1/filabrain/mcp</code>. Remote connections use HTTPS.</p>
+      <p>For general inventory work on FilaMan 2.1.0 or later, use the built-in MCP under <strong>Admin → App Settings → AI Assistants (MCP)</strong>. Its endpoint is <code>/mcp</code> and uses <code>Authorization: ApiKey &lt;FilaMan API key&gt;</code>.</p>
+      <p>For filament research and proposals, turn on <strong>Enable MCP access</strong> in FilaBrain's settings and copy the MCP URL. Configure your client for Streamable HTTP on <code>/api/v1/filabrain/mcp</code>. Remote connections use HTTPS.</p>
       <p>Send <code>Authorization: Bearer &lt;FilaMan API key&gt;</code>. The key controls access to tools such as <code>find_filaments</code>, <code>research_filament</code>, <code>create_filament</code> and <code>create_spool</code>. Start with <code>find_filaments</code> to verify the connection.</p>
+      <p>FilaMan's <strong>Allow write access</strong> setting applies only to the built-in endpoint. FilaBrain's separate <strong>Enable MCP access</strong> switch controls its endpoint, where permitted keys can still create filaments and spools while the built-in server is read-only.</p>
       <p>To send proposals to an open editor draft, use <strong>Advanced options → Pair a client</strong> in the research drawer. Its separate bearer token expires in 15 minutes.</p>
     </details>
     <details>
