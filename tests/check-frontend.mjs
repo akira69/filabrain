@@ -30,10 +30,17 @@ try {
   let searchUrl = ''
   let chatModelId = 'fixture:default'
   let canConfigure = true
+  let modelsUnavailable = false
+  let hostPicker = false
   await page.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
     if (path.startsWith('/plugin-page/')) return route.fulfill({ contentType: 'text/html', body: html })
+    if (path === '/filament-picker/' && hostPicker) return route.fulfill({ contentType: 'text/html', body: `
+      <label data-filament-picker><input type="checkbox"> Fixture PLA</label>
+      <script>document.querySelector('input').onchange = event => parent.postMessage({
+        type: 'filaman:filament-picker-selection', filament_ids: event.target.checked ? [10] : [],
+      }, location.origin)</script>` })
     if (path === '/selection-fixture') return route.fulfill({ contentType: 'text/html', body: `
       <iframe sandbox="allow-scripts allow-same-origin allow-forms" src="${url}?filament_host=selection"></iframe>
       <script>window.addEventListener('message', event => {
@@ -57,7 +64,9 @@ try {
       </script>` })
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: chatModelId,
       can_create: true, can_update: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
-    if (path.endsWith('/models')) return route.fulfill({ json: { models: ['fixture:default', 'fixture:alternate'] } })
+    if (path.endsWith('/models')) return modelsUnavailable
+      ? route.fulfill({ status: 502, json: {} })
+      : route.fulfill({ json: { models: ['fixture:default', 'fixture:alternate'] } })
     if (path.endsWith('/chat')) {
       assert.equal(req.postDataJSON().messages[0].content, 'Compare these materials')
       assert.equal(req.postDataJSON().model_id, 'fixture:alternate')
@@ -158,6 +167,26 @@ try {
   assert.equal(await setupModel.isVisible(), false)
   canConfigure = true
   chatModelId = 'fixture:default'
+  modelsUnavailable = true
+  await page.reload()
+  const warning = page.getByRole('link', { name: 'Could not load other models.' })
+  await warning.waitFor()
+  const pickerButton = page.locator('[data-chat-form] [data-model-trigger]')
+  const warningBounds = await warning.boundingBox()
+  const pickerBounds = await pickerButton.boundingBox()
+  assert.ok(warningBounds.x >= pickerBounds.x + pickerBounds.width)
+  assert.equal(await warning.evaluate(el => getComputedStyle(el).color), 'rgb(255, 211, 107)')
+  assert.equal(await warning.getAttribute('href'), '?tab=settings')
+  await warning.press('Enter')
+  assert.equal(await modelUrl.evaluate(el => el === document.activeElement), true)
+
+  canConfigure = false
+  await page.reload()
+  await page.getByText('Could not load other models.', { exact: true }).waitFor()
+  assert.equal(await warning.count(), 0)
+
+  canConfigure = true
+  modelsUnavailable = false
   await page.reload()
   const chatModel = page.getByRole('button', { name: /^Model for this conversation/ })
   const chatMenu = page.getByRole('menu', { name: 'Model for this conversation' })
@@ -176,9 +205,10 @@ try {
   await page.getByRole('textbox', { name: 'Your question' }).fill('Compare these materials')
   await page.getByRole('button', { name: 'Send message' }).click()
   await page.getByText('PLA is easier to print.').waitFor()
-  const guide = page.getByRole('dialog', { name: 'FilaBrain guide' })
+  const guide = page.getByRole('dialog', { name: 'Guide' })
   const headerGuide = page.locator('#plugin-header').getByRole('button', { name: 'Guide' })
   const draft = page.getByRole('textbox', { name: 'Your question' })
+  assert.equal(await draft.getAttribute('placeholder'), 'Ask FilaBrain…')
   await draft.fill('Unsent follow-up')
   const chatCard = page.locator('.research-chat')
   const fullWidth = (await chatCard.boundingBox()).width
@@ -318,6 +348,20 @@ try {
     material_subgroup: { old: null, value: 'Silk' },
   }])
   assert.equal(writes.length, 1)
+
+  hostPicker = true
+  await page.goto(`${url}?tab=library`)
+  const picker = page.frameLocator('#library-picker')
+  const pickFilament = picker.getByRole('checkbox', { name: 'Fixture PLA' })
+  await pickFilament.check()
+  await page.getByText('1 of 50 selected').waitFor()
+  assert.equal(await page.getByLabel('Search filament library').isVisible(), false)
+  await pickFilament.uncheck()
+  await page.getByText('0 of 50 selected').waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Start research' }).isDisabled(), true)
+  await pickFilament.check()
+  await page.getByRole('button', { name: 'Start research' }).click()
+  await page.getByRole('heading', { name: 'Review queue' }).waitFor()
 
   await page.goto('https://fila.test/selection-fixture')
   await frame.getByText('1 of 50 selected').waitFor()

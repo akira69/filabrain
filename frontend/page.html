@@ -104,14 +104,17 @@
     <div class="fm-card">
       <h2>Research existing filaments</h2>
       <p id="library-hint" class="fm-field-hint">Select up to 50 filaments. Review their proposals before applying changes.</p>
-      <form id="library-search" class="actions">
-        <label>Search filament library <input name="search" type="search" maxlength="200"></label>
-        <button type="submit" class="fm-btn fm-btn-outline">Search</button>
-      </form>
-      <div id="library-records"></div>
-      <div id="library-pages" class="actions" hidden>
-        <button type="button" class="fm-btn fm-btn-outline" id="library-prev">Previous</button>
-        <button type="button" class="fm-btn fm-btn-outline" id="library-next">Next</button>
+      <iframe id="library-picker" title="Filament library" hidden></iframe>
+      <div id="library-fallback" hidden>
+        <form id="library-search" class="actions">
+          <label>Search filament library <input name="search" type="search" maxlength="200"></label>
+          <button type="submit" class="fm-btn fm-btn-outline">Search</button>
+        </form>
+        <div id="library-records"></div>
+        <div id="library-pages" class="actions" hidden>
+          <button type="button" class="fm-btn fm-btn-outline" id="library-prev">Previous</button>
+          <button type="button" class="fm-btn fm-btn-outline" id="library-next">Next</button>
+        </div>
       </div>
       <form id="library-research">
         <p id="library-selected" role="status"></p>

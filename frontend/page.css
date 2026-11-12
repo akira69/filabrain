@@ -82,6 +82,10 @@ dialog::backdrop { background: #0008; }
 dialog dl { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; }
 dialog dd { margin: 0; overflow-wrap: anywhere; }
 .fm-modal-actions { display: flex; justify-content: end; gap: .5rem; padding-block-start: .75rem; }
+#library-picker { display: block; width: 100%; height: clamp(16rem, 50dvh, 36rem); border: 0; }
+#library-research { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; margin-block-start: .75rem; }
+#library-selected { align-self: center; margin: 0; }
+#library-status { width: 100%; margin: 0; }
 #library-records, #research-results { margin-block: .8rem; }
 #library-records label, .proposal-row > label { display: flex; align-items: baseline; gap: .5rem; padding: .35rem 0; }
 .proposal-row { margin: .7rem 0; border-top: 1px solid var(--border); padding: .65rem 0; overflow-wrap: anywhere; }

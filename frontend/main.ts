@@ -105,13 +105,33 @@ function mountLibrary(context?: SelectionContext) {
   }
 
   if (context) {
-    search.hidden = true
     element('library-hint').textContent = 'Review proposals for the filaments selected in FilaMan before applying changes.'
   } else {
     search.addEventListener('submit', event => { event.preventDefault(); currentPage = 1; void load() })
     prev.addEventListener('click', () => { currentPage--; void load() })
     next.addEventListener('click', () => { currentPage++; void load() })
-    void load()
+    const picker = element<HTMLIFrameElement>('library-picker')
+    window.addEventListener('message', event => {
+      if (picker.hidden || event.source !== picker.contentWindow || event.origin !== location.origin ||
+          event.data?.type !== 'filaman:filament-picker-selection') return
+      const ids: unknown = event.data.filament_ids
+      if (!Array.isArray(ids) || ids.length > 50 ||
+          !ids.every(id => Number.isSafeInteger(id) && id > 0)) return
+      selected.clear()
+      for (const id of ids) selected.add(id)
+      updateSelection()
+    })
+    message.textContent = 'Loading filaments…'
+    picker.addEventListener('load', () => {
+      if (picker.contentDocument?.querySelector('[data-filament-picker]')) {
+        message.textContent = ''
+        picker.hidden = false
+      } else {
+        element('library-fallback').hidden = false
+        void load()
+      }
+    }, { once: true })
+    picker.src = '/filament-picker/'
   }
 
   form.addEventListener('submit', async event => {

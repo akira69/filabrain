@@ -139,7 +139,7 @@ export async function mountChat(openSettings?: () => void) {
     if (!availability.can_chat) {
       status.textContent = t('filaBrain.chatUnavailable')
     } else {
-      modelPicker = mountModelPicker(form, availability.chat_model)
+      modelPicker = mountModelPicker(form, availability.chat_model, openSettings)
       function showComposer(model?: string) {
         form.hidden = !model
         setup.hidden = !!model

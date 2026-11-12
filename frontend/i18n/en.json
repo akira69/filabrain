@@ -1,7 +1,6 @@
 {
   "filaBrain": {
     "docs": "Guide",
-    "docsTitle": "FilaBrain guide",
     "chatChipAdd": "Add a filament",
     "chatPromptAdd": "Open the Add Filament form.",
     "chatNew": "New chat",

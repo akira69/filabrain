@@ -1,12 +1,21 @@
 import { api } from './api'
 import { t } from './i18n'
 
-export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | null) {
+export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | null, openSettings?: () => void) {
   const trigger = form.querySelector<HTMLButtonElement>('[data-model-trigger]')!
   const name = form.querySelector<HTMLElement>('[data-model-name]')!
   const menu = form.querySelector<HTMLElement>('[data-model-menu]')!
   const options = form.querySelector<HTMLElement>('[data-model-options]')!
   const status = form.querySelector<HTMLElement>('[data-model-picker-status]')!
+  const warning = status.querySelector('a')!
+  if (openSettings) {
+    warning.href = '?tab=settings'
+    warning.addEventListener('click', event => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      event.preventDefault()
+      openSettings()
+    })
+  }
   let busy = false
   let revision = 0
   let activeDefault = defaultModel
@@ -112,7 +121,7 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
       updateDisabled()
     } catch {
       if (current !== revision) return
-      status.textContent = t('filaBrain.otherModelsUnavailable')
+      warning.textContent = t('filaBrain.otherModelsUnavailable')
       status.hidden = false
     }
   }
