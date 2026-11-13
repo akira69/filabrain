@@ -102,8 +102,7 @@ dialog dd { margin: 0; overflow-wrap: anywhere; }
 #research-start-actions .chat-model-trigger { border-color: var(--border); }
 #research-conversation { margin-block: 1rem; }
 #research-transcript { gap: .65rem; }
-.research-assistant { padding-inline: .25rem; }
-#research-reply { margin-block-start: .75rem; }
+#research-reply { margin-block-start: .75rem; background: var(--chat-reply-bg); }
 #research-reply #research-results { margin-block-start: 0; }
 #save-filament:disabled { background: var(--bg-soft); border-color: var(--border); color: var(--text-muted); }
 #research-follow-up {

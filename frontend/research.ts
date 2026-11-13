@@ -304,7 +304,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
 
   function message(text: string, fromUser = false) {
     const item = document.createElement('p')
-    item.className = fromUser ? 'chat-message chat-user' : 'chat-message research-assistant'
+    item.className = fromUser ? 'chat-message chat-user' : 'chat-message chat-assistant'
     item.textContent = text
     transcript.append(item)
     return item
