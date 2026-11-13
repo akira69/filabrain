@@ -319,6 +319,6 @@ async def test_search(data: SettingsInput, _principal=admin):
     try:
         if not await search_web(data.search_url, "3D printing filament"):
             raise ValueError("No results returned")
-    except (httpx.HTTPError, ValueError, AttributeError, TypeError):
+    except (httpx.HTTPError, TimeoutError, ValueError, AttributeError, TypeError):
         raise HTTPException(502, "SearXNG returned no usable results. Check the URL, JSON output, and search engines.") from None
     return {"ok": True}

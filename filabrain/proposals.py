@@ -1380,7 +1380,7 @@ async def research_products(
         if term and search_available:
             try:
                 return await search_web(config["search_url"], term)
-            except (httpx.HTTPError, ValueError, AttributeError, TypeError) as error:
+            except (httpx.HTTPError, TimeoutError, ValueError, AttributeError, TypeError) as error:
                 if not isinstance(error, SearchEnginesUnavailable):
                     search_available = False
                 if search_issue is None:

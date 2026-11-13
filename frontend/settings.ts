@@ -196,6 +196,9 @@ export async function mountSettings() {
     if (action === 'save' && save.disabled) return
     const requestedConnection = connection()
     const config = values()
+    const stillCurrent = () => action === 'save' || (action === 'test-search'
+      ? config.search_url === values().search_url
+      : requestedConnection === connection() && (action === 'models' || config.model_id === values().model_id))
     const payload = action === 'test-search' ? { search_url: config.search_url }
       : action === 'save' ? config : {
         model_url: config.model_url, model_id: config.model_id, api_key: config.api_key, clear_key: config.clear_key,
@@ -215,9 +218,9 @@ export async function mountSettings() {
         body: JSON.stringify(payload),
       })
       const data = await response.json()
+      if (!stillCurrent()) return
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : t('filaBrain.failed'))
       if (action === 'models') {
-        if (requestedConnection !== connection()) return
         models = data.models
         showModels()
         feedback.textContent = t(data.models.length ? 'filaBrain.modelsLoaded' : 'filaBrain.noModels')
@@ -230,7 +233,7 @@ export async function mountSettings() {
       feedback.textContent = t(action === 'save' ? 'filaBrain.settingsSaved'
         : action === 'test-search' ? 'filaBrain.searchTestPassed' : 'filaBrain.testPassed')
     } catch (error) {
-      feedback.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
+      if (stillCurrent()) feedback.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
     } finally {
       inputs.forEach(input => { input.disabled = false })
       if (action === 'save') saving = false
@@ -257,6 +260,9 @@ export async function mountSettings() {
     load.addEventListener('click', () => void send('models'))
     form.addEventListener('input', event => {
       if (event.target === modelList) return
+      const name = (event.target as HTMLInputElement).name
+      if (name === 'search_url') searchMessage.textContent = ''
+      if (['model_url', 'model_id', 'api_key', 'clear_key'].includes(name)) modelMessage.textContent = ''
       if (['model_url', 'api_key', 'clear_key'].includes((event.target as HTMLInputElement).name)) {
         models = []
         showModels()
@@ -264,6 +270,7 @@ export async function mountSettings() {
       refresh()
     })
     modelList.addEventListener('change', () => {
+      modelMessage.textContent = ''
       if (modelList.value) field('model_id').value = modelList.value
       showModels()
       refresh()

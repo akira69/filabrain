@@ -90,6 +90,18 @@ async def test_search_connection_checks_unsaved_url_and_reports_no_results(insta
     assert (await installed.get(f"{BASE}/settings")).json()["search_url"] == before
 
 
+@pytest.mark.parametrize("response", [[], {"results": {}}, {"results": [], "padding": "x" * (512 * 1024)}])
+async def test_search_web_rejects_invalid_or_oversized_results(monkeypatch, response):
+    from httpx import Response
+    from filabrain import sources
+
+    monkeypatch.setattr(sources.httpx, "AsyncClient", lambda **kwargs: AsyncClient(
+        transport=MockTransport(lambda _request: Response(200, json=response)), **kwargs,
+    ))
+    with pytest.raises(ValueError, match="SearXNG"):
+        await sources.search_web("https://searxng.test", "PLA")
+
+
 async def test_research_sources_keep_defaults_and_survive_older_settings_clients(installed):
     url = f"{BASE}/settings"
     current = (await installed.get(url)).json()

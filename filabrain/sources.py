@@ -21,6 +21,7 @@ DEFAULT_SUPPLIER_DOWNLOAD_MIB = 8
 DEFAULT_SUPPLIER_DOWNLOAD_BYTES = DEFAULT_SUPPLIER_DOWNLOAD_MIB * 1024 * 1024
 SUPPLIER_TOO_LARGE = "Supplier page is too large"
 MAX_TEXT = 12_000
+MAX_SEARCH_RESPONSE_BYTES = 512 * 1024
 SHARED_SPEC = re.compile(r"\b(?:applies to all variants|same for all variants|all variants share)\b", re.IGNORECASE)
 _supplier_cooldowns = TTLCache()
 _product_sitemaps = TTLCache()
@@ -520,17 +521,25 @@ async def paramount_product_urls() -> tuple[str, ...]:
 
 
 async def search_web(origin: str, query: str) -> list[str]:
-    async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
-        response = await client.get(
-            f"{origin.rstrip('/')}/search", params={"q": query, "format": "json"}
-        )
+    async with (
+        asyncio.timeout(8),
+        httpx.AsyncClient(timeout=5, trust_env=False) as client,
+        client.stream("GET", f"{origin.rstrip('/')}/search", params={"q": query, "format": "json"}) as response,
+    ):
         response.raise_for_status()
-        data = response.json()
-    if not data.get("results") and data.get("unresponsive_engines"):
+        raw = bytearray()
+        async for chunk in response.aiter_bytes():
+            if len(raw) + len(chunk) > MAX_SEARCH_RESPONSE_BYTES:
+                raise ValueError("SearXNG response is too large")
+            raw.extend(chunk)
+        data = json.loads(raw)
+    if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+        raise ValueError("Expected SearXNG JSON search results")
+    if not data["results"] and data.get("unresponsive_engines"):
         raise SearchEnginesUnavailable("Upstream search engines failed to return results")
     return [
         row["url"]
-        for row in data.get("results", [])[:3]
+        for row in data["results"][:3]
         if isinstance(row, dict) and isinstance(row.get("url"), str)
     ]
 
