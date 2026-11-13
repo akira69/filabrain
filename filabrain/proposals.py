@@ -1161,7 +1161,6 @@ async def research_products(
         issues.extend({"code": "duplicate", "filament_id": ident} for ident in duplicates)
         return proposal
     _, config = await config_record(db)
-    disabled_sources = set(config["disabled_sources"])
     if release_read:
         # The worker supplies a detached authorized snapshot; do not hold a read
         # transaction across supplier, catalog or model calls.
@@ -1470,12 +1469,9 @@ async def research_products(
                 continue
             add(field, value, [{"url": url, "title": "Linked FilamentDB spool profile", "evidence": str(value)}], primary=True)
 
-    catalog_lookups = []
-    if "filamandb" not in disabled_sources:
-        catalog_lookups.extend((from_catalog("FilaManDB"), from_linked_spool()))
-    if "open_filament_database" not in disabled_sources:
-        catalog_lookups.append(from_catalog("Open Filament Database"))
-    await asyncio.gather(*catalog_lookups)
+    await asyncio.gather(
+        from_catalog("FilaManDB"), from_catalog("Open Filament Database"), from_linked_spool()
+    )
     all_matches = [row for matches, _, _ in catalog_matches for row in matches]
     candidates = [candidate for _, candidate in all_matches]
     variants = {
@@ -1628,7 +1624,7 @@ async def research_products(
         pages.update(await check_pages(supplier_urls))
     pages.update(await check_pages(preferred_urls))
     await check_datasheets(pages)
-    if "wayback" not in disabled_sources and not any(
+    if not any(
         page and _on_manufacturer_site(page.url, manufacturer_domain)
         and (
             _supplier_scopes(identity, replace(page, manufacturer_page=True), snapshot)

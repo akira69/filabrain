@@ -77,14 +77,13 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
 async def test_research_sources_keep_defaults_and_survive_older_settings_clients(installed):
     url = f"{BASE}/settings"
     current = (await installed.get(url)).json()
-    assert current["disabled_sources"] == []
     assert current["supplier_sites"] == []
     supplier_sites = [
         {"domain": " WWW.Filament.example. ", "enabled": True},
         {"domain": "other.example", "enabled": False},
     ]
     response = await installed.put(url, json={
-        "disabled_sources": ["open_filament_database"], "supplier_sites": supplier_sites,
+        "supplier_sites": supplier_sites,
     })
     assert response.status_code == 200, response.text
     supplier_sites[0]["domain"] = "filament.example"
@@ -92,7 +91,6 @@ async def test_research_sources_keep_defaults_and_survive_older_settings_clients
     assert (await installed.put(url, json={})).status_code == 200
     saved = (await installed.get(url)).json()
     assert saved["supplier_sites"] == supplier_sites
-    assert saved["disabled_sources"] == ["open_filament_database"]
 
 
 @pytest.mark.parametrize("domain", ["https://example.org", "localhost", "192.168.0.1", "example.org path"])
@@ -103,9 +101,10 @@ async def test_research_settings_reject_non_domain_sources(installed, domain):
     assert response.status_code == 422
 
 
-async def test_research_uses_enabled_supplier_domains_and_skips_disabled_catalogs(installed, monkeypatch):
+async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs(installed, monkeypatch):
     from filabrain import proposals
 
+    # A client using the earlier preview must not be able to turn off the catalogs.
     response = await installed.put(f"{BASE}/settings", json={
         "search_url": "http://searxng:8080",
         "disabled_sources": ["filamandb", "open_filament_database"],
@@ -117,6 +116,7 @@ async def test_research_uses_enabled_supplier_domains_and_skips_disabled_catalog
     assert response.status_code == 200
     queries = []
     fetched = []
+    catalogs = set()
     supplier_url = "https://shop.supplier.example/fixture-pla"
 
     async def search(_url, query):
@@ -126,10 +126,12 @@ async def test_research_uses_enabled_supplier_domains_and_skips_disabled_catalog
         return []
 
     async def catalog(_identity):
-        pytest.fail("FilaManDB is disabled")
+        catalogs.add("filamandb")
+        return [], "", True
 
     async def ofd(_manufacturer):
-        pytest.fail("Open Filament Database is disabled")
+        catalogs.add("open_filament_database")
+        return [], ""
 
     async def fetch(url):
         fetched.append(url)
@@ -146,6 +148,7 @@ async def test_research_uses_enabled_supplier_domains_and_skips_disabled_catalog
     assert "site:supplier.example Fixture Brand Fixture PLA" in queries
     assert all("disabled.example" not in query for query in queries)
     assert fetched == [supplier_url]
+    assert catalogs == {"filamandb", "open_filament_database"}
 
 
 async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
@@ -605,15 +608,14 @@ async def test_research_uses_only_the_linked_spool_profile(installed, db_session
     assert "default_spool_weight_g" not in values
 
 
-@pytest.mark.parametrize(("error", "enabled", "should_archive"), [
-    ("HTTP 403 (access denied)", True, True),
-    ("HTTP 429 (rate limited)", True, True),
-    ("Automated access blocked", True, True),
-    ("HTTP 401", True, False),
-    ("HTTP 403 (access denied)", False, False),
+@pytest.mark.parametrize(("error", "should_archive"), [
+    ("HTTP 403 (access denied)", True),
+    ("HTTP 429 (rate limited)", True),
+    ("Automated access blocked", True),
+    ("HTTP 401", False),
 ])
 async def test_blocked_manufacturer_page_can_use_a_dated_capture(
-    installed, db_session, monkeypatch, error, enabled, should_archive,
+    installed, db_session, monkeypatch, error, should_archive,
 ):
     from filabrain import proposals
     from filabrain.sources import Evidence
@@ -646,9 +648,6 @@ async def test_blocked_manufacturer_page_can_use_a_dated_capture(
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
     monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
-    if not enabled:
-        response = await installed.put(f"{BASE}/settings", json={"disabled_sources": ["wayback"]})
-        assert response.status_code == 200
     maker = Manufacturer(name="Fixture Manufacturer", url=site)
     db_session.add(maker)
     await db_session.flush()

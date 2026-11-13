@@ -12,12 +12,19 @@
 .research-web-search { border-block-start: 1px solid var(--border); padding-block-start: .75rem; }
 .research-web-search h3 { margin: 0; font-size: 1rem; }
 .research-web-search p { margin-block: .25rem .65rem; }
-.research-sources fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
-.research-source-list { display: grid; gap: .4rem; }
-.research-source-list + label { display: block; margin-block-start: .85rem; }
-.research-source-list label, .research-supplier-row { display: flex; align-items: center; gap: .5rem; }
-.research-supplier-row label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.research-supplier-add { display: flex; flex-wrap: wrap; gap: .5rem; margin-block-start: .5rem; }
-.research-supplier-add input { flex: 1 1 12rem; min-width: 0; }
+.research-source-box { margin-block-start: .6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.research-source-box h4 { margin: 0; font-size: .875rem; font-weight: 650; }
+.research-source-box > h4 { padding: .75rem .85rem .25rem; }
+.research-source-list { list-style: none; margin: 0; padding: 0 .85rem; }
+.research-source-list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding-block: .45rem; }
+.research-source-list li + li { border-block-start: 1px solid var(--border); }
+.research-source-list li > span + span { flex: none; color: var(--text-muted); font-size: .8125rem; }
+.research-source-box fieldset { border: 0; border-block-start: 1px solid var(--border); padding: .75rem .85rem .85rem; margin: 0; min-width: 0; background: var(--input-bg); }
+.research-source-box fieldset .research-source-list { padding: 0; margin-block-end: .55rem; }
+.research-source-box label[for] { font-size: .875rem; }
+.research-supplier-row label { display: flex; align-items: center; gap: .5rem; flex: 1; min-width: 0; min-height: 2.75rem; overflow-wrap: anywhere; cursor: pointer; }
+.research-supplier-add { display: flex; flex-wrap: wrap; gap: .5rem; margin-block-start: .25rem; }
+.research-supplier-add input { flex: 1 1 10rem; min-width: 0; }
+.research-supplier-row button, .research-supplier-add button, .research-supplier-add input { min-height: 2.75rem; }
 .research-manual-model > summary { color: var(--text-muted); cursor: pointer; }
 .research-manual-model > label { margin-block-start: .5rem; }

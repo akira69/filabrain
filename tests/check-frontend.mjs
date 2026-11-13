@@ -29,7 +29,6 @@ try {
   let mcpEnabled = false
   let searchUrl = ''
   let supplierSites = []
-  let disabledSources = []
   let chatModelId = 'fixture:default'
   let canConfigure = true
   let modelsUnavailable = false
@@ -108,13 +107,12 @@ try {
       if (settings) {
         searchUrl = settings.search_url
         supplierSites = settings.supplier_sites ?? supplierSites
-        disabledSources = settings.disabled_sources ?? disabledSources
         if (settings.model_id) chatModelId = settings.model_id
       }
       return route.fulfill({ json: {
         model_url: settings?.model_url || '', model_id: settings?.model_id || '',
         search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
-        supplier_sites: supplierSites, disabled_sources: disabledSources,
+        supplier_sites: supplierSites,
       } })
     }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
@@ -286,11 +284,11 @@ try {
   const searchField = page.getByRole('textbox', { name: 'SearXNG URL (optional)' })
   await page.getByText(/Some suppliers can be researched using/).waitFor()
   const sources = page.getByRole('region', { name: 'Research sources' })
-  const ofdSource = sources.getByRole('checkbox', { name: 'Open Filament Database' })
-  const searchSource = sources.getByRole('checkbox', { name: 'SearXNG web search' })
-  assert.equal(await ofdSource.isChecked(), true)
-  assert.equal(await searchSource.isChecked(), false)
-  await ofdSource.uncheck()
+  const builtIn = sources.getByRole('list', { name: 'Built-in sources' })
+  await builtIn.getByText('FilaManDB', { exact: true }).waitFor()
+  await builtIn.getByText('Open Filament Database', { exact: true }).waitFor()
+  assert.equal(await builtIn.getByRole('checkbox').count(), 0)
+  await builtIn.getByText('Not configured', { exact: true }).waitFor()
   await sources.getByRole('textbox', { name: 'Supplier domain' }).fill('shop.example.org')
   await sources.getByRole('button', { name: 'Add supplier' }).click()
   const supplier = sources.getByRole('checkbox', { name: 'shop.example.org' })
@@ -307,8 +305,7 @@ try {
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   await searchField.waitFor()
   assert.equal(await searchField.inputValue(), searchUrl)
-  assert.equal(await searchSource.isChecked(), true)
-  assert.equal(await ofdSource.isChecked(), false)
+  await builtIn.getByText('Configured', { exact: true }).waitFor()
   assert.equal(await supplier.isChecked(), true)
   await supplier.uncheck()
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()

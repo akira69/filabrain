@@ -1,7 +1,6 @@
 import { initI18n, t } from './shared/i18n'
 import { researchHeaders } from './shared/filabrain'
 
-const sourceNames = ['filamandb', 'open_filament_database', 'wayback'] as const
 const supplierDomain = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/
 const maxSupplierSites = 4
 type SupplierSite = { domain: string; enabled: boolean }
@@ -19,7 +18,7 @@ export async function mountSettings() {
   const enableSearch = document.getElementById('research-enable-search')!
   const searchSetup = document.getElementById('research-search-setup')!
   const sourceControls = form.querySelector<HTMLFieldSetElement>('#research-source-controls')!
-  const searchSource = form.querySelector<HTMLInputElement>('#research-search-source')!
+  const searchSource = document.getElementById('research-search-source')!
   const supplierSites = document.getElementById('research-supplier-sites')!
   const domainInput = form.querySelector<HTMLInputElement>('#research-supplier-domain')!
   const addSupplier = form.querySelector<HTMLButtonElement>('#research-add-supplier')!
@@ -41,7 +40,6 @@ export async function mountSettings() {
     model_url: field('model_url').value.trim(), model_id: field('model_id').value.trim(),
     search_url: field('search_url').value.trim(), api_key: field('api_key').value || null,
     clear_key: field('clear_key').checked,
-    disabled_sources: sourceNames.filter(name => !field(name).checked),
     supplier_sites: sites,
   })
   const connection = () => JSON.stringify([values().model_url, values().api_key, values().clear_key])
@@ -87,13 +85,13 @@ export async function mountSettings() {
     test.disabled = load.disabled || !config.model_id
     modelList.disabled = busy || !ready
     sourceControls.disabled = busy || !ready
-    searchSource.checked = !!config.search_url
     domainInput.disabled = addSupplier.disabled = sites.length >= maxSupplierSites
   }
 
   function renderSupplierSites() {
+    supplierSites.hidden = sites.length === 0
     supplierSites.replaceChildren(...sites.map(site => {
-      const row = document.createElement('div')
+      const row = document.createElement('li')
       row.className = 'research-supplier-row'
       const label = document.createElement('label')
       const checkbox = document.createElement('input')
@@ -168,7 +166,7 @@ export async function mountSettings() {
 
   function fill(config: {
     model_url: string; model_id: string; search_url: string; has_key: boolean
-    disabled_sources?: string[]; supplier_sites?: SupplierSite[]
+    supplier_sites?: SupplierSite[]
   }) {
     for (const key of ['model_url', 'model_id', 'search_url'] as const) field(key).value = config[key]
     enableSearch.hidden = !!config.search_url
@@ -176,7 +174,7 @@ export async function mountSettings() {
     field('api_key').value = ''
     field('clear_key').checked = false
     keyState.textContent = t(config.has_key ? 'filaBrain.keyConfigured' : 'filaBrain.keyOptional')
-    for (const name of sourceNames) field(name).checked = !config.disabled_sources?.includes(name)
+    searchSource.textContent = t(config.search_url ? 'filaBrain.sourceConfigured' : 'filaBrain.sourceNotConfigured')
     sites = config.supplier_sites ?? []
     renderSupplierSites()
     supplierMessage.textContent = sites.length >= maxSupplierSites ? t('filaBrain.supplierLimit') : ''

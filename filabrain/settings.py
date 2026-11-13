@@ -1,7 +1,6 @@
 import json
 import re
 from os import getenv
-from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -19,7 +18,6 @@ from .sources import Evidence
 
 router = APIRouter(tags=["FilaBrain"])
 admin = RequirePermission("admin:plugins_manage")
-ResearchSource = Literal["filamandb", "open_filament_database", "wayback"]
 SUPPLIER_DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]")
 
 
@@ -67,7 +65,6 @@ class SettingsInput(BaseModel):
     api_key: SecretStr | None = Field(None, max_length=1000)
     clear_key: bool = False
     mcp_enabled: StrictBool | None = None
-    disabled_sources: list[ResearchSource] = Field(default_factory=list, max_length=3)
     supplier_sites: list[SupplierSite] = Field(default_factory=list, max_length=4)
 
     @field_validator("supplier_sites")
@@ -128,7 +125,6 @@ async def config_record(db: DBSession) -> tuple[FilamentResearchSettings | None,
         "model_url": _deployment_model_url(),
         "model_id": getenv("FILABRAIN_MODEL_ID", "").strip(),
         "search_url": _deployment_search_url(),
-        "disabled_sources": [],
         "supplier_sites": [],
     }
     config = fallback | (row.config or {} if row else {})
@@ -150,7 +146,6 @@ def public_config(config: dict, mcp_enabled: bool) -> dict:
         "model_url": config["model_url"],
         "model_id": config["model_id"],
         "search_url": config["search_url"],
-        "disabled_sources": config["disabled_sources"],
         "supplier_sites": config["supplier_sites"],
         "mcp_enabled": mcp_enabled,
         "has_key": bool(config.get("encrypted_key"))
@@ -175,9 +170,8 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
     await lock_research_plugin(db)
     row, old = await config_record(db)
     config = data.model_dump(exclude={"api_key", "clear_key", "mcp_enabled"})
-    for key in ("disabled_sources", "supplier_sites"):
-        if key not in data.model_fields_set:
-            config[key] = old[key]
+    if "supplier_sites" not in data.model_fields_set:
+        config["supplier_sites"] = old["supplier_sites"]
     if bool(data.model_id) != bool(data.model_url):
         raise HTTPException(422, "Enter both a model URL and a model ID")
     if data.api_key and data.api_key.get_secret_value() and not data.clear_key:
