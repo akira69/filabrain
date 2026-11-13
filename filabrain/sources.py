@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, replace
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import quote, urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -23,6 +23,15 @@ SUPPLIER_TOO_LARGE = "Supplier page is too large"
 MAX_TEXT = 12_000
 MAX_SEARCH_RESPONSE_BYTES = 512 * 1024
 SHARED_SPEC = re.compile(r"\b(?:applies to all variants|same for all variants|all variants share)\b", re.IGNORECASE)
+DATASHEET_LABEL = re.compile(
+    r"technical[ _-]*data[ _-]*sheet|(?<![^\W_])tds(?![^\W_])", re.IGNORECASE
+)
+DATASHEET_HEADING = re.compile(r"(?:technical\s+data\s*sheet(?:\s*\(tds\))?|tds)\s*:?", re.IGNORECASE)
+SAFETY_SHEET_LABEL = re.compile(
+    r"(?<![^\W_])(?:safety[ _-]*data[ _-]*sheet|m?sds)(?![^\W_])", re.IGNORECASE
+)
+HTML_HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+DOCUMENT_SECTIONS = {"main", "article", "section", "aside", "nav", "footer"}
 _supplier_cooldowns = TTLCache()
 _product_sitemaps = TTLCache()
 
@@ -111,8 +120,14 @@ class _ProductPage(HTMLParser):
         self.title: list[str] = []
         self.products: list[dict] = []
         self.datasheets: list[str] = []
+        self.heading_datasheets: list[str] = []
         self._pdf_link: str | None = None
         self._link_text: list[str] = []
+        self._heading_tag: str | None = None
+        self._heading_depth = 0
+        self._heading_text: list[str] = []
+        self._document_depth = 0
+        self._datasheet_depth: int | None = None
         self._skip: str | None = None
         self._in_title = False
         self._structured: list[str] | None = None
@@ -126,6 +141,17 @@ class _ProductPage(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         if self._skip is None:
+            if tag in DOCUMENT_SECTIONS:
+                self._document_depth += 1
+                if tag in ("aside", "nav", "footer"):
+                    self._datasheet_depth = None
+            if tag == self._heading_tag:
+                self._heading_depth += 1
+            elif tag in HTML_HEADINGS or dict(attrs).get("role") == "heading":
+                self._heading_tag = tag
+                self._heading_depth = 1
+                self._heading_text.clear()
+                self._datasheet_depth = None
             if tag == self._main_tag:
                 self._main_depth += 1
             elif self._main_tag is None and (tag == "main" or dict(attrs).get("role") == "main"):
@@ -133,11 +159,19 @@ class _ProductPage(HTMLParser):
                 self._main_tag = tag
                 self._main_depth = 1
         if tag == "a" and self._skip is None:
-            href = dict(attrs).get("href") or ""
+            attributes = dict(attrs)
+            href = (attributes.get("href") or "").strip()
+            filename = attributes.get("download") or ""
+            decoded_href = unquote(href)
             # Keep only PDF links. The supplier fetcher validates every URL and redirect.
-            if re.search(r"\.pdf(?:[?#]|$)", href, re.IGNORECASE):
+            if href and not href.startswith("#") and (
+                re.search(r"\.pdf(?:[?#]|$)", decoded_href, re.IGNORECASE)
+                or filename.lower().endswith(".pdf")
+                or (attributes.get("type") or "").lower() == "application/pdf"
+                or self._datasheet_depth is not None and "download" in attributes
+            ):
                 self._pdf_link = href
-                self._link_text.clear()
+                self._link_text = [attributes.get("aria-label") or "", attributes.get("title") or "", filename, decoded_href]
         if tag in ("script", "style", "noscript", "template"):
             self._skip = tag
             if tag == "script" and dict(attrs).get("type") == "application/ld+json":
@@ -154,10 +188,25 @@ class _ProductPage(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag == "a" and self._pdf_link:
-            label = " ".join(self._link_text) + " " + self._pdf_link
-            if re.search(r"technical[ _-]*data[ _-]*sheet|\btds\b", label, re.IGNORECASE):
-                self.datasheets.append(self._pdf_link)
+            label = " ".join(self._link_text)
+            if not SAFETY_SHEET_LABEL.search(label):
+                if DATASHEET_LABEL.search(label):
+                    self.datasheets.append(self._pdf_link)
+                elif self._datasheet_depth is not None:
+                    self.heading_datasheets.append(self._pdf_link)
             self._pdf_link = None
+        if self._skip is None:
+            if tag == self._heading_tag:
+                self._heading_depth -= 1
+                if not self._heading_depth:
+                    heading = " ".join(" ".join(self._heading_text).split())
+                    if DATASHEET_HEADING.fullmatch(heading):
+                        self._datasheet_depth = self._document_depth
+                    self._heading_tag = None
+            if tag in DOCUMENT_SECTIONS and self._document_depth:
+                if self._datasheet_depth == self._document_depth:
+                    self._datasheet_depth = None
+                self._document_depth -= 1
         if tag == self._skip:
             self._skip = None
             if self._structured is not None:
@@ -240,6 +289,8 @@ class _ProductPage(HTMLParser):
         if self._structured is not None:
             self._structured.append(data)
         elif self._skip is None and data.strip():
+            if self._heading_tag:
+                self._heading_text.append(data.strip())
             if self._pdf_link:
                 self._link_text.append(data.strip())
             self.words.append(data.strip())
@@ -406,7 +457,9 @@ def _fetch_supplier(
             (prefix + visible)[:MAX_TEXT],
             product,
             scopes=tuple(scope[:MAX_TEXT] for scope in scopes if scope)[:100],
-            datasheets=tuple(dict.fromkeys(urljoin(url, link) for link in parser.datasheets))[:4],
+            datasheets=tuple(dict.fromkeys(
+                urljoin(url, link) for link in (*parser.datasheets, *parser.heading_datasheets)
+            ))[:4],
             origin="openfilamentdatabase.org" if re.search(r"open filament database", visible, re.IGNORECASE) else "",
         )
     raise ValueError("Too many supplier redirects")
@@ -492,7 +545,7 @@ async def supplier_sitemap_urls(url: str) -> tuple[str, ...]:
         declared = re.findall(r"(?im)^[ \t]*sitemap:[ \t]*(https?://[^\s#]+)", robots)
         children = []
         products = []
-        for sitemap in dict.fromkeys([*declared[:1], f"{origin}/sitemap.xml"]):
+        for sitemap in dict.fromkeys([*declared[:1], f"{origin}/sitemap.xml", f"{origin}/sitemap_index.xml"]):
             links, indexes = entries(sitemap)
             products.extend(links)
             children.extend(indexes)
