@@ -26,7 +26,9 @@ export async function mountSettings() {
   const mcpMessage = document.getElementById('research-mcp-message')!
   let mcpEnabled: boolean
   let saved: string | undefined
-  let busy = false
+  let saving = false
+  let testingModel = false
+  let testingSearch = false
   let models: string[] = []
   const values = () => ({
     model_url: field('model_url').value.trim(), model_id: field('model_id').value.trim(),
@@ -69,13 +71,13 @@ export async function mountSettings() {
     const ready = saved !== undefined
     const config = values()
     const dirty = ready && JSON.stringify(config) !== saved
-    save.disabled = busy || !dirty
+    save.disabled = saving || !dirty
     save.classList.toggle('fm-btn-primary', dirty)
     save.classList.toggle('fm-btn-outline', !dirty)
-    load.disabled = busy || !ready || !config.model_url
+    load.disabled = saving || testingModel || !ready || !config.model_url
     test.disabled = load.disabled || !config.model_id
-    testSearch.disabled = busy || !ready || !config.search_url
-    modelList.disabled = busy || !ready
+    testSearch.disabled = saving || testingSearch || !ready || !config.search_url
+    modelList.disabled = saving || testingModel || !ready
   }
 
   enableSearch.addEventListener('click', () => {
@@ -106,7 +108,8 @@ export async function mountSettings() {
   async function send(action: 'save' | 'test' | 'models' | 'test-search') {
     const search = action === 'test-search'
     const target = action === 'save' ? form : field(search ? 'search_url' : 'model_url')
-    if (busy || !target.reportValidity() || (action === 'save' && save.disabled)) return
+    if (saving || (search ? testingSearch : action !== 'save' && testingModel) ||
+        !target.reportValidity() || (action === 'save' && save.disabled)) return
     const requestedConnection = connection()
     const { search_url, ...model } = values()
     const payload = search ? { search_url } : action === 'save' ? values() : model
@@ -118,7 +121,9 @@ export async function mountSettings() {
     }
     const inputs = action === 'save' ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)')) : []
     inputs.forEach(input => { input.disabled = true })
-    busy = true
+    if (action === 'save') saving = true
+    else if (search) testingSearch = true
+    else testingModel = true
     refresh()
     status.textContent = ''
     try {
@@ -145,7 +150,9 @@ export async function mountSettings() {
       if (stillCurrent()) status.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
     } finally {
       inputs.forEach(input => { input.disabled = false })
-      busy = false
+      if (action === 'save') saving = false
+      else if (search) testingSearch = false
+      else testingModel = false
       refresh()
     }
   }

@@ -32,6 +32,7 @@ try {
   let canConfigure = true
   let modelsUnavailable = false
   let hostPicker = false
+  let pendingModelList
   await page.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
@@ -101,6 +102,7 @@ try {
       mcpEnabled = req.postDataJSON().mcp_enabled
       return route.fulfill({ json: { mcp_enabled: mcpEnabled } })
     }
+    if (pendingModelList && path.endsWith('/settings/models')) await pendingModelList
     if (path.endsWith('/settings/test-search')) {
       assert.deepEqual(req.postDataJSON(), { search_url: 'http://searxng:8080' })
       return route.fulfill({ json: { ok: true } })
@@ -313,6 +315,21 @@ try {
   await page.locator('#filabrain-settings input[name=api_key]').fill('fixture-key')
   await modelTest.click()
   await page.getByText('The model returned a verified sample.').waitFor()
+  let releaseModels
+  pendingModelList = new Promise(resolve => { releaseModels = resolve })
+  await searchField.fill('http://searxng:8080')
+  const loadModels = page.getByRole('button', { name: 'Load models', exact: true })
+  await loadModels.click()
+  try {
+    assert.equal(await loadModels.isDisabled(), true)
+    await searchTest.click()
+    await page.getByText('SearXNG returned a valid search response.').waitFor()
+  } finally {
+    releaseModels()
+    pendingModelList = undefined
+  }
+  await loadModels.waitFor()
+
   await modelUrl.fill('')
   await modelId.fill('')
   await page.locator('#filabrain-settings input[name=api_key]').fill('')
