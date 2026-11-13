@@ -44,6 +44,28 @@ class SupplierRateLimited(ValueError):
         self.seconds = max(1, min(31_536_000, round(seconds)))
 
 
+def public_link(value) -> str | None:
+    if (
+        not isinstance(value, str)
+        or len(value) > 500
+        or any(ch.isspace() or ord(ch) < 32 or ch == "\\" for ch in value)
+    ):
+        return None
+    try:
+        url = urlsplit(value)
+        if (
+            url.scheme in ("https", "http")
+            and url.hostname
+            and url.username is None
+            and url.password is None
+            and url.port != 0
+        ):
+            return value
+    except ValueError:
+        pass
+    return None
+
+
 def supplier_page_url(url: str) -> str:
     parsed = urlsplit(url)
     query = "&".join(
@@ -537,11 +559,13 @@ async def search_web(origin: str, query: str) -> list[str]:
         raise ValueError("Expected SearXNG JSON search results")
     if not data["results"] and data.get("unresponsive_engines"):
         raise SearchEnginesUnavailable("Upstream search engines failed to return results")
-    return [
-        row["url"]
-        for row in data["results"][:3]
-        if isinstance(row, dict) and isinstance(row.get("url"), str)
-    ]
+    urls = []
+    for row in data["results"]:
+        if isinstance(row, dict) and (url := public_link(row.get("url"))):
+            urls.append(url)
+            if len(urls) == 3:
+                break
+    return urls
 
 
 async def ofd_candidates(manufacturer: str) -> tuple[list[dict], str]:

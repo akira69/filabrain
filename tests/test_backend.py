@@ -211,7 +211,7 @@ async def test_oversized_supplier_page_finds_specific_replacement(installed, db_
 
 
 @pytest.mark.parametrize("store_host", ["us.fixturebrand.example", "fixturebrand.example"])
-@pytest.mark.parametrize("ambiguous", [False, True])
+@pytest.mark.parametrize("ambiguous", [False, True, "sitemap"])
 async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(installed, monkeypatch, store_host, ambiguous):
     from filabrain import proposals
 
@@ -219,6 +219,7 @@ async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(install
     store = f"https://{store_host}/products/matte-pla"
     sheet = f"{site}documents/polyterra.pdf"
     wrong = f"{site}documents/polyterra-plus.pdf"
+    shared = f"{site}documents/polyterra-pla.pdf"
     fake = "https://fixturebrand.example.unrelated.example/documents/polyterra.pdf"
     sheet_text = (
         "TECHNICAL\nDATA SHEET\nV6.0\n\nPolyTerra TM PLA\n"
@@ -235,6 +236,8 @@ async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(install
             raise ValueError(proposals.SUPPLIER_TOO_LARGE)
         if url == site:
             return proposals.Evidence(url, "Fixture Brand | 3D printing filament", "Fixture Brand makes filament.")
+        if url == shared:
+            return proposals.Evidence(url, "Technical data sheet", sheet_text, datasheet=True)
         assert url in (sheet, wrong)
         if ambiguous:
             content = sheet_text + f"\nSKU: {'PT-001' if url == sheet else 'PT-002'}"
@@ -260,7 +263,10 @@ async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(install
 
     monkeypatch.setattr(proposals, "fetch_supplier", fetch)
     monkeypatch.setattr(proposals, "search_web", search)
-    monkeypatch.setattr(proposals, "supplier_sitemap_urls", no_results)
+    async def sitemap(_url):
+        return [shared] if ambiguous == "sitemap" else []
+
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap)
     monkeypatch.setattr(proposals, "manufacturer_website", no_results)
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
@@ -274,10 +280,16 @@ async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(install
     })
     assert response.is_success, response.text
     result = response.json()
-    if ambiguous:
+    if ambiguous is True:
         assert {"code": "supplier_download_limit", "url": store} in result["issues"]
         assert not any(issue["code"] == "supplier_alternative_found" for issue in result["issues"])
         assert not result["suggestions"]
+        return
+    if ambiguous == "sitemap":
+        sheet = shared
+        assert any(item["field"] == "density_g_cm3" and item["sources"][0]["url"] == shared
+                   for item in result["suggestions"])
+        assert not any(issue.get("url") == store for issue in result["issues"])
         return
     assert {"code": "supplier_alternative_found", "url": sheet} in result["issues"]
     assert not any(issue.get("url") in (store, wrong, fake) for issue in result["issues"])
@@ -506,11 +518,12 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
     fetched = []
     catalogs = set()
     supplier_url = "https://shop.supplier.example/fixture-pla"
+    wrong = "https://shop.supplier.example/unrelated"
 
     async def search(_url, query):
         queries.append(query)
         if query.startswith("site:supplier.example "):
-            return ["https://unrelated.example/fixture-pla", supplier_url]
+            return ["https://shop.supplier.example/", wrong, supplier_url]
         return []
 
     async def catalog(_identity):
@@ -523,7 +536,7 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
 
     async def fetch(url, **_):
         fetched.append(url)
-        return proposals.Evidence(url, "Fixture PLA", "Fixture PLA")
+        return proposals.Evidence(url, "Unrelated" if url == wrong else "Fixture PLA", "Other product" if url == wrong else "Fixture PLA")
 
     monkeypatch.setattr(proposals, "search_web", search)
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
@@ -535,7 +548,7 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
     assert response.status_code == 200
     assert "site:supplier.example Fixture Brand Fixture PLA" in queries
     assert all("disabled.example" not in query for query in queries)
-    assert fetched == [supplier_url]
+    assert fetched == [wrong, supplier_url]
     assert catalogs == {"filamandb", "open_filament_database"}
 
 
@@ -557,6 +570,9 @@ async def test_missing_manufacturer_site_is_discovered_and_can_be_saved(
     )
     db_session.add(filament)
     await db_session.commit()
+    record = f"{BASE}/filaments/{filament.id}/research-record"
+    response = await installed.get(record)
+    assert response.json() == {"record_token": getattr(filament, "record_token", None)}
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
     if not catalog_has_site:
         assert (await installed.put(f"{BASE}/settings", json={"search_url": "http://searxng:8080"})).is_success
@@ -609,6 +625,7 @@ async def test_missing_manufacturer_site_is_discovered_and_can_be_saved(
         ) as viewer:
             assert (await viewer.get(f"{BASE}/status")).json()["can_update_manufacturer"] is False
             assert (await viewer.put(endpoint, json=payload)).status_code == 403
+            assert (await viewer.get(record)).status_code == 403
     assert (await installed.put(endpoint, json=payload | {"manufacturer_id": manufacturer.id + 1})).status_code == 409
     assert (await installed.put(endpoint, json=payload | {"url": "http://127.0.0.1/"})).status_code == 422
     assert (await installed.put(endpoint, json=payload)).status_code == 204
@@ -649,6 +666,8 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
 @pytest.mark.parametrize(("upstream_response", "expected"), [
     (Response(200, json={"results": [{"url": "https://maker.example/specs"}]}), 200),
     (Response(200, json={"results": []}), 502),
+    (Response(200, json={"results": [{"url": ""}]}), 502),
+    (Response(200, json={"results": [None, {}, {}, {"url": "https://maker.example/specs"}]}), 200),
     (Response(200, json={"status": "ok"}), 502),
     (Response(403), 502),
 ])
@@ -894,6 +913,28 @@ async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_sess
         assert response.status_code == 404
 
     assert not (await db_session.scalars(select(Filament))).all()
+
+
+async def test_interactive_research_keeps_website_discovery_with_read_release(db_session, monkeypatch):
+    from filabrain import proposals
+
+    snapshot = dict.fromkeys(proposals.MODE_FIELDS["fill"], "filled")
+    snapshot.update(
+        designation="Fixture PLA", manufacturer_name="Fixture Brand", manufacturer_url=None,
+        material_type="PLA", diameter_mm=1.75, raw_material_weight_g=1000,
+    )
+    issue = {"code": "manufacturer_website_found", "url": "https://fixture.example"}
+
+    async def research_products(_db, _identity, **kwargs):
+        assert kwargs["release_read"]
+        return {"suggestions": [], "issues": [issue]}
+
+    monkeypatch.setattr(proposals, "research_products", research_products)
+    result = await proposals.batch_proposal(db_session, snapshot, "fill", release_read=True)
+    assert result["issues"] == [issue]
+    assert await proposals.batch_proposal(db_session, snapshot, "fill", skip_complete=True) == {
+        "proposals": [], "issues": [],
+    }
 
 
 async def test_research_deadline_preserves_verified_datasheet(installed, db_session, monkeypatch):

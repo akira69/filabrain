@@ -43,16 +43,22 @@ main { max-width: 76rem; margin: auto; padding: clamp(.65rem, 2vw, 1.25rem); }
 #plugin-header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-areas: "logo tabs guide";
+  align-items: start;
   gap: .5rem 1rem;
   margin-bottom: 1rem;
 }
 @media (max-width: 1120px) {
-  #plugin-header { grid-template-columns: minmax(0, 1fr) auto; }
-  #plugin-header nav { grid-column: 1 / -1; grid-row: 2; }
+  #plugin-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "logo logo" "tabs guide";
+  }
 }
 h1, h2, h3 { line-height: 1.2; }
-#plugin-header h1 { margin: 0; font: 700 clamp(1.5rem, 5vw, 2rem) var(--font-serif); }
+#plugin-header h1 { grid-area: logo; margin: 0; font: 700 clamp(1.5rem, 5vw, 2rem) var(--font-serif); }
+#plugin-header nav { grid-area: tabs; }
+#plugin-header .docs-trigger { grid-area: guide; }
+#plugin-header :is(nav button, .docs-trigger) { min-height: 2.5rem; font-size: .875rem; }
 .filabrain-heading { display: flex; align-items: center; gap: .7rem; }
 .filabrain-mark { width: 2.5rem; height: 2.5rem; flex: none; }
 .filabrain-heading h2 { margin: 0; }
@@ -125,7 +131,7 @@ dialog dd { margin: 0; overflow-wrap: anywhere; }
 .research-note a { color: inherit; text-underline-offset: .15em; }
 .proposal-row > label .research-note { font-size: inherit; }
 #research-pairing { margin-block-start: 1rem; }
-#settings-back-to-chat { margin-block-end: .75rem; }
+.editor-settings-bar { display: flex; justify-content: space-between; gap: .5rem; margin-block-end: .75rem; }
 .draft-fields { display: contents; }
 #research-options > summary, #research-advanced-fields > summary { color: var(--text-muted); cursor: pointer; margin-block: .6rem; }
 #research-start-actions { align-items: center; }

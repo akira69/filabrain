@@ -19,6 +19,7 @@ for (const section of ['chat', 'settings', 'batches', 'docs']) {
 }
 const docsButton = await read('docs-button.html')
 html = html.replaceAll('<!-- docs-button -->', () => docsButton)
+html = html.replaceAll('<!-- editor-docs-button -->', () => docsButton.replace(' data-open-docs ', ' data-open-docs="editor" '))
 const modelPicker = await read('model-picker.html')
 html = html.replaceAll('<!-- model-picker -->', () => modelPicker)
 const mark = (await read('../filabrain/icon.svg')).replace('<svg ', '<svg class="filabrain-mark" aria-hidden="true" ')

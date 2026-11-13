@@ -36,6 +36,7 @@ from .sources import (
     fetch_supplier,
     ofd_candidates,
     paramount_product_urls,
+    public_link,
     search_web,
     supplier_page_url,
     supplier_sitemap_urls,
@@ -287,27 +288,6 @@ async def _local_conventions(db: DBSession, snapshot: dict) -> dict:
 
 def _positive(value):
     return value if type(value) in (int, float) and 0 < value < float("inf") else None
-
-
-def public_link(value) -> str | None:
-    if (
-        not isinstance(value, str)
-        or len(value) > 500
-        or any(ch.isspace() or ord(ch) < 32 or ch == "\\" for ch in value)
-    ):
-        return None
-    try:
-        url = urlsplit(value)
-        if (
-            url.scheme in ("https", "http")
-            and url.hostname
-            and not url.username
-            and not url.password
-        ):
-            return value
-    except ValueError:
-        pass
-    return None
 
 
 def _site_host(url) -> str:
@@ -1767,20 +1747,32 @@ async def research_products(
             different_sites.setdefault(_site_host(link), supplier_page_url(link))
 
     async def find_supplier_page(domain):
-        for url in await search(f"site:{domain} {supplier_query}"):
-            if _on_manufacturer_site(url, domain):
-                return supplier_page_url(url)
-        return None
+        urls = await search(f"site:{domain} {supplier_query}")
+        oversized_pages = {}
+        try:
+            async with network_time(8):
+                for url in urls:
+                    if not _on_manufacturer_site(url, domain) or urlsplit(url).path in ("", "/"):
+                        continue
+                    link = supplier_page_url(url)
+                    page = await supplier(link)
+                    if page and _supplier_scopes(identity, page, snapshot):
+                        return {link: page}
+                    if fetch_errors.get(link) == SUPPLIER_TOO_LARGE:
+                        oversized_pages[link] = None
+        except TimeoutError:
+            pass
+        return oversized_pages
 
-    preferred_urls = await asyncio.gather(*(
-        find_supplier_page(site["domain"]) for site in config["supplier_sites"]
-        if site["enabled"] and supplier_query and site["domain"] != search_domain
-    ))
     supplier_urls = [*direct_urls, *(supplement if guidance else []), *catalog_urls, *different_sites.values()]
     pages = first_pages | await check_pages(supplier_urls)
     if sum(bool(page and not _on_manufacturer_site(page.url, manufacturer_domain)) for page in pages.values()) < 2:
         pages.update(await check_pages(supplier_urls))
-    pages.update(await check_pages(preferred_urls))
+    for preferred in await asyncio.gather(*(
+        find_supplier_page(site["domain"]) for site in config["supplier_sites"]
+        if site["enabled"] and supplier_query and site["domain"] != search_domain
+    )):
+        pages.update(preferred)
     await check_datasheets(pages)
     pages.update(linked_sheets)
     if product_url and fetch_errors.get(product_url) == SUPPLIER_TOO_LARGE:
@@ -1800,6 +1792,22 @@ async def research_products(
     color = set(_tokens(identity.color))
     sku = "-".join(_product_key(lookup_sku or variant_sku))
 
+    supplier_identity = identity
+    if snapshot is not None and variant_sku and not _norm(identity.sku):
+        proven = next(candidate for candidate in candidates if _norm(candidate.sku) == variant_sku)
+        supplier_identity = identity.model_copy(update={
+            "sku": proven.sku,
+            "color": identity.color or proven.color,
+            "weight_g": identity.weight_g if identity.weight_g is not None else proven.weight_g,
+        })
+
+    known_variant = _known_variant_fields(supplier_identity, snapshot)
+
+    def needs_variant(sheet):
+        return any(
+            values and known_variant[key] in (None, ()) for key, values in _sheet_variant_values(sheet).items()
+        )
+
     async def check_alternatives(host, urls):
         links = list(dict.fromkeys(
             supplier_page_url(link) for url in urls if (link := public_link(url))
@@ -1816,11 +1824,15 @@ async def research_products(
                     "url": page.url, "product_url": page.url,
                 })
                 return page.url
+            if page.datasheet:
+                if _on_manufacturer_site(page.url, document_domain) and _sheet_matches(page, titles, supplier_identity, snapshot):
+                    authoritative_docs[page.url] = replace(page, manufacturer_page=True)
+                    fallback_docs.add(page.url)
+                continue
             official = _on_manufacturer_site(page.url, manufacturer_domain)
             if (
-                (official and _sheet_matches(page, titles, identity, snapshot))
-                or _supplier_scopes(identity, replace(page, manufacturer_page=official), snapshot)
-                or (official and _bundle_temperatures(identity, page, snapshot))
+                _supplier_scopes(supplier_identity, replace(page, manufacturer_page=official), snapshot)
+                or (official and _bundle_temperatures(supplier_identity, page, snapshot))
             ):
                 pages.update({url: result for url, result in alternatives.items() if result})
                 pages.setdefault(link, page)
@@ -1839,13 +1851,17 @@ async def research_products(
                 await check_pages(links)
                 for link in links:
                     sheet = checked_pages.get(link)
-                    if sheet and _on_manufacturer_site(sheet.url, document_domain) and _sheet_matches(sheet, titles, identity, snapshot):
+                    if sheet and _on_manufacturer_site(sheet.url, document_domain) and _sheet_matches(sheet, titles, supplier_identity, snapshot):
                         authoritative_docs[sheet.url] = replace(sheet, manufacturer_page=True)
                         fallback_docs.add(sheet.url)
+            # A sheet that requires an unknown variant can still be rejected after supplier checks.
+            usable_fallback = any(not needs_variant(authoritative_docs[url]) for url in fallback_docs)
             # shortcut: check two sites per lookup, raise the budget if common searches need more.
             fallback_by_host = {}
             for url in oversized:
-                if url not in linked_sheets and not (fallback_docs and url in official_oversized) and (host := _site_host(url)):
+                if url not in linked_sheets and not (usable_fallback and url in official_oversized) and (host := _site_host(url)):
+                    if url in official_oversized and document_domain and document_domain != host:
+                        fallback_by_host.setdefault(document_domain, f"https://{document_domain}/")
                     fallback_by_host.setdefault(host, url)
             for host, original in list(fallback_by_host.items())[:2]:
                 matches = []
@@ -1909,14 +1925,6 @@ async def research_products(
                         break
         except TimeoutError:
             pass
-    supplier_identity = identity
-    if snapshot is not None and variant_sku and not _norm(identity.sku):
-        proven = next(candidate for candidate in candidates if _norm(candidate.sku) == variant_sku)
-        supplier_identity = identity.model_copy(update={
-            "sku": proven.sku,
-            "color": identity.color or proven.color,
-            "weight_g": identity.weight_g if identity.weight_g is not None else proven.weight_g,
-        })
     official_scopes = []
     for url, page in pages.items():
         if page is None:
@@ -1955,12 +1963,9 @@ async def research_products(
         if not unresolved_variants:
             issues.append({"code": "ambiguous_match", "source": "Supplier pages"})
         unresolved_variants = True
-    known_variant = _known_variant_fields(supplier_identity, snapshot)
     recovered_sheet = None
     for sheet in authoritative_docs.values():
-        if sheet not in matching_docs or unresolved_variants and any(
-            values and known_variant[key] in (None, ()) for key, values in _sheet_variant_values(sheet).items()
-        ):
+        if sheet not in matching_docs or (unresolved_variants and needs_variant(sheet)):
             issues.append({"code": "manual_datasheet", "url": sheet.url})
             continue
         if sheet.url in fallback_docs and recovered_sheet is None:
@@ -2165,13 +2170,13 @@ async def research_products(
 
 async def batch_proposal(
     db: DBSession, snapshot: dict, mode: str, *, sku_hint="", product_url=None,
-    guidance="", release_read=True, model_id: str | None = None, deadline: float | None = None,
+    guidance="", release_read=True, skip_complete=False, model_id: str | None = None, deadline: float | None = None,
 ) -> dict:
     if mode == "standardize":
         return await _local_conventions(db, snapshot)
     result = {"proposals": [], "issues": []}
     if not any(is_missing(field, snapshot.get(field)) for field in MODE_FIELDS["fill"]) and (
-        release_read or not is_missing("manufacturer_url", snapshot.get("manufacturer_url"))
+        skip_complete or not is_missing("manufacturer_url", snapshot.get("manufacturer_url"))
     ):
         return result
     identity = snapshot_identity(snapshot)

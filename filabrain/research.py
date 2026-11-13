@@ -282,6 +282,19 @@ async def research_proposal(
     return await research(db, data)
 
 
+@router.get("/filaments/{filament_id}/research-record")
+async def research_record(filament_id: int, db: DBSession, principal: PrincipalDep):
+    if not await is_enabled(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    if principal.auth_type != "session":
+        raise HTTPException(403, "A browser session is required")
+    await ensure_any_permission(db, principal, "filaments:update")
+    filament = await db.get(Filament, filament_id)
+    if filament is None:
+        raise HTTPException(404, "Filament not found")
+    return {"record_token": getattr(filament, "record_token", None)}
+
+
 @router.put("/filaments/{filament_id}/manufacturer-website", status_code=204)
 async def save_manufacturer_website(
     filament_id: int, data: ManufacturerWebsite, db: DBSession, principal: PrincipalDep,

@@ -11,7 +11,9 @@ const pageLabels = {
   model_settings: 'filaBrain.settings',
 }
 type Action = { page: keyof typeof pageLabels; url: string }
-type Message = { role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal'] }
+type Message = {
+  role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal']; savedFilamentId?: number
+}
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
   researching?: true; model?: string; updatedAt?: number
@@ -93,6 +95,16 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
         link.textContent = t(pageLabels[page])
         log.append(link)
       }
+    }
+    const savedId = message.savedFilamentId
+    if (typeof savedId === 'number' && Number.isSafeInteger(savedId) && savedId > 0) {
+      const link = document.createElement('a')
+      link.className = 'chat-action'
+      link.href = `/filaments/${savedId}`
+      link.target = '_blank'
+      link.rel = 'noopener noreferrer'
+      link.textContent = t('filaBrain.openSavedFilament')
+      log.append(link)
     }
     scrollToEnd()
     return paragraph
@@ -330,6 +342,17 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     get model() { return modelPicker.selected },
     picker,
     startResearch,
+    completeResearch(id: number) {
+      if (current.research && activeAnswer && research) {
+        activeAnswer.after(research.archive(current.research.proposal))
+      }
+      current.research = undefined
+      activeAnswer = undefined
+      const message: Message = { role: 'assistant', content: t('filaBrain.filamentSaved'), savedFilamentId: id }
+      current.messages.push(message)
+      append(message)
+      remember()
+    },
     saveSelection(selection: ResearchDraft['selection']) {
       if (!current.research) return
       current.research = { ...current.research, selection }

@@ -169,7 +169,7 @@
 .research-history p { margin: .15rem 0; }
 .research-history-value { margin-block-start: .35rem; overflow-wrap: anywhere; }
 
-:root[data-research-editor] main:has(> [data-view="chat"]:not([hidden])) {
+:root[data-research-editor] main:has(> [data-view="chat"]:not([hidden])):not(:has(> .docs-panel[open]:not(:modal))) {
   display: flex;
   flex-direction: column;
   height: 100dvh;

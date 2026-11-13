@@ -43,6 +43,7 @@ try {
   let heldModelList
   let staleBatchOnce = false
   let libraryReads = 0
+  let editorRecordToken = 'c'.repeat(32)
   let supportsRecordToken = true
   let hostSendsIdentity = false
   await page.route('https://fila.test/**', async route => {
@@ -90,6 +91,7 @@ try {
     if (path.endsWith('/me')) return route.fulfill({ json: { id: account } })
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: chatModelId,
       can_create: true, can_update: true, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
+    if (path.endsWith('/filaments/10/research-record')) return route.fulfill({ json: { record_token: editorRecordToken } })
     if (path.endsWith('/filaments/10/manufacturer-website') && req.method() === 'PUT') {
       savedManufacturerWebsite = req.postDataJSON()
       return route.fulfill({ status: 204 })
@@ -370,9 +372,13 @@ try {
   await history.click()
   await page.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
   await page.getByRole('log').getByText('Look for a datasheet', { exact: true }).waitFor()
-  await earlierResult.click()
+  await earlierResult.first().click()
   await earlierSource.waitFor()
   await page.getByRole('link', { name: 'Fixture catalog' }).first().waitFor()
+  const savedLink = page.getByRole('link', { name: 'Open saved filament' })
+  await savedLink.waitFor()
+  assert.equal(await savedLink.getAttribute('href'), '/filaments/11')
+  assert.equal(await page.getByRole('button', { name: 'Save new filament' }).count(), 0)
   account = 8
   await page.reload()
   await history.click()
@@ -433,6 +439,14 @@ try {
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.waitForFunction(() => document.querySelector('#filabrain-docs').matches('[open]:not(:modal)'))
   assert.equal(await headerGuide.evaluate(button => button.closest('nav') === null), true)
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 780 })
+    const guideButtonBounds = await headerGuide.boundingBox()
+    const firstTabBounds = await page.getByRole('button', { name: 'Chat', exact: true }).boundingBox()
+    assert.equal(guideButtonBounds.height, firstTabBounds.height)
+    assert.ok(Math.abs(guideButtonBounds.y - firstTabBounds.y) <= 1, `Guide aligns with the tabs at ${width}px`)
+  }
+  await page.setViewportSize({ width: 1440, height: 780 })
   const guideClose = guide.getByRole('button', { name: 'Close' })
   assert.equal(await guideClose.locator('svg[aria-hidden="true"]').count(), 1)
   await guideClose.click()
@@ -516,6 +530,22 @@ try {
   await page.goto('https://fila.test/editor-fixture')
   const frame = page.frameLocator('iframe')
   const followUp = frame.getByRole('textbox', { name: 'Follow up on this search' })
+  const drawerGuide = frame.getByRole('dialog', { name: 'Guide' })
+  await frame.getByRole('button', { name: 'Guide', exact: true }).click()
+  await drawerGuide.getByRole('heading', { name: 'Research this filament', exact: true }).waitFor()
+  assert.equal(await drawerGuide.evaluate(el => el.matches(':modal')), true)
+  await page.locator('iframe').evaluate(el => { el.style.width = '960px' })
+  await frame.locator('#filabrain-docs[open]:not(:modal)').waitFor()
+  const drawerBounds = await frame.locator('.research-chat').boundingBox()
+  assert.ok((await drawerGuide.boundingBox()).x >= drawerBounds.x + drawerBounds.width)
+  await page.locator('iframe').evaluate(el => { el.style.width = '640px' })
+  await frame.locator('#filabrain-docs:modal').waitFor()
+  await drawerGuide.getByRole('button', { name: 'Close' }).click()
+  await frame.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await frame.getByRole('button', { name: 'Guide', exact: true }).click()
+  await drawerGuide.getByText('External MCP', { exact: true }).waitFor()
+  await drawerGuide.getByRole('button', { name: 'Close' }).click()
+  await frame.getByRole('button', { name: 'Back to chat' }).click()
   const researchModel = frame.getByRole('button', { name: /^Model for this conversation/ })
   const researchMenu = frame.getByRole('menu', { name: 'Model for this conversation' })
   await researchModel.click()
@@ -625,6 +655,16 @@ try {
   await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
   await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).waitFor()
   pairedProposal = null
+  for (const token of ['d'.repeat(32), null]) {
+    editorRecordToken = token
+    await page.reload()
+    await frame.locator('[data-chat-history] summary').click()
+    await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
+    await frame.getByText(/Saved findings are read-only/).waitFor()
+    await frame.getByText('Earlier findings', { exact: true }).first().waitFor()
+    assert.equal(await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).count(), 0)
+    assert.equal(proposalRequests, requestsBeforeReopen)
+  }
 
   hostPicker = 'legacy'
   supportsRecordToken = false
