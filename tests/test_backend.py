@@ -188,11 +188,11 @@ async def test_missing_manufacturer_site_is_discovered_and_can_be_saved(
 
     async def search(_url, query):
         if query == "Fixture Brand filament official website":
-            return ["https://retailer.example/fixture", website]
+            return ["https://shop.fixturebrand.example/", website, "https://presets.fixturebrand.example/"]
         return []
 
     async def fetch(url):
-        assert url == website
+        assert url in (website, "https://shop.fixturebrand.example/", "https://presets.fixturebrand.example/")
         return proposals.Evidence(url, "Fixture Brand | 3D printing filament", "Fixture Brand makes filament.")
 
     monkeypatch.setattr(filamentdb_proxy, "_proxy_get", catalog_request)

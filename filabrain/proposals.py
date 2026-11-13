@@ -1400,8 +1400,10 @@ async def research_products(
                 and re.sub(r"[^a-z0-9]", "", _publisher(page.url).split(".")[0]) == brand
                 and (site := manufacturer_site_url(page.url))
             }
-            if len(matches) == 1:
-                discovered = matches.pop()
+            home_sites = {site for site in matches if _site_host(site) == _publisher(site)}
+            candidates = home_sites or matches
+            if len(candidates) == 1:
+                discovered = next(iter(candidates))
                 source = "SearXNG"
         if discovered:
             manufacturer_site = discovered
