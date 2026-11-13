@@ -401,7 +401,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       current.messages.push(message)
       append(message)
       // The stale tab can show its confirmation without replacing the newer draft in History.
-      forkNextResearchTurn = alreadySaved && hasStoredReceipt(id)
+      forkNextResearchTurn = hasStoredReceipt(id)
       if (!forkNextResearchTurn) remember()
     },
     saveSelection(selection: ResearchDraft['selection']) {
