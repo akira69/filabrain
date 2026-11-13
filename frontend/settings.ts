@@ -12,6 +12,7 @@ export async function mountSettings() {
   const route = '/api/v1/filabrain/settings'
   const form = document.querySelector<HTMLFormElement>('#filabrain-settings')!
   const message = document.getElementById('research-settings-message')!
+  const modelMessage = document.getElementById('research-model-message')!
   const keyState = document.getElementById('research-key-state')!
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement
   const save = form.querySelector<HTMLButtonElement>('button[type=submit]')!
@@ -24,6 +25,8 @@ export async function mountSettings() {
   const supplierMessage = document.getElementById('research-supplier-message')!
   const load = form.querySelector<HTMLButtonElement>('#research-load-models')!
   const test = form.querySelector<HTMLButtonElement>('#research-test-model')!
+  const testSearch = form.querySelector<HTMLButtonElement>('#research-test-search')!
+  const searchMessage = document.getElementById('research-search-message')!
   const modelList = form.elements.namedItem('available_model') as HTMLSelectElement
   const mcpSwitch = document.querySelector<HTMLInputElement>('#research-mcp-enabled')!
   const mcpState = document.getElementById('research-mcp-state')!
@@ -83,6 +86,7 @@ export async function mountSettings() {
     save.classList.toggle('fm-btn-outline', !dirty)
     load.disabled = busy || !ready || !config.model_url
     test.disabled = load.disabled || !config.model_id
+    testSearch.disabled = busy || !ready || !config.search_url || !field('search_url').validity.valid
     modelList.disabled = busy || !ready
     sourceControls.disabled = busy || !ready
     sourceControls.hidden = !config.search_url || !field('search_url').validity.valid
@@ -183,17 +187,21 @@ export async function mountSettings() {
     showModels()
   }
 
-  async function send(action: 'save' | 'test' | 'models') {
-    if (busy || (action === 'models' ? !field('model_url').reportValidity() : !form.reportValidity())) return
+  async function send(action: 'save' | 'test' | 'models' | 'test-search') {
+    if (busy) return
+    if (action === 'test-search' ? !field('search_url').reportValidity()
+      : action === 'save' ? !form.reportValidity() : !field('model_url').reportValidity()) return
     if (action === 'save' && save.disabled) return
     const requestedConnection = connection()
-    const payload = action === 'models' ? { ...values(), search_url: '', supplier_download_mib: undefined } : values()
+    const payload = action === 'test-search' ? { search_url: values().search_url }
+      : action === 'save' ? values() : { ...values(), search_url: '', supplier_download_mib: undefined }
     const inputs = action === 'save' ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)'))
       .filter(input => !sourceControls.contains(input)) : []
     inputs.forEach(input => { input.disabled = true })
     busy = true
     refresh()
-    message.textContent = ''
+    const feedback = action === 'save' ? message : action === 'test-search' ? searchMessage : modelMessage
+    feedback.textContent = ''
     try {
       const response = await fetch(action === 'save' ? route : `${route}/${action}`, {
         method: action === 'save' ? 'PUT' : 'POST', credentials: 'include', headers: researchHeaders(),
@@ -205,16 +213,17 @@ export async function mountSettings() {
         if (requestedConnection !== connection()) return
         models = data.models
         showModels()
-        message.textContent = t(data.models.length ? 'filaBrain.modelsLoaded' : 'filaBrain.noModels')
+        feedback.textContent = t(data.models.length ? 'filaBrain.modelsLoaded' : 'filaBrain.noModels')
         return
       }
       if (action === 'save') {
         fill(data)
         document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: data.model_id }))
       }
-      message.textContent = t(action === 'test' ? 'filaBrain.testPassed' : 'filaBrain.settingsSaved')
+      feedback.textContent = t(action === 'save' ? 'filaBrain.settingsSaved'
+        : action === 'test-search' ? 'filaBrain.searchTestPassed' : 'filaBrain.testPassed')
     } catch (error) {
-      message.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
+      feedback.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
     } finally {
       inputs.forEach(input => { input.disabled = false })
       busy = false
@@ -235,6 +244,7 @@ export async function mountSettings() {
     refresh()
     form.addEventListener('submit', event => { event.preventDefault(); void send('save') })
     test.addEventListener('click', () => void send('test'))
+    testSearch.addEventListener('click', () => void send('test-search'))
     load.addEventListener('click', () => void send('models'))
     form.addEventListener('input', event => {
       if (event.target === modelList) return

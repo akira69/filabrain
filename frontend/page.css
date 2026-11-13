@@ -71,6 +71,9 @@ h1, h2, h3 { line-height: 1.2; }
   padding: .65rem 1rem; background: var(--bg-soft); border-bottom: 1px solid var(--border);
 }
 .fm-section-header h2 { margin: 0; font-size: 1rem; font-weight: 700; }
+.fm-card.fm-section { padding: 0; overflow: hidden; }
+.fm-section-body { display: grid; gap: .75rem; min-width: 0; padding: 1rem; }
+.fm-section-body > :is(p, #library-research) { margin: 0; }
 .action-icon { flex: none; margin-inline-end: .35rem; }
 #plugin-header nav button[aria-current] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
 a { color: var(--accent); }
@@ -121,9 +124,8 @@ dialog dd { margin: 0; overflow-wrap: anywhere; }
 .research-note { color: var(--text-muted); font-size: .875rem; }
 .research-note a { color: inherit; text-underline-offset: .15em; }
 .proposal-row > label .research-note { font-size: inherit; }
-#research-pairing { margin-block: .65rem 1rem; }
-#research-pairing summary { cursor: pointer; color: var(--text-muted); font-size: .875rem; }
-#research-pairing button, #pair-credentials { margin-block-start: .5rem; }
+#research-pairing { margin-block-start: 1rem; }
+#settings-back-to-chat { margin-block-end: .75rem; }
 .draft-fields { display: contents; }
 #research-options > summary, #research-advanced-fields > summary { color: var(--text-muted); cursor: pointer; margin-block: .6rem; }
 #research-start-actions { align-items: center; }

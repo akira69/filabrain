@@ -81,9 +81,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   const confirm = element<HTMLDialogElement>('create-confirm')
   const createButton = element<HTMLButtonElement>('create-filament')
   const saved = element<HTMLAnchorElement>('saved-filament')
-  const pairing = element<HTMLDetailsElement>('research-pairing')
+  const pairing = element('research-pairing')
   const pair = element<HTMLButtonElement>('pair-client')
   const credentials = element('pair-credentials')
+  const pairStatus = element('pair-status')
   const manufacturer = form.elements.namedItem('manufacturer_id') as HTMLSelectElement
   const palette = form.elements.namedItem('color_id') as HTMLSelectElement
   const buttons = [...form.querySelectorAll<HTMLButtonElement>('button[type=submit]')]
@@ -243,7 +244,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       const p = document.createElement('p')
       if (sourceNotes.has(issue.code)) p.className = 'research-note'
       const key = `filaBrain.${issue.code}`
-      const explanation = t(key, { name: issue.name || '', source: issue.source || '' })
+      const explanation = t(key, {
+        name: issue.name || (issue.field ? researchFieldLabel(issue.field) : ''),
+        source: issue.source || '',
+      })
       p.textContent = explanation === key ? issue.code.replaceAll('_', ' ') : explanation
       if (issue.reason) p.append(` (${issue.reason})`)
       const productUrl = issue.product_url && /^https?:\/\//i.test(issue.product_url) ? issue.product_url : undefined
@@ -332,8 +336,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         noChoice.checked = true
         none.append(noChoice, t('filaBrain.leaveBlank'))
         group.append(none)
+        const preferred = proposal.suggestions.find(suggestion => suggestion.field === field)
         for (const candidate of issue.options) {
-          group.append(option(unitFor(field, candidate.value), candidate.sources, undefined, noChoice.name))
+          const recommended = preferred && JSON.stringify(candidate.value) === JSON.stringify(preferred.value)
+          group.append(option(unitFor(field, candidate.value), candidate.sources,
+            recommended ? t('filaBrain.recommendedValue') : undefined, noChoice.name))
         }
         results.append(group)
       }
@@ -553,6 +560,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     pairGeneration++
     window.clearTimeout(pairPoll)
     credentials.hidden = true
+    pairStatus.textContent = ''
     element<HTMLInputElement>('pair-url').value = ''
     element<HTMLInputElement>('pair-token').value = ''
     pair.disabled = false
@@ -561,15 +569,19 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     if (id) return revoke(id)
   }
 
+  let draftOpen = !!editor
   function showPairing(enabled: boolean) {
-    pairing.hidden = !enabled
-    if (!enabled) {
-      pairing.open = false
-      void disconnect()
-    }
+    pairing.hidden = !enabled || !draftOpen
+    if (pairing.hidden) void disconnect()
   }
   showPairing(status.mcp_enabled)
   document.addEventListener('filaman:mcp-state', event => showPairing((event as CustomEvent<boolean>).detail))
+  document.addEventListener('filabrain:chat-mode', event => {
+    if (!editor) {
+      draftOpen = (event as CustomEvent<boolean>).detail
+      showPairing(status.mcp_enabled)
+    }
+  })
   window.addEventListener('focus', async () => {
     if (form.closest<HTMLElement>('[data-view]')?.hidden) return
     try {
@@ -578,8 +590,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         status.chat_model = current.chat_model
         document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: current.chat_model }))
       }
+      status.mcp_enabled = current.mcp_enabled
       showPairing(current.mcp_enabled)
-    } catch { /* Pairing endpoints enforce current access. */ }
+    } catch { /* Keep the last known settings while the server is unreachable. */ }
   })
   element('pair-revoke').addEventListener('click', () => { void disconnect() })
   window.addEventListener('pagehide', () => { void disconnect() })
@@ -616,15 +629,14 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         } catch {
           if (pairId !== session.id) return
           void disconnect()
-          notice.textContent = t('filaBrain.pairExpired')
+          pairStatus.textContent = t('filaBrain.pairExpired')
         }
       }
       pairPoll = window.setTimeout(poll, 2000)
     } catch (error) {
       if (generation !== pairGeneration) return
-      conversation.hidden = false
-      notice.textContent = errorText(error)
       void disconnect()
+      pairStatus.textContent = errorText(error)
     }
   })
   if (editor) showInChat(false)

@@ -181,10 +181,35 @@ async function main() {
       if (hostMode === 'editor' && (context.mode === 'create' || context.mode === 'edit')) {
         if (context.mode === 'create' ? !status.can_create : !status.can_update) throw new Error('Filament access is required.')
         element('plugin-header').hidden = true
-        const chat = mountChat(status.chat_model, undefined, context.filament_id ? 'editor:' + context.filament_id : '')
-        mountResearch(status, chat, () => {
-          document.querySelector<HTMLElement>('[data-view="chat"]')!.hidden = false
-        }, context)
+        const chatView = document.querySelector<HTMLElement>('[data-view="chat"]')!
+        const settingsView = document.querySelector<HTMLElement>('[data-view="settings"]')!
+        const settingsButton = chatView.querySelector<HTMLButtonElement>('[data-editor-settings]')!
+        const back = element<HTMLButtonElement>('settings-back-to-chat')
+        let settingsMounted = false
+        function showChat() {
+          settingsView.hidden = true
+          chatView.hidden = false
+        }
+        function openEditorSettings() {
+          chatView.hidden = true
+          settingsView.hidden = false
+          back.focus()
+          if (status.can_configure && !settingsMounted) {
+            settingsMounted = true
+            void mountSettings()
+          }
+        }
+        element('research-admin-settings').hidden = !status.can_configure
+        settingsButton.hidden = !status.can_configure && !status.mcp_enabled
+        settingsButton.addEventListener('click', openEditorSettings)
+        back.hidden = false
+        back.addEventListener('click', () => {
+          showChat()
+          settingsButton.focus()
+        })
+        const chat = mountChat(status.chat_model, status.can_configure ? openEditorSettings : undefined,
+          context.filament_id ? 'editor:' + context.filament_id : '')
+        mountResearch(status, chat, showChat, context)
       } else if (hostMode === 'selection' && context.mode === 'selection' && status.can_update) {
         element('plugin-header').hidden = true
         document.querySelector<HTMLElement>('[data-view="library"]')!.hidden = false

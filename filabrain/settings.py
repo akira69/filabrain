@@ -14,7 +14,7 @@ from sqlalchemy import select, text
 
 from .db import FilamentResearchSettings
 from .model import request_extraction
-from .sources import DEFAULT_SUPPLIER_DOWNLOAD_MIB, Evidence
+from .sources import DEFAULT_SUPPLIER_DOWNLOAD_MIB, Evidence, search_web
 
 router = APIRouter(tags=["FilaBrain"])
 admin = RequirePermission("admin:plugins_manage")
@@ -309,4 +309,16 @@ async def test_model(data: SettingsInput, db: DBSession, _principal=admin):
             502,
             "The model did not return a usable sample. Check the connection and model ID.",
         ) from None
+    return {"ok": True}
+
+
+@router.post("/settings/test-search")
+async def test_search(data: SettingsInput, _principal=admin):
+    if not data.search_url:
+        raise HTTPException(422, "Enter the SearXNG URL")
+    try:
+        if not await search_web(data.search_url, "3D printing filament"):
+            raise ValueError("No results returned")
+    except (httpx.HTTPError, ValueError, AttributeError, TypeError):
+        raise HTTPException(502, "SearXNG returned no usable results. Check the URL, JSON output, and search engines.") from None
     return {"ok": True}

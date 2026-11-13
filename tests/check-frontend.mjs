@@ -120,6 +120,17 @@ try {
       mcpEnabled = req.postDataJSON().mcp_enabled
       return route.fulfill({ json: { mcp_enabled: mcpEnabled } })
     }
+    if (path.endsWith('/settings/test-search')) {
+      assert.deepEqual(req.postDataJSON(), { search_url: 'http://searxng:8080' })
+      return route.fulfill({ json: { ok: true } })
+    }
+    if (path.endsWith('/pairings') && req.method() === 'POST') {
+      assert.equal(req.postDataJSON().filament_id, 10)
+      return route.fulfill({ json: { id: 'fixture-pair', url: 'https://fila.test/api/v1/filabrain/mcp', token: 'fixture-token' } })
+    }
+    if (path.endsWith('/pairings/fixture-pair')) {
+      return req.method() === 'DELETE' ? route.fulfill({ status: 204 }) : route.fulfill({ json: {} })
+    }
     if (path.endsWith('/settings')) {
       const settings = req.method() === 'PUT' ? req.postDataJSON() : null
       if (settings) {
@@ -379,6 +390,9 @@ try {
   assert.equal(await searchField.evaluate(el => el === document.activeElement), true)
   await page.getByRole('link', { name: 'SearXNG Docker setup' }).waitFor()
   await searchField.fill('http://searxng:8080')
+  await internet.getByRole('button', { name: 'Test SearXNG' }).click()
+  await internet.getByText('SearXNG returned search results.').waitFor()
+  assert.equal(searchUrl, '', 'testing SearXNG does not save the URL')
   await supplierDomain.fill('shop.example.org')
   await internet.getByRole('button', { name: 'Add supplier' }).click()
   const supplier = internet.getByRole('checkbox', { name: 'shop.example.org' })
@@ -417,8 +431,17 @@ try {
   await researchModel.click()
   await researchMenu.getByRole('menuitemradio', { name: 'fixture:alternate' }).click()
   await researchMenu.waitFor({ state: 'hidden' })
-  await frame.getByText('Advanced options', { exact: true }).waitFor()
+  assert.equal(await frame.getByText('Advanced options', { exact: true }).count(), 0)
   assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).isVisible(), false)
+  await frame.getByRole('button', { name: 'Model & MCP settings' }).click()
+  const pair = frame.getByRole('region', { name: 'Pair this draft' })
+  await pair.getByRole('button', { name: 'Pair a client' }).click()
+  const token = pair.getByRole('textbox', { name: /Bearer token/ })
+  await token.waitFor()
+  assert.equal(await token.inputValue(), 'fixture-token')
+  await pair.getByRole('button', { name: 'Disconnect' }).click()
+  assert.equal(await token.isVisible(), false)
+  await frame.getByRole('button', { name: 'Back to chat' }).click()
   assert.equal(await followUp.isVisible(), false)
   assert.match(await researchModel.innerText(), /fixture:alternate/)
   await frame.getByRole('button', { name: 'Find specifications' }).click()

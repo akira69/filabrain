@@ -1,7 +1,6 @@
 #filament-batches [hidden] { display: none; }
-  #filament-batches h2 { margin: 0; font-size: 1.1rem; }
   #filament-batches h3 { margin: .75rem 0 .5rem; font-size: .9rem; }
-  #filament-batches p { margin: .5rem 0; }
+  #filament-batches p { margin: 0; }
   #filament-batches a:not(.fm-btn) { color: var(--accent); text-decoration: underline; }
   #filament-batches .batch-muted { color: var(--text-muted); font-size: .85rem; }
   #filament-batches .batch-message { color: var(--text-muted); }
@@ -25,7 +24,7 @@
   #filament-batches .batch-proposals, #filament-batches .batch-changes {
     list-style: none; padding: 0; margin: 0;
   }
-  #filament-batches [data-batch-queue] { margin-top: .75rem; max-height: 30rem; overflow: auto; }
+  #filament-batches [data-batch-queue] { display: grid; gap: .35rem; max-height: 30rem; overflow: auto; }
   #filament-batches [data-batch-queue] button {
     display: grid; width: 100%; padding: .5rem; gap: .1rem; text-align: left;
     overflow-wrap: anywhere; border-radius: var(--radius-sm); cursor: pointer;

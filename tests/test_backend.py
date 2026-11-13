@@ -74,6 +74,22 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
     assert saved["mcp_enabled"] is False
 
 
+async def test_search_connection_checks_unsaved_url_and_reports_no_results(installed, monkeypatch):
+    from filabrain import settings
+
+    async def search(url, query):
+        assert query == "3D printing filament"
+        return ["https://fixture.example/filament"] if url == "http://searxng:8080" else []
+
+    monkeypatch.setattr(settings, "search_web", search)
+    route = f"{BASE}/settings/test-search"
+    before = (await installed.get(f"{BASE}/settings")).json()["search_url"]
+    assert (await installed.post(route, json={"search_url": "http://searxng:8080"})).json() == {"ok": True}
+    assert (await installed.post(route, json={"search_url": "http://searxng:8081"})).status_code == 502
+    assert (await installed.post(route, json={})).status_code == 422
+    assert (await installed.get(f"{BASE}/settings")).json()["search_url"] == before
+
+
 async def test_research_sources_keep_defaults_and_survive_older_settings_clients(installed):
     url = f"{BASE}/settings"
     current = (await installed.get(url)).json()
