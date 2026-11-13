@@ -29,6 +29,7 @@ try {
   let mcpEnabled = false
   let searchUrl = ''
   let supplierSites = []
+  let savedManufacturerWebsite
   let chatModelId = 'fixture:default'
   let canConfigure = true
   let modelsUnavailable = false
@@ -56,7 +57,7 @@ try {
           if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
           const { type, request_id, units } = event.data;
           if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'edit',
-            filament_id:10, fields:{ designation:'Fixture PLA', manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75 }}, location.origin)
+            filament_id:10, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75 }}, location.origin)
           if (type === 'filaman:filament-stage') {
             window.staged = units;
             event.source.postMessage({type, request_id, staged:units.flatMap(unit => Object.keys(unit)), skipped:[]}, location.origin)
@@ -64,7 +65,11 @@ try {
         })
       </script>` })
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: chatModelId,
-      can_create: true, can_update: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
+      can_create: true, can_update: true, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
+    if (path.endsWith('/filaments/10/manufacturer-website') && req.method() === 'PUT') {
+      savedManufacturerWebsite = req.postDataJSON()
+      return route.fulfill({ status: 204 })
+    }
     if (path.endsWith('/models')) return modelsUnavailable
       ? route.fulfill({ status: 502, json: {} })
       : route.fulfill({ json: { models: ['fixture:default', 'fixture:alternate'] } })
@@ -96,6 +101,7 @@ try {
         { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
       ], issues: target.mode === 'edit' ? [
         { code: 'manufacturer_color_reference', name: 'RAL 9005 Signal Black', url: evidence[0].url },
+        { code: 'manufacturer_website_found', name: manufacturer.name, source: 'FilaManDB', url: 'https://manufacturer.test/' },
       ] : [] } })
     }
     if (path.endsWith('/settings/mcp')) {
@@ -280,24 +286,25 @@ try {
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   const settings = page.locator('#mcp-settings').locator('..').locator('..')
   await settings.getByText('Off', { exact: true }).waitFor()
-  const enableSearch = page.getByRole('button', { name: 'Enable web search' })
+  const enableSearch = page.getByRole('button', { name: 'Set up search' })
   const searchField = page.getByRole('textbox', { name: 'SearXNG URL (optional)' })
-  await page.getByText(/Some suppliers can be researched using/).waitFor()
   const sources = page.getByRole('region', { name: 'Research sources' })
-  const builtIn = sources.getByRole('list', { name: 'Built-in sources' })
+  const builtIn = sources.getByRole('list')
   await builtIn.getByText('FilaManDB', { exact: true }).waitFor()
   await builtIn.getByText('Open Filament Database', { exact: true }).waitFor()
   assert.equal(await builtIn.getByRole('checkbox').count(), 0)
-  await builtIn.getByText('Not configured', { exact: true }).waitFor()
-  await sources.getByRole('textbox', { name: 'Supplier domain' }).fill('shop.example.org')
-  await sources.getByRole('button', { name: 'Add supplier' }).click()
-  const supplier = sources.getByRole('checkbox', { name: 'shop.example.org' })
-  assert.equal(await supplier.isChecked(), true)
+  const internet = page.getByRole('region', { name: 'Internet search' })
+  const supplierDomain = internet.getByRole('textbox', { name: 'Supplier domain' })
+  assert.equal(await supplierDomain.isVisible(), false)
   assert.equal(await searchField.isVisible(), false)
   await enableSearch.click()
   assert.equal(await searchField.evaluate(el => el === document.activeElement), true)
   await page.getByRole('link', { name: 'SearXNG Docker setup' }).waitFor()
   await searchField.fill('http://searxng:8080')
+  await supplierDomain.fill('shop.example.org')
+  await internet.getByRole('button', { name: 'Add supplier' }).click()
+  const supplier = internet.getByRole('checkbox', { name: 'shop.example.org' })
+  assert.equal(await supplier.isChecked(), true)
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('Settings saved.').waitFor()
   assert.equal(searchUrl, 'http://searxng:8080')
@@ -305,13 +312,12 @@ try {
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   await searchField.waitFor()
   assert.equal(await searchField.inputValue(), searchUrl)
-  await builtIn.getByText('Configured', { exact: true }).waitFor()
   assert.equal(await supplier.isChecked(), true)
   await supplier.uncheck()
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('Settings saved.').waitFor()
   assert.deepEqual(supplierSites, [{ domain: 'shop.example.org', enabled: false }])
-  await sources.getByRole('button', { name: 'Remove shop.example.org' }).click()
+  await internet.getByRole('button', { name: 'Remove shop.example.org' }).click()
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('Settings saved.').waitFor()
   assert.deepEqual(supplierSites, [])
@@ -348,6 +354,12 @@ try {
   await frame.getByRole('log').getByText('Find specifications', { exact: true }).waitFor()
   const colorReference = frame.getByText('Manufacturer color reference: RAL 9005 Signal Black')
   assert.equal(await colorReference.getByRole('link', { name: 'Open source' }).getAttribute('href'), evidence[0].url)
+  assert.equal(savedManufacturerWebsite, undefined)
+  await frame.getByRole('button', { name: 'Save manufacturer website' }).click()
+  await frame.getByText('Manufacturer website saved.', { exact: false }).waitFor()
+  assert.deepEqual(savedManufacturerWebsite, {
+    manufacturer_id: 7, name: manufacturer.name, url: 'https://manufacturer.test/',
+  })
   await frame.getByRole('button', { name: 'Stage 1 field' }).click()
   await frame.getByText('1 field staged.', { exact: false }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.staged), [{ density_g_cm3: { old: null, value: 1.24 } }])

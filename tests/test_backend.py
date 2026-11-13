@@ -151,6 +151,83 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
     assert catalogs == {"filamandb", "open_filament_database"}
 
 
+@pytest.mark.parametrize("catalog_has_site", [True, False])
+async def test_missing_manufacturer_site_is_discovered_and_can_be_saved(
+    installed, db_session, monkeypatch, normal_user, catalog_has_site,
+):
+    from app.core.security import generate_token_secret, hash_token
+    from app.models import UserSession
+
+    from filabrain import proposals
+
+    website = "https://fixturebrand.example/"
+    manufacturer = Manufacturer(name="Fixture Brand")
+    db_session.add(manufacturer)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=manufacturer.id, designation="Fixture PLA", material_type="PLA", diameter_mm=1.75,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    if not catalog_has_site:
+        assert (await installed.put(f"{BASE}/settings", json={"search_url": "http://searxng:8080"})).is_success
+
+    async def catalog_request(path, params):
+        assert path == "/manufacturers"
+        return {"items": [
+            {"name": "Fixture Brand Store", "website": "https://retailer.example/"},
+            {"name": "Fixture Brand", "website": website if catalog_has_site else None},
+        ]}
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_name):
+        return [], ""
+
+    async def search(_url, query):
+        if query == "Fixture Brand filament official website":
+            return ["https://retailer.example/fixture", website]
+        return []
+
+    async def fetch(url):
+        assert url == website
+        return proposals.Evidence(url, "Fixture Brand | 3D printing filament", "Fixture Brand makes filament.")
+
+    monkeypatch.setattr(filamentdb_proxy, "_proxy_get", catalog_request)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.is_success, response.text
+    issue = next(issue for issue in response.json()["issues"] if issue["code"] == "manufacturer_website_found")
+    assert issue["url"] == website
+    assert issue["source"] == ("FilaManDB" if catalog_has_site else "SearXNG")
+    assert (await installed.get(f"/api/v1/manufacturers/{manufacturer.id}")).json()["url"] is None
+    payload = {"manufacturer_id": manufacturer.id, "name": manufacturer.name, "url": issue["url"]}
+    endpoint = f"{BASE}/filaments/{filament.id}/manufacturer-website"
+    if catalog_has_site:
+        token = generate_token_secret()
+        session = UserSession(user_id=normal_user.id, session_token_hash=hash_token(token))
+        db_session.add(session)
+        await db_session.commit()
+        csrf = generate_token_secret()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="https://filaman.test",
+            cookies={"session_id": f"sess.{session.id}.{token}", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+        ) as viewer:
+            assert (await viewer.get(f"{BASE}/status")).json()["can_update_manufacturer"] is False
+            assert (await viewer.put(endpoint, json=payload)).status_code == 403
+    assert (await installed.put(endpoint, json=payload | {"manufacturer_id": manufacturer.id + 1})).status_code == 409
+    assert (await installed.put(endpoint, json=payload | {"url": "http://127.0.0.1/"})).status_code == 422
+    assert (await installed.put(endpoint, json=payload)).status_code == 204
+    assert (await installed.get(f"/api/v1/manufacturers/{manufacturer.id}")).json()["url"] == website
+    assert (await installed.put(endpoint, json=payload | {"url": "https://other.example/"})).status_code == 409
+
+
 async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     from filabrain import research, settings
 
@@ -570,6 +647,8 @@ async def test_research_uses_only_the_linked_spool_profile(installed, db_session
     from filabrain import proposals
 
     async def profile(path, params=None):
+        if path == "/manufacturers":
+            return {"items": []}
         assert path == "/spool-profiles/732"
         return {
             "id": profile_id, "is_active": True, "name": "250g Spool", "empty_weight_g": 250.0,

@@ -5,10 +5,11 @@ from urllib.parse import urlencode
 
 import httpx
 from app.api.deps import DBSession, PrincipalDep, ensure_any_permission
-from app.models import Filament, InstalledPlugin
+from app.core.event_bus import event_bus
+from app.models import Filament, InstalledPlugin, Manufacturer
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from .model import request_completion
@@ -19,6 +20,7 @@ from .proposals import (
     filament_identity,
     filament_snapshot,
     identity_matches,
+    manufacturer_site_url,
     research_products,
 )
 from .settings import (
@@ -58,6 +60,12 @@ class ChatMessage(BaseModel):
     content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8000)]
 
 
+class ManufacturerWebsite(BaseModel):
+    manufacturer_id: Annotated[int, Field(gt=0)]
+    name: Text
+    url: Annotated[str, Field(max_length=500)]
+
+
 class ChatRequest(BaseModel):
     messages: Annotated[list[ChatMessage], Field(min_length=1, max_length=11)]
     model_id: ModelId | None = None
@@ -85,6 +93,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "filaments:create",
                 "filaments:update",
                 "filaments:read",
+                "manufacturers:update",
                 "admin:plugins_manage",
             )
         except HTTPException as exc:
@@ -102,6 +111,8 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         "mcp_enabled": enabled and await mcp_access_enabled(db),
         "can_create": enabled and "filaments:create" in permissions,
         "can_update": "filaments:update" in permissions,
+        "can_update_manufacturer": enabled and principal.auth_type == "session"
+        and {"filaments:update", "manufacturers:update"} <= permissions,
         "can_configure": enabled and "admin:plugins_manage" in permissions,
         "can_chat": can_chat,
         "chat_model": chat_model,
@@ -268,3 +279,34 @@ async def research_proposal(
         db, principal, "filaments:update" if data.mode == "edit" else "filaments:create"
     )
     return await research(db, data)
+
+
+@router.put("/filaments/{filament_id}/manufacturer-website", status_code=204)
+async def save_manufacturer_website(
+    filament_id: int, data: ManufacturerWebsite, db: DBSession, principal: PrincipalDep,
+):
+    if not await is_enabled(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    if principal.auth_type != "session":
+        raise HTTPException(403, "A browser session is required")
+    required = {"filaments:update", "manufacturers:update"}
+    if not required <= await ensure_any_permission(db, principal, *required):
+        raise HTTPException(403, "Manufacturer update permission is required")
+    if not (website := manufacturer_site_url(data.url)):
+        raise HTTPException(422, "Enter a manufacturer website")
+    result = await db.execute(
+        update(Manufacturer)
+        .where(
+            Manufacturer.id == data.manufacturer_id,
+            Manufacturer.name == data.name,
+            or_(Manufacturer.url.is_(None), func.trim(Manufacturer.url) == ""),
+            select(Filament.id).where(
+                Filament.id == filament_id, Filament.manufacturer_id == data.manufacturer_id
+            ).exists(),
+        )
+        .values(url=website)
+    )
+    if not result.rowcount:
+        raise HTTPException(409, "The manufacturer changed or already has a website. Reload the filament.")
+    await db.commit()
+    await event_bus.publish({"event": "manufacturers_changed"})

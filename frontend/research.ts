@@ -220,7 +220,40 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       if (issue.filament_id && issue.code === 'duplicate') {
         p.append(' ', externalLink(`/filaments/${issue.filament_id}`, t('filaBrain.openExisting')))
       }
-      if (issue.url && /^https?:\/\//i.test(issue.url)) p.append(' ', externalLink(issue.url, t('filaBrain.openSource')))
+      if (issue.url && /^https?:\/\//i.test(issue.url)) {
+        const url = issue.url
+        const websiteFound = issue.code === 'manufacturer_website_found'
+        if (websiteFound) p.className = 'research-website-result'
+        p.append(' ', externalLink(url, websiteFound ? url : t('filaBrain.openSource')))
+        if (websiteFound && editor?.mode === 'edit' && status.can_update_manufacturer &&
+            context.filament_id && typeof fields.manufacturer_id === 'number') {
+          const saveWebsite = document.createElement('button')
+          saveWebsite.type = 'button'
+          saveWebsite.textContent = t('filaBrain.saveManufacturerWebsite')
+          saveWebsite.addEventListener('click', async () => {
+            saveWebsite.disabled = true
+            try {
+              const current = await target()
+              if (current.filament_id !== context.filament_id ||
+                  current.fields.manufacturer_id !== fields.manufacturer_id) {
+                throw new Error(t('filaBrain.manufacturerChanged'))
+              }
+              await api.put(`${route}/filaments/${context.filament_id}/manufacturer-website`, {
+                manufacturer_id: fields.manufacturer_id, name: issue.name, url,
+              })
+              saveWebsite.replaceWith(t('filaBrain.manufacturerWebsiteSaved'))
+            } catch (error) {
+              notice.textContent = errorText(error)
+              saveWebsite.disabled = false
+            }
+          })
+          const action = document.createElement('span')
+          action.className = 'research-website-action'
+          action.setAttribute('aria-live', 'polite')
+          action.append(saveWebsite)
+          p.append(action)
+        }
+      }
       if (issue.product_url && /^https?:\/\//i.test(issue.product_url)) {
         const choose = document.createElement('button')
         choose.type = 'button'

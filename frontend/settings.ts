@@ -18,7 +18,6 @@ export async function mountSettings() {
   const enableSearch = document.getElementById('research-enable-search')!
   const searchSetup = document.getElementById('research-search-setup')!
   const sourceControls = form.querySelector<HTMLFieldSetElement>('#research-source-controls')!
-  const searchSource = document.getElementById('research-search-source')!
   const supplierSites = document.getElementById('research-supplier-sites')!
   const domainInput = form.querySelector<HTMLInputElement>('#research-supplier-domain')!
   const addSupplier = form.querySelector<HTMLButtonElement>('#research-add-supplier')!
@@ -85,6 +84,7 @@ export async function mountSettings() {
     test.disabled = load.disabled || !config.model_id
     modelList.disabled = busy || !ready
     sourceControls.disabled = busy || !ready
+    sourceControls.hidden = !config.search_url || !field('search_url').validity.valid
     domainInput.disabled = addSupplier.disabled = sites.length >= maxSupplierSites
   }
 
@@ -174,7 +174,6 @@ export async function mountSettings() {
     field('api_key').value = ''
     field('clear_key').checked = false
     keyState.textContent = t(config.has_key ? 'filaBrain.keyConfigured' : 'filaBrain.keyOptional')
-    searchSource.textContent = t(config.search_url ? 'filaBrain.sourceConfigured' : 'filaBrain.sourceNotConfigured')
     sites = config.supplier_sites ?? []
     renderSupplierSites()
     supplierMessage.textContent = sites.length >= maxSupplierSites ? t('filaBrain.supplierLimit') : ''

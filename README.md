@@ -36,7 +36,9 @@ FILAMAN_NETWORK=your-filaman-network docker compose -f compose.searxng.yml up -d
 
 The search service stays on that Docker network and serves JSON results. When a public product page blocks access, FilaBrain can check a dated Wayback Machine capture if one is available. PDF extraction uses `pdftotext` when it is available on the FilaMan host.
 
-**Research sources** lists the built-in catalogs and shows whether SearXNG is configured. Add supplier domains there to include them in targeted SearXNG searches. Unchecking a supplier pauses its targeted search, and general web search can still find that site.
+**Research sources** lists the built-in sources. Add supplier domains under **Internet search** to include them in targeted SearXNG searches. General search can still find unchecked sites.
+
+When a manufacturer's website is missing, FilaBrain checks FilaManDB first and can look for a matching brand site through SearXNG. In the filament editor, users with manufacturer update permission can review and save a suggested website to the manufacturer record.
 
 ## External MCP connections
 

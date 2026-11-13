@@ -29,36 +29,31 @@
         </label>
         <p id="research-key-state" class="fm-field-hint"></p>
         <label><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
+        <section class="research-sources" aria-labelledby="research-sources-title">
+          <h3 id="research-sources-title" data-i18n="filaBrain.researchSources">Research sources</h3>
+          <ul class="research-built-in" role="list">
+            <li>FilaManDB</li>
+            <li>Open Filament Database</li>
+            <li data-i18n="filaBrain.manufacturerLinks">Manufacturer sites and product links</li>
+            <li data-i18n="filaBrain.waybackFallback">Wayback Machine fallback</li>
+          </ul>
+        </section>
         <section class="research-web-search" aria-labelledby="research-search-title">
-          <h3 id="research-search-title" data-i18n="filaBrain.webSearch">Web search (optional)</h3>
-          <p class="fm-field-hint" data-i18n="filaBrain.searchHint">Some suppliers can be researched using known manufacturer links and filament catalogs. Enable web search to find additional product pages and datasheets.</p>
-          <button type="button" id="research-enable-search" class="fm-btn fm-btn-outline" aria-controls="research-search-setup" data-i18n="filaBrain.enableWebSearch" hidden>Enable web search</button>
+          <div class="research-search-heading">
+            <h3 id="research-search-title" data-i18n="filaBrain.webSearch">Internet search</h3>
+            <button type="button" id="research-enable-search" class="fm-btn fm-btn-outline" aria-controls="research-search-setup" data-i18n="filaBrain.enableWebSearch" hidden>Set up search</button>
+          </div>
           <div id="research-search-setup" class="form-field" hidden>
             <label for="research-search-url" data-i18n="filaBrain.searchUrl">SearXNG URL (optional)</label>
-            <input id="research-search-url" name="search_url" type="url" class="fm-input" maxlength="500" placeholder="http://searxng:8080" aria-describedby="research-search-instructions research-search-provider" />
-            <small id="research-search-instructions" class="fm-field-hint" data-i18n="filaBrain.searchInstructions">Use a SearXNG address that FilaMan can reach. Enable JSON results in SearXNG, then enter the address here and click Save.</small>
-            <small id="research-search-provider" class="fm-field-hint" data-i18n="filaBrain.searchProvider">FilaBrain uses SearXNG for broad web search with any model. Claude and OpenAI offer native search APIs that FilaBrain has yet to integrate.</small>
+            <input id="research-search-url" name="search_url" type="url" class="fm-input" maxlength="500" placeholder="http://searxng:8080" aria-describedby="research-search-instructions" />
+            <small id="research-search-instructions" class="fm-field-hint" data-i18n="filaBrain.searchInstructions">Enable JSON results on your SearXNG server.</small>
             <div><a href="https://docs.searxng.org/admin/installation-docker" target="_blank" rel="noopener noreferrer" data-i18n="filaBrain.searchInstall">SearXNG Docker setup</a></div>
-          </div>
-        </section>
-        <section class="research-web-search research-sources" aria-labelledby="research-sources-title">
-          <h3 id="research-sources-title" data-i18n="filaBrain.researchSources">Research sources</h3>
-          <div class="research-source-box">
-            <h4 id="research-built-in-title" data-i18n="filaBrain.builtInSources">Built-in sources</h4>
-            <ul class="research-source-list" role="list" aria-labelledby="research-built-in-title">
-              <li><span data-i18n="filaBrain.manufacturerLinks">Manufacturer and product links</span><span data-i18n="filaBrain.sourceWhenLinked">When linked</span></li>
-              <li><span>FilaManDB</span><span data-i18n="filaBrain.sourceAutomatic">Automatic</span></li>
-              <li><span>Open Filament Database</span><span data-i18n="filaBrain.sourceAutomatic">Automatic</span></li>
-              <li><span>Wayback Machine</span><span data-i18n="filaBrain.sourceFallback">Fallback</span></li>
-              <li><span data-i18n="filaBrain.searxngSource">SearXNG web search</span><span id="research-search-source">—</span></li>
-            </ul>
-            <fieldset id="research-source-controls" aria-labelledby="research-supplier-title" disabled>
-              <h4 id="research-supplier-title" data-i18n="filaBrain.supplierSites">Supplier sites</h4>
-              <p id="research-supplier-hint" class="fm-field-hint" data-i18n="filaBrain.supplierHint">With SearXNG configured, checked sites get a targeted search. General web search can still find unchecked sites.</p>
-              <ul id="research-supplier-sites" class="research-source-list" role="list" aria-labelledby="research-supplier-title" hidden></ul>
-              <label for="research-supplier-domain" data-i18n="filaBrain.supplierDomain">Supplier domain</label>
+            <fieldset id="research-source-controls" hidden disabled>
+              <legend data-i18n="filaBrain.supplierSites">Supplier sites</legend>
+              <p id="research-supplier-hint" class="fm-field-hint" data-i18n="filaBrain.supplierHint">Checked sites get a targeted search. General search can still find unchecked sites.</p>
+              <ul id="research-supplier-sites" class="research-supplier-list" role="list" hidden></ul>
               <div class="research-supplier-add">
-                <input id="research-supplier-domain" class="fm-input" type="text" inputmode="url" maxlength="254" placeholder="example.com" aria-describedby="research-supplier-hint research-supplier-message" />
+                <input id="research-supplier-domain" class="fm-input" type="text" inputmode="url" maxlength="254" data-i18n-aria-label="filaBrain.supplierDomain" aria-label="Supplier domain" placeholder="example.com" aria-describedby="research-supplier-hint research-supplier-message" />
                 <button id="research-add-supplier" type="button" class="fm-btn fm-btn-outline" data-i18n="filaBrain.addSupplier">Add supplier</button>
               </div>
               <small id="research-supplier-message" class="fm-field-hint" role="status"></small>

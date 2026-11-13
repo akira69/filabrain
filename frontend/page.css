@@ -70,6 +70,8 @@ input:not([type=checkbox]), select, textarea { max-width: 100%; min-width: 0; bo
 input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
 input[type=checkbox] { accent-color: var(--accent); }
 [data-view="settings"] .fm-section { max-width: 52rem; }
+.research-website-result a { overflow-wrap: anywhere; }
+.research-website-action { display: block; margin-block-start: .35rem; }
 .fm-toggle { display: inline-block; position: relative; width: 40px; height: 22px; flex: none; }
 .fm-toggle input { opacity: 0; width: 0; height: 0; }
 .fm-toggle-slider { position: absolute; inset: 0; background: var(--border); border-radius: 999px; cursor: pointer; }

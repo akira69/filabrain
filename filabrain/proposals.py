@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import replace
 from typing import Annotated
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 from app.api.deps import DBSession
@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from sqlalchemy import func, or_, select
 
-from .catalog import linked_spool_profile, lookup_filaments
+from .catalog import linked_spool_profile, lookup_filaments, manufacturer_website
 from .model import (
     LIMITS,
     SPEC_LABELS,
@@ -309,6 +309,20 @@ def public_link(value) -> str | None:
 def _site_host(url) -> str:
     link = public_link(url)
     return (urlsplit(link).hostname or "").rstrip(".").removeprefix("www.") if link else ""
+
+
+def manufacturer_site_url(value) -> str | None:
+    if not (link := public_link(value)):
+        return None
+    parsed = urlsplit(link)
+    try:
+        if parsed.port not in (None, 443 if parsed.scheme == "https" else 80):
+            return None
+    except ValueError:
+        return None
+    if not re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]+", _site_host(link)):
+        return None
+    return urlunsplit(parsed._replace(query="", fragment=""))
 
 def _publisher(url):
     host = _site_host(url)
@@ -1359,7 +1373,46 @@ async def research_products(
                 func.lower(Manufacturer.name) == _norm(identity.manufacturer)
             ).limit(1)
         )
-    manufacturer_domain = "paramount-3d.com" if verified_paramount_url else _site_host(manufacturer_site)
+    saved_domain = _site_host(manufacturer_site)
+    manufacturer_domain = "paramount-3d.com" if verified_paramount_url else saved_domain
+    search_domain = manufacturer_domain
+    if not saved_domain and identity.manufacturer:
+        if verified_paramount_url:
+            discovered = "https://www.paramount-3d.com/"
+            source = "Manufacturer product page"
+        else:
+            discovered = manufacturer_site_url(await manufacturer_website(identity.manufacturer))
+            source = "FilaManDB"
+        if not discovered:
+            # Require a brand-owned-looking host and a branded filament homepage.
+            brand = re.sub(r"[^a-z0-9]", "", _norm(identity.manufacturer))
+            homepages = []
+            if len(brand) >= 3:
+                for url in await search(f"{identity.manufacturer} filament official website"):
+                    if re.sub(r"[^a-z0-9]", "", _publisher(url).split(".")[0]) == brand:
+                        link = manufacturer_site_url(url)
+                        if link:
+                            homepages.append(urlunsplit(urlsplit(link)._replace(path="/")))
+            matches = {
+                site for page in (await check_pages(homepages)).values()
+                if page and _literal_in(identity.manufacturer, page.title)
+                and re.search(r"filament|3d print", page.title + " " + page.text, re.IGNORECASE)
+                and re.sub(r"[^a-z0-9]", "", _publisher(page.url).split(".")[0]) == brand
+                and (site := manufacturer_site_url(page.url))
+            }
+            if len(matches) == 1:
+                discovered = matches.pop()
+                source = "SearXNG"
+        if discovered:
+            manufacturer_site = discovered
+            search_domain = _site_host(discovered)
+            if source != "SearXNG":
+                manufacturer_domain = search_domain
+            if snapshot is not None and is_missing("manufacturer_url", snapshot.get("manufacturer_url")):
+                issues.append({
+                    "code": "manufacturer_website_found", "url": discovered,
+                    "name": identity.manufacturer, "source": source,
+                })
     direct_urls = [
         supplier_page_url(link) for url in (
             product_url if not resolve_pasted_url else None,
@@ -1376,7 +1429,7 @@ async def research_products(
         imported_sku = ""
     lookup_sku = identity.sku.strip() or sku_hint.strip() or imported_sku
     initial_query = search_terms(lookup_sku)
-    early_web = not manufacturer_domain and bool(identity.manufacturer and initial_query)
+    early_web = not search_domain and bool(identity.manufacturer and initial_query)
     web_urls = []
     def official_match():
         return any(
@@ -1387,10 +1440,10 @@ async def research_products(
 
     if manufacturer_domain == "paramount-3d.com" and not official_match():
         first_pages.update(await check_pages(await _paramount_candidates(identity, lookup_sku)))
-    if manufacturer_domain and not official_match():
-        official_results = await search(f"site:{manufacturer_domain} {initial_query}")
+    if search_domain and not official_match():
+        official_results = await search(f"site:{search_domain} {initial_query}")
         first_pages.update(await check_pages(
-            [url for url in official_results if _on_manufacturer_site(url, manufacturer_domain)]
+            [url for url in official_results if _on_manufacturer_site(url, search_domain)]
             or ([manufacturer_site] if not first_urls else [])
         ))
     elif early_web:
@@ -1616,7 +1669,7 @@ async def research_products(
 
     preferred_urls = await asyncio.gather(*(
         find_supplier_page(site["domain"]) for site in config["supplier_sites"]
-        if site["enabled"] and supplier_query and site["domain"] != manufacturer_domain
+        if site["enabled"] and supplier_query and site["domain"] != search_domain
     ))
     supplier_urls = [*direct_urls, *(supplement if guidance else []), *catalog_urls, *different_sites.values()]
     pages = first_pages | await check_pages(supplier_urls)
@@ -1904,7 +1957,9 @@ async def batch_proposal(
     if mode == "standardize":
         return await _local_conventions(db, snapshot)
     result = {"proposals": [], "issues": []}
-    if not any(is_missing(field, snapshot.get(field)) for field in MODE_FIELDS["fill"]):
+    if not any(is_missing(field, snapshot.get(field)) for field in MODE_FIELDS["fill"]) and (
+        release_read or not is_missing("manufacturer_url", snapshot.get("manufacturer_url"))
+    ):
         return result
     identity = snapshot_identity(snapshot)
     if _norm(identity.sku) and _norm(sku_hint) and _norm(identity.sku) != _norm(sku_hint):

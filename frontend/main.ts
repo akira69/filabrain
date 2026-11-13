@@ -12,6 +12,7 @@ export type Status = {
   chat_model?: string | null
   can_create: boolean
   can_update: boolean
+  can_update_manufacturer?: boolean
   can_configure: boolean
   mcp_enabled: boolean
 }
