@@ -207,7 +207,7 @@ async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(install
 
     async def search(_url, query):
         if query == "Fixture Brand filament official website":
-            return [site]
+            raise proposals.SearchEnginesUnavailable("Upstream search engines failed to return results")
         if query == "site:fixturebrand.example polyterra pla technical data sheet filetype:pdf":
             return [fake, wrong, sheet]
         return []

@@ -26,6 +26,10 @@ _supplier_cooldowns = TTLCache()
 _product_sitemaps = TTLCache()
 
 
+class SearchEnginesUnavailable(ValueError):
+    pass
+
+
 class SupplierRateLimited(ValueError):
     def __init__(self, host: str, retry_after: str = ""):
         super().__init__("HTTP 429 (rate limited)")
@@ -523,7 +527,7 @@ async def search_web(origin: str, query: str) -> list[str]:
         response.raise_for_status()
         data = response.json()
     if not data.get("results") and data.get("unresponsive_engines"):
-        raise ValueError("Upstream search engines failed to return results")
+        raise SearchEnginesUnavailable("Upstream search engines failed to return results")
     return [
         row["url"]
         for row in data.get("results", [])[:3]

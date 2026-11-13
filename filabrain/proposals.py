@@ -30,6 +30,7 @@ from .sources import (
     SHARED_SPEC,
     SUPPLIER_TOO_LARGE,
     Evidence,
+    SearchEnginesUnavailable,
     fetch_archived_supplier,
     fetch_supplier,
     ofd_candidates,
@@ -1327,20 +1328,21 @@ async def research_products(
         )))
 
     search_available = bool(config["search_url"])
+    search_issue = None
 
     async def search(term):
-        nonlocal search_available
+        nonlocal search_available, search_issue
         if term and search_available:
             try:
                 return await search_web(config["search_url"], term)
             except (httpx.HTTPError, ValueError, AttributeError, TypeError) as error:
-                if not search_available:
-                    return []
-                search_available = False
-                issue = {"code": "unavailable_source", "source": "Web search"}
-                if isinstance(error, ValueError):
-                    issue["reason"] = str(error)
-                issues.append(issue)
+                if not isinstance(error, SearchEnginesUnavailable):
+                    search_available = False
+                if search_issue is None:
+                    search_issue = {"code": "unavailable_source", "source": "Web search"}
+                    if isinstance(error, ValueError):
+                        search_issue["reason"] = str(error)
+                    issues.append(search_issue)
         return []
 
     # Resolve a pasted product URL first so its brand and SKU can drive both catalogs.
@@ -1410,6 +1412,9 @@ async def research_products(
             brand = re.sub(r"[^a-z0-9]", "", _norm(identity.manufacturer))
             homepages = []
             if len(brand) >= 3:
+                product_publisher = _publisher(product_url)
+                if re.sub(r"[^a-z0-9]", "", product_publisher.split(".")[0]) == brand:
+                    homepages.append(f"https://{product_publisher}/")
                 for url in await search(f"{identity.manufacturer} filament official website"):
                     if re.sub(r"[^a-z0-9]", "", _publisher(url).split(".")[0]) == brand:
                         link = manufacturer_site_url(url)
