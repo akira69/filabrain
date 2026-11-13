@@ -35,7 +35,9 @@ export async function mountSettings() {
   const mcpMessage = document.getElementById('research-mcp-message')!
   let mcpEnabled: boolean
   let saved: string | undefined
-  let busy = false
+  let saving = false
+  let testingModel = false
+  let testingSearch = false
   let models: string[] = []
   let sites: SupplierSite[] = []
   const values = () => ({
@@ -81,14 +83,14 @@ export async function mountSettings() {
     const ready = saved !== undefined
     const config = values()
     const dirty = ready && JSON.stringify(config) !== saved
-    save.disabled = busy || !dirty
+    save.disabled = saving || !dirty
     save.classList.toggle('fm-btn-primary', dirty)
     save.classList.toggle('fm-btn-outline', !dirty)
-    load.disabled = busy || !ready || !config.model_url
+    load.disabled = saving || testingModel || !ready || !config.model_url
     test.disabled = load.disabled || !config.model_id
-    testSearch.disabled = busy || !ready || !config.search_url || !field('search_url').validity.valid
-    modelList.disabled = busy || !ready
-    sourceControls.disabled = busy || !ready
+    testSearch.disabled = saving || testingSearch || !ready || !config.search_url || !field('search_url').validity.valid
+    modelList.disabled = saving || testingModel || !ready
+    sourceControls.disabled = saving || !ready
     sourceControls.hidden = !config.search_url || !field('search_url').validity.valid
     domainInput.disabled = addSupplier.disabled = sites.length >= maxSupplierSites
   }
@@ -188,17 +190,22 @@ export async function mountSettings() {
   }
 
   async function send(action: 'save' | 'test' | 'models' | 'test-search') {
-    if (busy) return
+    if (saving || (action === 'test-search' ? testingSearch : action !== 'save' && testingModel)) return
     if (action === 'test-search' ? !field('search_url').reportValidity()
       : action === 'save' ? !form.reportValidity() : !field('model_url').reportValidity()) return
     if (action === 'save' && save.disabled) return
     const requestedConnection = connection()
-    const payload = action === 'test-search' ? { search_url: values().search_url }
-      : action === 'save' ? values() : { ...values(), search_url: '', supplier_download_mib: undefined }
+    const config = values()
+    const payload = action === 'test-search' ? { search_url: config.search_url }
+      : action === 'save' ? config : {
+        model_url: config.model_url, model_id: config.model_id, api_key: config.api_key, clear_key: config.clear_key,
+      }
     const inputs = action === 'save' ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)'))
       .filter(input => !sourceControls.contains(input)) : []
     inputs.forEach(input => { input.disabled = true })
-    busy = true
+    if (action === 'save') saving = true
+    else if (action === 'test-search') testingSearch = true
+    else testingModel = true
     refresh()
     const feedback = action === 'save' ? message : action === 'test-search' ? searchMessage : modelMessage
     feedback.textContent = ''
@@ -226,7 +233,9 @@ export async function mountSettings() {
       feedback.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
     } finally {
       inputs.forEach(input => { input.disabled = false })
-      busy = false
+      if (action === 'save') saving = false
+      else if (action === 'test-search') testingSearch = false
+      else testingModel = false
       refresh()
     }
   }

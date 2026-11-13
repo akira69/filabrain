@@ -13,6 +13,7 @@ export type ResearchDraft = {
   context: EditorContext
   proposal: ResearchProposal
   action: string
+  selection?: Unit[]
 }
 export type SelectionContext = { mode: 'selection'; filament_ids: number[] }
 
@@ -111,8 +112,8 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   let lastAction = 'fill'
   let formRevision = 0
 
-  function showInChat(movePicker = true) {
-    openChat()
+  function showInChat(movePicker = true, reveal = true) {
+    if (reveal) openChat()
     if (movePicker) document.querySelector('[data-chat-form] .chat-toolbar')!.prepend(chat.picker)
     if (inputs.parentElement !== chatInput) chatInput.append(inputs)
     if (conversation.parentElement !== chatResults) chatResults.append(conversation)
@@ -189,7 +190,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     }
   }
 
-  results.addEventListener('change', updateSave)
+  results.addEventListener('change', () => {
+    updateSave()
+    chat.saveSelection(selected())
+  })
 
   function option(unit: Unit, sources: ResearchOption['sources'], reason?: string, group?: string) {
     const row = document.createElement('div')
@@ -454,6 +458,39 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   chat.setResearch({
     start: showInChat,
     reset,
+    archive(proposal) {
+      const details = document.createElement('details')
+      details.className = 'research-history research-note'
+      const heading = document.createElement('summary')
+      heading.textContent = t('filaBrain.earlierFindings')
+      details.append(heading)
+      const row = (field: string, value: Value, sources: ResearchOption['sources']) => {
+        const item = document.createElement('div')
+        item.className = 'research-history-value'
+        item.textContent = `${researchFieldLabel(field)}: ${valueText(value)}`
+        appendSources(item, sources)
+        details.append(item)
+      }
+      for (const result of proposal.suggestions) row(result.field, result.value, result.sources)
+      for (const unit of proposal.proposals || []) {
+        for (const [field, change] of Object.entries(unit.fields)) {
+          row(field, change.value, unit.sources.map(source => ({ ...source, evidence: source.quote })))
+        }
+      }
+      const links = new Set<string>()
+      for (const issue of proposal.issues) {
+        for (const option of issue.options || []) {
+          if (issue.field) row(issue.field, option.value, option.sources)
+        }
+        if (issue.url && /^https?:\/\//i.test(issue.url) && !links.has(issue.url)) {
+          links.add(issue.url)
+          const line = document.createElement('p')
+          line.append(externalLink(issue.url, issue.name || t('filaBrain.openSource')))
+          details.append(line)
+        }
+      }
+      return details
+    },
     async resume(draft) {
       await pendingOptions
       for (const [key, value] of Object.entries(draft.fields)) {
@@ -465,13 +502,17 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
           JSON.stringify(identity(draft.context.fields)) !== JSON.stringify(identity(context.fields))) {
         conversation.hidden = false
         notice.textContent = t('filaBrain.identityChanged')
-        return
+        return false
       }
       conversation.hidden = false
       lastAction = draft.action
       optionsSummary.hidden = false
       searchOptions.open = false
       render(draft.proposal, context)
+      const checked = new Set(draft.selection?.map(unit => JSON.stringify(unit)))
+      for (const [control, unit] of choices) control.checked = checked.has(JSON.stringify(unit))
+      updateSave()
+      return true
     },
     followUp: prompt => search(lastAction, prompt),
   })
@@ -491,6 +532,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       }
       if (editor) {
         const { staged, skipped } = await hostRequest<{ staged: string[]; skipped: string[] }>('filaman:filament-stage', { units })
+        chat.saveSelection([])
         clearResults()
         notice.textContent = `${staged.length} field${staged.length === 1 ? '' : 's'} staged. Save in the FilaMan editor to keep the changes.`
           + (skipped.length ? ` ${skipped.length} skipped because the form changed or the field is unavailable.` : '')
@@ -619,11 +661,28 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
           const incoming = await api.get<{ proposal_id?: string; proposal?: ResearchProposal }>(path, { cache: 'no-store' })
           if (pairId !== session.id) return
           if (incoming.proposal && incoming.proposal_id && incoming.proposal_id !== lastId) {
-            lastId = incoming.proposal_id
-            showInChat()
-            conversation.hidden = false
-            render(incoming.proposal, context)
-            notice.textContent = t('filaBrain.pairReceived')
+            const proposal = incoming.proposal
+            const current = await target()
+            if (pairId !== session.id) return
+            if (current.filament_id !== context.filament_id ||
+                JSON.stringify(identity(current.fields)) !== JSON.stringify(identity(context.fields))) {
+              void disconnect()
+              pairStatus.textContent = t('filaBrain.identityChanged')
+              return
+            }
+            if (!busy && !saving) {
+              showInChat(true, false)
+              if (await chat.researchTurn(t('filaBrain.pairReceived'), async () => {
+                conversation.hidden = false
+                lastAction = 'fill'
+                render(proposal, current)
+                return {
+                  reply: t(results.childElementCount ? 'filaBrain.researchReview' : 'filaBrain.noSuggestions'),
+                  draft: { fields: Object.fromEntries(new FormData(form).entries()) as Record<string, string>,
+                    context: current, proposal, action: 'fill' },
+                }
+              })) lastId = incoming.proposal_id
+            }
           }
           pairPoll = window.setTimeout(poll, 2000)
         } catch {

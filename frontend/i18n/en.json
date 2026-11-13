@@ -45,6 +45,7 @@
     "researchNoModel": "Model not configured",
     "researchReview": "Here’s what I found. Review the results below.",
     "sourcesChecked": "Sources checked ({count})",
+    "earlierFindings": "Earlier findings",
     "sendFollowUp": "Send follow-up",
     "title": "FilaBrain",
     "description": "Research a filament and review the sources before applying suggestions.",

@@ -148,16 +148,26 @@
   inset-inline-end: 1rem;
   top: calc(100% + .35rem);
   display: grid;
-  gap: .4rem;
+  gap: .15rem;
+  padding: .35rem;
   width: min(17rem, calc(100vw - 3rem));
   max-height: min(20rem, 55dvh);
   overflow: auto;
 }
-.chat-history-list button { text-align: start; overflow-wrap: anywhere; }
+.chat-history-list button {
+  min-height: 2rem; padding: .3rem .45rem; border-radius: .35rem;
+  font: .78rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-align: start; overflow-wrap: anywhere;
+}
+.chat-history-list p { margin: .3rem .45rem; }
 .chat-history-list button[aria-current="true"] { border-color: var(--accent); }
 [data-chat-research-input], [data-chat-research-results] { width: min(100%, 48rem); margin-inline: auto; }
 [data-chat-research-input] { margin-block-end: .65rem; }
 [data-chat-research-results] #research-conversation { margin-block-end: 0; }
+.research-history { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: .45rem; }
+.research-history summary { cursor: pointer; }
+.research-history p { margin: .15rem 0; }
+.research-history-value { margin-block-start: .35rem; overflow-wrap: anywhere; }
 
 :root[data-research-editor] main:has(> [data-view="chat"]:not([hidden])) {
   display: flex;

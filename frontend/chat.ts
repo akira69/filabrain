@@ -11,12 +11,16 @@ const pageLabels = {
   model_settings: 'filaBrain.settings',
 }
 type Action = { page: keyof typeof pageLabels; url: string }
-type Message = { role: 'user' | 'assistant'; content: string; action?: Action }
-type Conversation = { id: string; title: string; messages: Message[]; research?: ResearchDraft }
+type Message = { role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal'] }
+type Conversation = {
+  id: string; title: string; messages: Message[]; research?: ResearchDraft
+  researching?: true; model?: string; updatedAt?: number
+}
 type Research = {
   start(): void
   reset(): void
-  resume(draft: ResearchDraft): Promise<void>
+  resume(draft: ResearchDraft): Promise<boolean>
+  archive(proposal: ResearchDraft['proposal']): HTMLElement
   followUp(prompt: string): Promise<void>
 }
 
@@ -39,10 +43,12 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   let current: Conversation = { id: '', title: '', messages: [] }
   let saved: Conversation[] = []
   let storageKey: string | undefined
+  const historyStorage = () => editorScope === '' ? sessionStorage : localStorage
   let request: AbortController | undefined
   let busyResearch = false
   let researching = false
   let research: Research | undefined
+  let activeAnswer: HTMLElement | undefined
   const modelPicker = mountModelPicker(form, model, openSettings)
   const picker = form.querySelector<HTMLElement>('.chat-model-picker')!
   status.removeAttribute('data-i18n')
@@ -92,9 +98,14 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     return paragraph
   }
 
+  function placeResearchResults(answer: HTMLElement) {
+    answer.after(researchResults)
+    activeAnswer = answer
+  }
+
   function renderHistory() {
     historyList.replaceChildren()
-    const conversations = saved.filter(item => !item.research || research)
+    const conversations = saved.filter(item => item.researching || item.research ? research : !researchOnly)
     if (!conversations.length) {
       const empty = document.createElement('p')
       empty.className = 'fm-field-hint'
@@ -108,23 +119,42 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       if (conversation.id === current.id) button.setAttribute('aria-current', 'true')
       button.addEventListener('click', async () => {
         if (busyResearch) return
-        reset(!!conversation.research)
+        const researchChat = !!(conversation.researching || conversation.research)
+        reset(researchChat)
         current = { ...conversation, messages: [...conversation.messages] }
+        let lastResult = -1
+        current.messages.forEach((message, index) => { if (message.proposal) lastResult = index })
+        if (conversation.research && lastResult === -1) {
+          lastResult = current.messages.length - 1
+          current.messages[lastResult] = { ...current.messages[lastResult], proposal: conversation.research.proposal }
+        }
+        modelPicker.reset(conversation.model)
         busyResearch = true
         updateControls()
         try {
-          if (conversation.research) {
+          let resumed = false
+          if (researchChat) {
             research?.start()
-            await research?.resume(conversation.research)
           }
-          current.messages.forEach(append)
+          if (conversation.research) {
+            resumed = await research?.resume(conversation.research) ?? false
+          }
+          current.messages.forEach((message, index) => {
+            const bubble = append(message)
+            if (conversation.research && index === lastResult) {
+              placeResearchResults(bubble)
+              if (!resumed && research) bubble.after(research.archive(conversation.research.proposal))
+            } else if (message.proposal && research) {
+              bubble.after(research.archive(message.proposal))
+            }
+          })
         } catch {
           status.textContent = t('filaBrain.failed')
         } finally {
           busyResearch = false
           renderHistory()
           updateControls()
-          if (conversation.research) {
+          if (researchChat) {
             const lastQuestion = log.querySelectorAll<HTMLElement>('.chat-user')
             transcript.scrollTop = (lastQuestion[lastQuestion.length - 1]?.offsetTop ?? 0) - 8
           } else scrollToEnd()
@@ -137,7 +167,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
 
   function readHistory(): Conversation[] {
     if (!storageKey) return []
-    const stored: unknown = JSON.parse(localStorage.getItem(storageKey) || '[]')
+    const stored: unknown = JSON.parse(historyStorage().getItem(storageKey) || '[]')
     return Array.isArray(stored) ? stored.filter(item => typeof item?.id === 'string' &&
       Array.isArray(item.messages) && item.messages.length && item.messages.every(
         (message: Message) => (message?.role === 'user' || message?.role === 'assistant') &&
@@ -149,32 +179,36 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       current.id = String(Date.now()) + '-' + Math.random().toString(36).slice(2)
       current.title = current.messages[0].content.slice(0, 100)
     }
-    const snapshot = { ...current, messages: current.messages.slice(-60) }
+    const snapshot = { ...current, model: modelPicker.selected, updatedAt: Date.now(), messages: current.messages.slice(-60) }
     saved = [snapshot, ...saved.filter(item => item.id !== snapshot.id)].slice(0, 20)
     if (storageKey) {
       try {
-        const byId = new Map([...saved, ...readHistory()].map(item => [item.id, item]))
-        saved = [snapshot, ...[...byId.values()].filter(item => item.id !== snapshot.id)].slice(0, 20)
-        localStorage.setItem(storageKey, JSON.stringify(saved))
+        const byId = new Map<string, Conversation>()
+        for (const item of [...saved, ...readHistory()]) {
+          const previous = byId.get(item.id)
+          if (!previous || lastUpdated(item) >= lastUpdated(previous)) byId.set(item.id, item)
+        }
+        saved = [snapshot, ...[...byId.values()].filter(item => item.id !== snapshot.id)
+          .sort((a, b) => lastUpdated(b) - lastUpdated(a))].slice(0, 20)
+        historyStorage().setItem(storageKey, JSON.stringify(saved))
       } catch { status.textContent = t('filaBrain.chatHistoryFailed') }
     }
     renderHistory()
   }
 
-  if (editorScope === '') {
+  function lastUpdated(item: Conversation) {
+    return item.updatedAt ?? (Number(item.id.split('-')[0]) || 0)
+  }
+
+  void api.get<{ id: number }>('/me', { cache: 'no-store' }).then(({ id }) => {
+    if (!Number.isSafeInteger(id) || id < 1) return
+    storageKey = `filabrain:chat:${id}${editorScope === '' ? ':editor:new' : editorScope ? ':' + editorScope : ''}`
+    try { saved = [...saved, ...readHistory()].slice(0, 20) }
+    catch { /* The current conversation remains available in memory. */ }
+    if (current.messages.length) remember()
     renderHistory()
     history.hidden = false
-  } else {
-    void api.get<{ id: number }>('/me', { cache: 'no-store' }).then(({ id }) => {
-      if (!Number.isSafeInteger(id) || id < 1) return
-      storageKey = `filabrain:chat:${id}${editorScope ? ':' + editorScope : ''}`
-      try { saved = [...saved, ...readHistory()].slice(0, 20) }
-      catch { /* The current conversation remains available in memory. */ }
-      if (current.messages.length) remember()
-      renderHistory()
-      history.hidden = false
-    }).catch(() => {})
-  }
+  }).catch(() => {})
 
   document.addEventListener('click', event => {
     if (event.target instanceof Node && !history.contains(event.target)) history.open = false
@@ -194,6 +228,8 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     research?.reset()
     document.dispatchEvent(new CustomEvent('filabrain:chat-mode', { detail: useResearch }))
     modelPicker.reset()
+    log.after(researchResults)
+    activeAnswer = undefined
     log.replaceChildren()
     input.value = ''
     status.textContent = ''
@@ -294,6 +330,11 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     get model() { return modelPicker.selected },
     picker,
     startResearch,
+    saveSelection(selection: ResearchDraft['selection']) {
+      if (!current.research) return
+      current.research = { ...current.research, selection }
+      remember()
+    },
     setResearch(value: Research) { research = value; renderHistory() },
     showChat() {
       if (busyResearch) {
@@ -301,7 +342,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       } else if (researching) reset(false)
     },
     async researchTurn(content: string, run: () => Promise<{ reply: string; draft?: ResearchDraft }>) {
-      if (busyResearch) return
+      if (busyResearch) return false
       const question: Message = { role: 'user', content }
       const questionBubble = append(question)
       const note = append({ role: 'assistant', content: t('filaBrain.searching') })
@@ -313,15 +354,18 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       try {
         const { reply, draft } = await run()
         note.textContent = reply
+        note.className = 'chat-message chat-assistant'
+        const previous = current.research
+        if (draft && previous && activeAnswer && research) activeAnswer.after(research.archive(previous.proposal))
+        current.messages.push(question, { role: 'assistant', content: reply, proposal: draft?.proposal })
         if (draft) {
-          const answer: Message = { role: 'assistant', content: reply }
-          current.messages.push(question, answer)
           current.research = draft
+          placeResearchResults(note)
           if (input.value.trim() === content) input.value = ''
-          remember()
-        } else {
-          note.className = 'chat-message chat-assistant'
         }
+        current.researching = true
+        remember()
+        return true
       } finally {
         note.removeAttribute('data-chat-running')
         busyResearch = false

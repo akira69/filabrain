@@ -38,6 +38,8 @@ try {
   let account = 7
   let chatRequests = 0
   let proposalRequests = 0
+  let pairedProposal = null
+  let heldModelList
   await page.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
@@ -75,6 +77,7 @@ try {
       savedManufacturerWebsite = req.postDataJSON()
       return route.fulfill({ status: 204 })
     }
+    if (path.endsWith('/settings/models') && heldModelList) await heldModelList
     if (path.endsWith('/models')) return modelsUnavailable
       ? route.fulfill({ status: 502, json: {} })
       : route.fulfill({ json: { models: ['fixture:default', 'fixture:alternate'] } })
@@ -129,7 +132,8 @@ try {
       return route.fulfill({ json: { id: 'fixture-pair', url: 'https://fila.test/api/v1/filabrain/mcp', token: 'fixture-token' } })
     }
     if (path.endsWith('/pairings/fixture-pair')) {
-      return req.method() === 'DELETE' ? route.fulfill({ status: 204 }) : route.fulfill({ json: {} })
+      return req.method() === 'DELETE' ? route.fulfill({ status: 204 })
+        : route.fulfill({ json: pairedProposal ? { proposal_id: 'from-client', proposal: pairedProposal } : {} })
     }
     if (path.endsWith('/settings')) {
       const settings = req.method() === 'PUT' ? req.postDataJSON() : null
@@ -300,6 +304,12 @@ try {
   await page.getByRole('button', { name: 'Send follow-up' }).click()
   await page.getByRole('log').getByText('Look for a datasheet', { exact: true }).waitFor()
   await page.getByRole('log').getByText('Here’s what I found. Review the results below.', { exact: true }).nth(1).waitFor()
+  const earlierResult = page.getByRole('log').getByText('Earlier findings', { exact: true })
+  await earlierResult.click()
+  const earlierSource = page.getByRole('log').getByRole('link', { name: 'Fixture catalog' }).first()
+  await earlierSource.waitFor()
+  assert.equal(await earlierSource.evaluate(el => Boolean(el.closest('details')?.nextElementSibling?.classList.contains('chat-user'))), true)
+  await earlierResult.click()
   await page.getByRole('checkbox', { name: /Density/ }).check()
   assert.equal(writes.length, 0)
   await page.getByRole('button', { name: 'Save new filament' }).click()
@@ -313,12 +323,15 @@ try {
   await history.click()
   await page.getByRole('button', { name: 'Compare these materials', exact: true }).click()
   await page.getByText('PLA is easier to print.').waitFor()
+  assert.match(await page.getByRole('button', { name: /^Model for this conversation/ }).innerText(), /fixture:alternate/)
   await page.getByRole('textbox', { name: 'Your question' }).fill('Which settings should I try?')
   await page.getByRole('button', { name: 'Send message' }).click()
   await page.getByText('PLA is easier to print.').nth(1).waitFor()
   await history.click()
   await page.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
   await page.getByRole('log').getByText('Look for a datasheet', { exact: true }).waitFor()
+  await earlierResult.click()
+  await earlierSource.waitFor()
   await page.getByRole('link', { name: 'Fixture catalog' }).first().waitFor()
   account = 8
   await page.reload()
@@ -390,9 +403,18 @@ try {
   assert.equal(await searchField.evaluate(el => el === document.activeElement), true)
   await page.getByRole('link', { name: 'SearXNG Docker setup' }).waitFor()
   await searchField.fill('http://searxng:8080')
+  await modelUrl.fill('http://ollama:11434')
+  let releaseModelList
+  heldModelList = new Promise(resolve => { releaseModelList = resolve })
+  const loadModels = page.getByRole('button', { name: 'Load models', exact: true })
+  await loadModels.click()
+  assert.equal(await loadModels.isDisabled(), true)
   await internet.getByRole('button', { name: 'Test SearXNG' }).click()
   await internet.getByText('SearXNG returned search results.').waitFor()
   assert.equal(searchUrl, '', 'testing SearXNG does not save the URL')
+  releaseModelList()
+  heldModelList = undefined
+  await page.getByLabel('Available models').selectOption('fixture:default')
   await supplierDomain.fill('shop.example.org')
   await internet.getByRole('button', { name: 'Add supplier' }).click()
   const supplier = internet.getByRole('checkbox', { name: 'shop.example.org' })
@@ -493,6 +515,7 @@ try {
   await followUp.fill('Focus on the material finish')
   await followUp.press('Enter')
   await frame.getByRole('log').getByText('Focus on the material finish', { exact: true }).waitFor()
+  await frame.getByRole('log').getByText('Source unavailable', { exact: true }).waitFor()
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).check()
   assert.equal(await followUp.inputValue(), '')
   await frame.getByRole('button', { name: 'Stage 2 fields' }).click()
@@ -510,6 +533,27 @@ try {
   await frame.getByRole('log').getByText('Focus on the material finish', { exact: true }).waitFor()
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).waitFor()
   assert.equal(proposalRequests, requestsBeforeReopen, 'reopening editor research does not run another lookup')
+  await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).check()
+  await page.reload()
+  await frame.locator('[data-chat-history] summary').click()
+  await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
+  await frame.getByRole('button', { name: 'Stage 2 fields' }).waitFor()
+  await frame.getByRole('button', { name: 'Model & MCP settings' }).click()
+  pairedProposal = {
+    target: { mode: 'edit', filament_id: 10 },
+    suggestions: [{ field: 'density_g_cm3', value: 1.28, sources: evidence }],
+    issues: [],
+  }
+  await pair.getByRole('button', { name: 'Pair a client' }).click()
+  await frame.locator('[data-chat-log]').getByText('A paired client sent a proposal.').waitFor({ state: 'attached' })
+  assert.equal(await token.isVisible(), true, 'an incoming proposal leaves settings visible')
+  await frame.getByRole('button', { name: 'Back to chat' }).click()
+  await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).waitFor()
+  await page.reload()
+  await frame.locator('[data-chat-history] summary').click()
+  await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
+  await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).waitFor()
+  pairedProposal = null
 
   hostPicker = true
   await page.goto(`${url}?tab=library`)

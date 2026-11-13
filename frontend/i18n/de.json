@@ -45,6 +45,7 @@
     "researchNoModel": "Kein Modell eingerichtet",
     "researchReview": "Das habe ich gefunden. Prüfe die Ergebnisse unten.",
     "sourcesChecked": "Geprüfte Quellen ({count})",
+    "earlierFindings": "Frühere Ergebnisse",
     "sendFollowUp": "Rückfrage senden",
     "title": "FilaBrain",
     "description": "Recherchiere ein Filament und prüfe die Quellen, bevor du Vorschläge übernimmst.",

@@ -220,6 +220,9 @@ async function main() {
     }
     let chat: ReturnType<typeof mountChat> | undefined
     let startResearch: (() => void) | undefined
+    let draftOpen = false
+    const canOpenSettings = () => status.can_configure || (draftOpen && status.mcp_enabled)
+    element('research-admin-settings').hidden = !status.can_configure
     function openConversation() {
       const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
       view.hidden = false
@@ -238,11 +241,12 @@ async function main() {
         batch.querySelector<HTMLElement>('[data-batch-message]')!.removeAttribute('data-i18n')
         mountResearchBatches(batch, id)
       }),
-      settings: status.can_configure && mountSettings,
+      settings: () => { if (status.can_configure) void mountSettings() },
     }
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-tab]')]
     const visited = new Set<string>()
     function show(tab: string) {
+      if (tab === 'settings' && !canOpenSettings()) return
       const run = Object.hasOwn(mount, tab) && mount[tab]
       if (!run) return
       for (const button of buttons) {
@@ -265,10 +269,10 @@ async function main() {
     }
     for (const button of buttons) {
       const tab = button.dataset.tab!
-      button.hidden = !mount[tab]
+      button.hidden = tab === 'settings' ? !canOpenSettings() : !mount[tab]
       button.addEventListener('click', () => show(tab))
     }
-    const available = Object.keys(mount).find(tab => mount[tab])
+    const available = Object.keys(mount).find(tab => tab === 'settings' ? canOpenSettings() : mount[tab])
     if (!available) {
       message.textContent = 'You do not have permission to use FilaBrain.'
       return
@@ -276,15 +280,17 @@ async function main() {
     message.textContent = ''
     document.addEventListener('filabrain:chat-mode', event => {
       const researching = (event as CustomEvent<boolean>).detail
+      draftOpen = researching
       const tab = researching ? 'new' : status.can_chat ? 'chat' : 'new'
       for (const button of buttons) {
+        if (button.dataset.tab === 'settings') button.hidden = !canOpenSettings()
         if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
         else button.removeAttribute('aria-current')
       }
       setGuide(tab)
     })
     const tab = params.get('tab') || available
-    show(Object.hasOwn(mount, tab) && mount[tab] ? tab : available)
+    show(Object.hasOwn(mount, tab) && (tab === 'settings' ? canOpenSettings() : mount[tab]) ? tab : available)
   } catch (error) {
     message.textContent = errorText(error)
   }
