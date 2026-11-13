@@ -175,14 +175,18 @@ async def test_oversized_supplier_page_finds_specific_replacement(installed, db_
     assert width and width["sources"][0]["url"] == replacement
     assert {"code": "supplier_alternative_found", "url": replacement} in result["issues"]
     assert not any(issue.get("url") == original for issue in result["issues"])
-    assert any("technical data sheet" in query for query in searches) is not has_sitemap
+    assert any("technical data sheet" in query and "filetype:pdf" not in query for query in searches) is not has_sitemap
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "create", "product_url": original})
+    assert response.is_success, response.text
+    assert any(issue.get("product_url") == replacement for issue in response.json()["issues"])
 
 
-async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(installed, monkeypatch):
+@pytest.mark.parametrize("store_host", ["us.fixturebrand.example", "fixturebrand.example"])
+async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(installed, monkeypatch, store_host):
     from filabrain import proposals
 
     site = "https://fixturebrand.example/"
-    store = "https://us.fixturebrand.example/products/matte-pla"
+    store = f"https://{store_host}/products/matte-pla"
     sheet = f"{site}documents/polyterra.pdf"
     wrong = f"{site}documents/polyterra-plus.pdf"
     fake = "https://fixturebrand.example.unrelated.example/documents/polyterra.pdf"
@@ -297,13 +301,39 @@ async def test_datasheet_layout_keeps_exact_identity_and_cites_only_supported_va
     assert {item["field"]: item["value"] for item in specs} == expected
     assert all(item["sources"][0]["url"] == url for item in specs)
 
+async def test_datasheet_product_label_overrides_generic_header_cell():
+    from filabrain import proposals
 
-async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed, db_session, monkeypatch):
+    identity = proposals.Identity(designation="PLA", material="PLA")
+    page = proposals.Evidence(
+        "https://manufacturer.example/technical.pdf", "Technical data sheet",
+        "Technical Data Sheet\nProduct Name: PLA High Speed\nBase Material     PLA",
+        datasheet=True,
+    )
+    assert not proposals._sheet_matches(page, {"PLA"}, identity)
+
+
+@pytest.mark.parametrize("section, expected", [
+    ("• Sample Preparation\nNozzle Temperature 240 °C", {}),
+    ("• Recommended Printing Settings\nNozzle Temperature 210 °C\n"
+     "• Sample Preparation\nBed Temperature 70 °C", {"extruder_temp_range_c": {"min": 210, "max": 210}}),
+])
+async def test_datasheet_extracts_only_recommended_temperatures(section, expected):
+    from filabrain import proposals
+
+    page = proposals.Evidence("https://manufacturer.example/technical.pdf", "Technical data sheet", section, datasheet=True)
+    values, _ = proposals._sheet_specs(page)
+    assert {item["field"]: item["value"] for item in values} == expected
+
+
+@pytest.mark.parametrize("pdf_state", ["ok", "oversized", "manual", "conflict"])
+async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed, db_session, monkeypatch, pdf_state):
     from filabrain import proposals
 
     site = "https://manufacturer.example/"
     product = site + "products/pla-basic"
     sheet = "https://cdn.example/technical.pdf"
+    replacement = site + "pla-basic.pdf"
     unrelated = "https://other.example/products/pla-basic"
     pdf = proposals.Evidence(
         sheet, "Technical data sheet",
@@ -312,8 +342,21 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
 
     async def fetch(url, **_):
         if url == sheet:
+            if pdf_state == "oversized":
+                raise ValueError(proposals.SUPPLIER_TOO_LARGE)
+            if pdf_state == "manual":
+                return proposals.replace(pdf, manual=True, text="")
             return pdf
-        return proposals.Evidence(url, "PLA Basic | Fixture Brand", "PLA Basic", datasheets=(sheet,) if url == product else ())
+        if url == replacement:
+            return proposals.replace(pdf, url=url, text=pdf.text.replace("1.24", "1.26") if pdf_state == "conflict" else pdf.text)
+        linked = (sheet, replacement) if pdf_state == "conflict" else (sheet,)
+        return proposals.Evidence(url, "PLA Basic | Fixture Brand", "PLA Basic Density 1.31 g/cm³", datasheets=linked if url == product else ())
+
+    async def search(_url, query):
+        return [replacement] if pdf_state == "oversized" and "filetype:pdf" in query else []
+
+    async def extract(*args, **kwargs):
+        return [{"field": "density_g_cm3", "value": 1.31, "sources": [{"url": product, "title": "Store", "evidence": "1.31 g/cm³"}]}], []
 
     async def catalog(_identity):
         return [], "", True
@@ -324,10 +367,16 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
     monkeypatch.setattr(proposals, "fetch_supplier", fetch)
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "_supplier_scopes", lambda identity, page, snapshot=None: [page] if page.url == product else [])
+    monkeypatch.setattr(proposals, "request_extraction", extract)
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
     monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
     db_session.add(Manufacturer(name="Fixture Brand", url=site))
     await db_session.commit()
+    assert (await installed.put(f"{BASE}/settings", json={
+        "search_url": "http://searxng:8080", "model_url": "http://ollama:11434/v1", "model_id": "fixture",
+    })).is_success
 
     for url in (product, unrelated):
         response = await installed.post(f"{BASE}/proposals", json={
@@ -335,9 +384,18 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
             "identity": {"manufacturer": "Fixture Brand", "designation": "PLA Basic"},
         })
         assert response.is_success, response.text
-        density = next((s for s in response.json()["suggestions"] if s["field"] == "density_g_cm3"), None)
+        result = response.json()
+        density = next((s for s in result["suggestions"] if s["field"] == "density_g_cm3"), None)
         if url == product:
-            assert density and density["sources"][0]["url"] == sheet
+            if pdf_state == "manual":
+                assert {"code": "manual_datasheet", "url": sheet} in result["issues"]
+            elif pdf_state == "conflict":
+                assert density is None
+                assert any(issue["code"] == "conflict" and issue.get("field") == "density_g_cm3" for issue in result["issues"])
+            else:
+                assert density and density["value"] == 1.24
+                assert density["sources"][0]["url"] == (replacement if pdf_state == "oversized" else sheet)
+                assert any(issue["code"] == "source_disagreement" and issue.get("field") == "density_g_cm3" for issue in result["issues"])
         else:
             assert density is None
 

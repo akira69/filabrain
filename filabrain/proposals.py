@@ -1136,14 +1136,20 @@ def _known_variant_fields(identity: Identity, snapshot) -> dict:
 
 def _sheet_matches(page: Evidence, titles: set[str], identity: Identity, snapshot=None) -> bool:
     header = [line.strip() for line in page.text.splitlines() if line.strip()][:8]
-    cells = {
-        _sheet_title(cell)
-        for line in header for cell in re.split(r"[ \t]{3,}", line)
-    }
-    if not (
-        page.datasheet and re.search(r"\btechnical data\s*sheet\b|物性表", _norm(" ".join(header)))
-        and cells.intersection(_sheet_title(title) for title in titles)
-    ):
+    marker = r"\btechnical data\s*sheet\b|物性表"
+    if not page.datasheet or not re.search(marker, _norm(" ".join(header))):
+        return False
+    labeled = []
+    candidates = []
+    for row in header:
+        cells = re.split(r"[ \t]{3,}", row)
+        for index, cell in enumerate(cells):
+            label = re.fullmatch(r"(?:产品名称\s*)?product name\b\s*[:：]?\s*(.*)", cell, re.IGNORECASE)
+            if label:
+                labeled.append(label[1] or (cells[index + 1] if index + 1 < len(cells) else ""))
+        if len(cells) == 1 or any(re.search(marker, cell, re.IGNORECASE) for cell in cells):
+            candidates.extend(cells)
+    if not {_sheet_title(cell) for cell in (labeled or candidates)}.intersection(map(_sheet_title, titles)):
         return False
     known = _known_variant_fields(identity, snapshot)
     return all(known[key] in (None, ()) or not values or values == {known[key]}
@@ -1157,7 +1163,11 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
     rows = [" ".join(line.split()) for line in lines]
     page = replace(page, text=" ".join(rows).strip())
     heading = re.compile(r"(?:建议打印参数\s+)?recommended printing (?:settings|conditions|parameters)(?: data)?", re.IGNORECASE)
-    has_heading = any(heading.fullmatch(row) for row in rows)
+    other_section = re.compile(
+        r"(?:sample preparation|test (?:methods?|conditions)|specimen (?:test|printing)|"
+        r"printing test conditions|(?:material |physical |mechanical |thermal )?properties|specifications)\s*:?",
+        re.IGNORECASE,
+    )
     degrees = r"(?:[°˚]\s*C|℃)"
     density_unit = r"g\s*/\s*cm\s*[³3]"
     entries = []
@@ -1167,10 +1177,11 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
         entries.append({"field": field, "value": value, "source": 1, "quote": quote})
 
     for index, (line, row) in enumerate(zip(lines, rows)):
-        if re.search(r"\b(?:specimen (?:test|printing)|printing test conditions)\b", row, re.IGNORECASE):
-            break
-        if heading.fullmatch(row) or (not has_heading and row.startswith("•")):
+        section = row.removeprefix("•").strip().rstrip(":：")
+        if heading.fullmatch(section):
             printing = True
+        elif row.startswith("•") or other_section.fullmatch(section):
+            printing = False
         density_row = row.removeprefix("密度 ")
         density = re.fullmatch(
             rf"Density\b.*?\s(\d+(?:\.\d+)?)\s*{density_unit}(?:\s+at\s+\d+(?:\.\d+)?\s*{degrees})?",
@@ -1231,6 +1242,7 @@ async def research_products(
     suggestions: dict[str, dict] = {}
     conflict: set[str] = set()
     primary_fields: set[str] = set()
+    sheet_fields: set[str] = set()
     field_options: dict[str, list[dict]] = {}
 
     def remember(field, value, citations):
@@ -1247,11 +1259,13 @@ async def research_products(
             same["sources"].extend(cite for cite in citations if cite not in same["sources"])
         return True
 
-    def add(field, value, citations, *, primary=False):
+    def add(field, value, citations, *, primary=False, datasheet=False):
         if not remember(field, value, citations):
             return
-        if primary and field not in primary_fields:
+        if (datasheet and field not in sheet_fields) or (primary and field not in primary_fields):
             primary_fields.add(field)
+            if datasheet:
+                sheet_fields.add(field)
             conflict.discard(field)
             suggestions[field] = {"field": field, "value": value, "sources": list(citations)}
             return
@@ -1262,14 +1276,17 @@ async def research_products(
             isinstance(value, str) and _norm(value) == _norm(existing["value"])
         ):
             existing["sources"].extend(citations)
-        elif field not in primary_fields or primary:
+        elif field not in primary_fields or (primary and field not in sheet_fields) or datasheet:
             conflict.add(field)
 
-    def remember_conflict(issue, *, primary):
+    def remember_conflict(issue, *, primary, datasheet=False):
         field = issue["field"]
+        if datasheet and field not in sheet_fields:
+            suggestions.pop(field, None)
+            sheet_fields.add(field)
         for option in issue.get("options", []):
             remember(field, option["value"], option["sources"])
-        if primary or field not in primary_fields:
+        if datasheet or (field not in sheet_fields and (primary or field not in primary_fields)):
             conflict.add(field)
         if primary and field in field_options:
             primary_fields.add(field)
@@ -1508,6 +1525,7 @@ async def research_products(
     archived_official_urls: set[str] = set()
 
     document_domain = manufacturer_domain or search_domain
+    linked_sheets: dict[str, Evidence | None] = {}
 
     async def check_datasheets(pages):
         linked = []
@@ -1521,6 +1539,7 @@ async def research_products(
         await check_pages(links)
         for link in links:
             sheet = checked_pages[link]
+            linked_sheets[link] = sheet
             if sheet and _sheet_matches(sheet, titles, identity, snapshot):
                 authoritative_docs[sheet.url] = replace(sheet, manufacturer_page=True)
 
@@ -1729,17 +1748,19 @@ async def research_products(
     if sum(bool(page and not _on_manufacturer_site(page.url, manufacturer_domain)) for page in pages.values()) < 2:
         pages.update(await check_pages(supplier_urls))
     pages.update(await check_pages(preferred_urls))
+    await check_datasheets(pages)
+    pages.update(linked_sheets)
     if product_url and fetch_errors.get(product_url) == SUPPLIER_TOO_LARGE:
         pages.setdefault(product_url, None)
 
     def url_words(url):
         return set(re.findall(r"[^\W_]+", unquote(urlsplit(url).path).casefold()))
 
-    oversized = {}
-    for url in dict.fromkeys([*direct_urls, *pages]):
-        if fetch_errors.get(url) == SUPPLIER_TOO_LARGE and (host := _site_host(url)):
-            oversized.setdefault(host, url)
-    recovered = set()
+    oversized = [
+        url for url in dict.fromkeys([*direct_urls, *pages])
+        if fetch_errors.get(url) == SUPPLIER_TOO_LARGE
+    ]
+    recovered_urls: set[str] = set()
     line = set(re.findall(r"[^\W_]+", " ".join(_line(identity.designation, identity.color))))
     color = set(_tokens(identity.color))
     sku = "-".join(_product_key(lookup_sku or variant_sku))
@@ -1754,6 +1775,12 @@ async def research_products(
             page = checked_pages.get(link)
             if not page or _site_host(page.url) != host:
                 continue
+            if resolve_pasted_url and not pasted_page and page.product and page.product.get("designation"):
+                issues.append({
+                    "code": "possible_match", "name": page.title[:255], "source": "Web search",
+                    "url": page.url, "product_url": page.url,
+                })
+                return page.url
             official = _on_manufacturer_site(page.url, manufacturer_domain)
             if (
                 (official and _sheet_matches(page, titles, identity, snapshot))
@@ -1765,36 +1792,41 @@ async def research_products(
                 return page.url
         return None
 
-    product_line = " ".join(_line(identity.designation, identity.color))
+    product_line = " ".join(_line(identity.designation, identity.color)) or lookup_sku
     try:
         async with asyncio.timeout(15):
-            # shortcut: check two sites per lookup, raise the budget if common searches need more.
-            for host, original in list(oversized.items())[:2]:
-                if product_line and host != document_domain and _on_manufacturer_site(original, document_domain):
-                    results = await search(f"site:{document_domain} {product_line} technical data sheet filetype:pdf")
-                    links = [
-                        link for url in results if (link := public_link(url))
-                        and _on_manufacturer_site(link, document_domain) and urlsplit(link).path not in ("", "/")
-                    ]
-                    await check_pages(links)
-                    sheet = next((
-                        page for link in links if (page := checked_pages.get(link))
-                        and _on_manufacturer_site(page.url, document_domain)
-                        and _sheet_matches(page, titles, identity, snapshot)
-                    ), None)
-                    if sheet:
+            official_oversized = {url for url in oversized if url in linked_sheets or _on_manufacturer_site(url, document_domain)}
+            if product_line and document_domain and official_oversized:
+                found = await search(f"site:{document_domain} {product_line} technical data sheet filetype:pdf")
+                links = [
+                    link for url in found if (link := public_link(url))
+                    and _on_manufacturer_site(link, document_domain) and urlsplit(link).path not in ("", "/")
+                ][:4]
+                await check_pages(links)
+                for link in links:
+                    sheet = checked_pages.get(link)
+                    if sheet and _on_manufacturer_site(sheet.url, document_domain) and _sheet_matches(sheet, titles, identity, snapshot):
                         authoritative_docs[sheet.url] = replace(sheet, manufacturer_page=True)
-                        recovered.add(host)
-                        issues.append({"code": "supplier_alternative_found", "url": sheet.url})
-                        continue
+                        if not recovered_urls:
+                            issues.append({"code": "supplier_alternative_found", "url": sheet.url})
+                        recovered_urls.update(official_oversized)
+            # shortcut: check two sites per lookup, raise the budget if common searches need more.
+            fallback_by_host = {}
+            for url in oversized:
+                if url not in recovered_urls and url not in linked_sheets and (host := _site_host(url)):
+                    fallback_by_host.setdefault(host, url)
+            for host, original in list(fallback_by_host.items())[:2]:
                 matches = []
+                path_terms = url_words(original) - {"store", "shop", "products", "product"}
                 for url in await supplier_sitemap_urls(original):
-                    if not (link := public_link(url)) or _site_host(link) != host or supplier_page_url(link) in checked_pages:
+                    if not (link := public_link(url)) or _site_host(link) != host:
+                        continue
+                    if supplier_page_url(link) in checked_pages and not checked_pages[supplier_page_url(link)]:
                         continue
                     words = url_words(link)
                     path = "-".join(_product_key(unquote(urlsplit(link).path)))
                     sku_match = bool(sku and f"-{sku}-" in f"-{path}-")
-                    if sku_match or (line and line <= words):
+                    if sku_match or (line and line <= words) or (resolve_pasted_url and path_terms and path_terms <= words):
                         matches.append((link, sku_match, len(words & color)))
                 matches.sort(key=lambda match: (-match[1], -match[2]))
                 alternative = await check_alternatives(host, [url for url, _, _ in matches[:2]])
@@ -1804,12 +1836,13 @@ async def research_products(
                         host, await search(f"site:{host} {query} technical data sheet"),
                     )
                 if alternative:
-                    recovered.add(host)
+                    recovered_urls.add(original)
                     issues.append({"code": "supplier_alternative_found", "url": alternative})
     except TimeoutError:
         pass
 
     await check_datasheets(pages)
+    pages.update(linked_sheets)
     if not any(
         page and _on_manufacturer_site(page.url, manufacturer_domain)
         and (
@@ -1857,10 +1890,10 @@ async def research_products(
         if page is None:
             reason = fetch_errors.get(url)
             if reason == SUPPLIER_TOO_LARGE:
-                if _site_host(url) not in recovered:
+                if url not in recovered_urls:
                     issues.append({"code": "supplier_download_limit", "url": public_link(url)})
                 continue
-            source_name = "Manufacturer page" if _on_manufacturer_site(url, manufacturer_domain) else "Supplier page"
+            source_name = "Manufacturer page" if url in linked_sheets or _on_manufacturer_site(url, manufacturer_domain) else "Supplier page"
             issues.append({"code": "unavailable_source", "source": source_name,
                            "url": public_link(url), "reason": reason})
             continue
@@ -1900,12 +1933,12 @@ async def research_products(
             issues.append({"code": "manual_datasheet", "url": sheet.url})
             continue
         issues.insert(0, {"code": "manufacturer_page", "name": sheet.title, "url": sheet.url})
-        add("datasheet_url", sheet.url, [{"url": sheet.url, "title": sheet.title, "evidence": "Technical Data Sheet"}], primary=True)
+        add("datasheet_url", sheet.url, [{"url": sheet.url, "title": sheet.title, "evidence": "Technical Data Sheet"}], primary=True, datasheet=True)
         sheet_values, sheet_conflicts = _sheet_specs(sheet)
         for result in sheet_values:
-            add(result["field"], result["value"], result["sources"], primary=True)
+            add(result["field"], result["value"], result["sources"], primary=True, datasheet=True)
         for issue in sheet_conflicts:
-            remember_conflict(issue, primary=True)
+            remember_conflict(issue, primary=True, datasheet=True)
 
     has_published_color = False
     if not unresolved_variants:
@@ -2058,7 +2091,10 @@ async def research_products(
     for field in sorted(conflict | disagreements | corroborated.keys()):
         options = sorted(
             field_options.get(field, []),
-            key=lambda option: (option is not corroborated.get(field), not any(primary_source(source.get("url")) for source in option["sources"])),
+            key=lambda option: (
+                option["value"] != suggestions.get(field, {}).get("value") or field in conflict,
+                not any(primary_source(source.get("url")) for source in option["sources"]),
+            ),
         )
         issue = {"code": "conflict" if field in conflict else "corroborated" if field in corroborated else "source_disagreement", "field": field}
         if len(options) > 1:
