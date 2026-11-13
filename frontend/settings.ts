@@ -1,6 +1,10 @@
 import { initI18n, t } from './shared/i18n'
 import { researchHeaders } from './shared/filabrain'
 
+const supplierDomain = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/
+const maxSupplierSites = 4
+type SupplierSite = { domain: string; enabled: boolean }
+
 export async function mountSettings() {
   await initI18n()
   document.querySelector<HTMLInputElement>('#research-mcp-url')!.value =
@@ -8,13 +12,21 @@ export async function mountSettings() {
   const route = '/api/v1/filabrain/settings'
   const form = document.querySelector<HTMLFormElement>('#filabrain-settings')!
   const message = document.getElementById('research-settings-message')!
+  const modelMessage = document.getElementById('research-model-message')!
   const keyState = document.getElementById('research-key-state')!
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement
   const save = form.querySelector<HTMLButtonElement>('button[type=submit]')!
   const enableSearch = document.getElementById('research-enable-search')!
   const searchSetup = document.getElementById('research-search-setup')!
+  const sourceControls = form.querySelector<HTMLFieldSetElement>('#research-source-controls')!
+  const supplierSites = document.getElementById('research-supplier-sites')!
+  const domainInput = form.querySelector<HTMLInputElement>('#research-supplier-domain')!
+  const addSupplier = form.querySelector<HTMLButtonElement>('#research-add-supplier')!
+  const supplierMessage = document.getElementById('research-supplier-message')!
   const load = form.querySelector<HTMLButtonElement>('#research-load-models')!
   const test = form.querySelector<HTMLButtonElement>('#research-test-model')!
+  const testSearch = form.querySelector<HTMLButtonElement>('#research-test-search')!
+  const searchMessage = document.getElementById('research-search-message')!
   const modelList = form.elements.namedItem('available_model') as HTMLSelectElement
   const mcpSwitch = document.querySelector<HTMLInputElement>('#research-mcp-enabled')!
   const mcpState = document.getElementById('research-mcp-state')!
@@ -23,12 +35,17 @@ export async function mountSettings() {
   const mcpMessage = document.getElementById('research-mcp-message')!
   let mcpEnabled: boolean
   let saved: string | undefined
-  let busy = false
+  let saving = false
+  let testingModel = false
+  let testingSearch = false
   let models: string[] = []
+  let sites: SupplierSite[] = []
   const values = () => ({
     model_url: field('model_url').value.trim(), model_id: field('model_id').value.trim(),
     search_url: field('search_url').value.trim(), api_key: field('api_key').value || null,
     clear_key: field('clear_key').checked,
+    supplier_sites: sites,
+    supplier_download_mib: field('supplier_download_mib').valueAsNumber,
   })
   const connection = () => JSON.stringify([values().model_url, values().api_key, values().clear_key])
 
@@ -66,13 +83,79 @@ export async function mountSettings() {
     const ready = saved !== undefined
     const config = values()
     const dirty = ready && JSON.stringify(config) !== saved
-    save.disabled = busy || !dirty
+    save.disabled = saving || !dirty
     save.classList.toggle('fm-btn-primary', dirty)
     save.classList.toggle('fm-btn-outline', !dirty)
-    load.disabled = busy || !ready || !config.model_url
+    load.disabled = saving || testingModel || !ready || !config.model_url
     test.disabled = load.disabled || !config.model_id
-    modelList.disabled = busy || !ready
+    testSearch.disabled = saving || testingSearch || !ready || !config.search_url || !field('search_url').validity.valid
+    modelList.disabled = saving || testingModel || !ready
+    sourceControls.disabled = saving || !ready
+    sourceControls.hidden = !config.search_url || !field('search_url').validity.valid
+    domainInput.disabled = addSupplier.disabled = sites.length >= maxSupplierSites
   }
+
+  function renderSupplierSites() {
+    supplierSites.hidden = sites.length === 0
+    supplierSites.replaceChildren(...sites.map(site => {
+      const row = document.createElement('li')
+      row.className = 'research-supplier-row'
+      const label = document.createElement('label')
+      const checkbox = document.createElement('input')
+      checkbox.type = 'checkbox'
+      checkbox.checked = site.enabled
+      checkbox.addEventListener('change', () => {
+        site.enabled = checkbox.checked
+        refresh()
+      })
+      const domain = document.createElement('span')
+      domain.textContent = site.domain
+      label.append(checkbox, domain)
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'fm-btn fm-btn-outline'
+      remove.textContent = t('filaBrain.removeSupplier')
+      remove.setAttribute('aria-label', t('filaBrain.removeSupplierDomain', { domain: site.domain }))
+      remove.addEventListener('click', () => {
+        sites = sites.filter(entry => entry !== site)
+        supplierMessage.textContent = ''
+        renderSupplierSites()
+        refresh()
+        domainInput.focus()
+      })
+      row.append(label, remove)
+      return row
+    }))
+  }
+
+  function addSupplierSite() {
+    if (sourceControls.disabled || addSupplier.disabled) return
+    const domain = domainInput.value.trim().toLowerCase().replace(/\.$/, '').replace(/^www\./, '')
+    if (!supplierDomain.test(domain)) {
+      supplierMessage.textContent = t('filaBrain.invalidSupplierDomain')
+      domainInput.focus()
+      return
+    }
+    if (sites.some(site => site.domain === domain)) {
+      supplierMessage.textContent = t('filaBrain.duplicateSupplierDomain')
+      domainInput.focus()
+      return
+    }
+    sites.push({ domain, enabled: true })
+    domainInput.value = ''
+    supplierMessage.textContent = sites.length === maxSupplierSites ? t('filaBrain.supplierLimit') : ''
+    renderSupplierSites()
+    refresh()
+    if (domainInput.disabled) supplierSites.lastElementChild?.querySelector('input')?.focus()
+    else domainInput.focus()
+  }
+  addSupplier.addEventListener('click', addSupplierSite)
+  domainInput.addEventListener('input', () => { supplierMessage.textContent = '' })
+  domainInput.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    addSupplierSite()
+  })
 
   enableSearch.addEventListener('click', () => {
     enableSearch.hidden = true
@@ -88,51 +171,74 @@ export async function mountSettings() {
     modelList.value = selected
   }
 
-  function fill(config: { model_url: string; model_id: string; search_url: string; has_key: boolean }) {
+  function fill(config: {
+    model_url: string; model_id: string; search_url: string; has_key: boolean
+    supplier_sites?: SupplierSite[]; supplier_download_mib: number
+  }) {
     for (const key of ['model_url', 'model_id', 'search_url'] as const) field(key).value = config[key]
+    field('supplier_download_mib').valueAsNumber = config.supplier_download_mib
     enableSearch.hidden = !!config.search_url
     searchSetup.hidden = !config.search_url
     field('api_key').value = ''
     field('clear_key').checked = false
     keyState.textContent = t(config.has_key ? 'filaBrain.keyConfigured' : 'filaBrain.keyOptional')
+    sites = config.supplier_sites ?? []
+    renderSupplierSites()
+    supplierMessage.textContent = sites.length >= maxSupplierSites ? t('filaBrain.supplierLimit') : ''
     saved = JSON.stringify(values())
     showModels()
   }
 
-  async function send(action: 'save' | 'test' | 'models') {
-    if (busy || (action === 'models' ? !field('model_url').reportValidity() : !form.reportValidity())) return
+  async function send(action: 'save' | 'test' | 'models' | 'test-search') {
+    if (saving || (action === 'test-search' ? testingSearch : action !== 'save' && testingModel)) return
+    if (action === 'test-search' ? !field('search_url').reportValidity()
+      : action === 'save' ? !form.reportValidity() : !field('model_url').reportValidity()) return
     if (action === 'save' && save.disabled) return
     const requestedConnection = connection()
-    const payload = action === 'models' ? { ...values(), search_url: '' } : values()
-    const inputs = action === 'save' ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)')) : []
+    const config = values()
+    const stillCurrent = () => action === 'save' || (action === 'test-search'
+      ? config.search_url === values().search_url
+      : requestedConnection === connection() && (action === 'models' || config.model_id === values().model_id))
+    const payload = action === 'test-search' ? { search_url: config.search_url }
+      : action === 'save' ? config : {
+        model_url: config.model_url, model_id: config.model_id, api_key: config.api_key, clear_key: config.clear_key,
+      }
+    const inputs = action === 'save' ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)'))
+      .filter(input => !sourceControls.contains(input)) : []
     inputs.forEach(input => { input.disabled = true })
-    busy = true
+    if (action === 'save') saving = true
+    else if (action === 'test-search') testingSearch = true
+    else testingModel = true
     refresh()
-    message.textContent = ''
+    const feedback = action === 'save' ? message : action === 'test-search' ? searchMessage : modelMessage
+    feedback.textContent = ''
     try {
       const response = await fetch(action === 'save' ? route : `${route}/${action}`, {
         method: action === 'save' ? 'PUT' : 'POST', credentials: 'include', headers: researchHeaders(),
         body: JSON.stringify(payload),
       })
       const data = await response.json()
+      if (!stillCurrent()) return
       if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : t('filaBrain.failed'))
       if (action === 'models') {
-        if (requestedConnection !== connection()) return
         models = data.models
         showModels()
-        message.textContent = t(data.models.length ? 'filaBrain.modelsLoaded' : 'filaBrain.noModels')
+        feedback.textContent = t(data.models.length ? 'filaBrain.modelsLoaded' : 'filaBrain.noModels')
         return
       }
       if (action === 'save') {
         fill(data)
         document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: data.model_id }))
       }
-      message.textContent = t(action === 'test' ? 'filaBrain.testPassed' : 'filaBrain.settingsSaved')
+      feedback.textContent = t(action === 'save' ? 'filaBrain.settingsSaved'
+        : action === 'test-search' ? 'filaBrain.searchTestPassed' : 'filaBrain.testPassed')
     } catch (error) {
-      message.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
+      if (stillCurrent()) feedback.textContent = error instanceof Error ? error.message : t('filaBrain.failed')
     } finally {
       inputs.forEach(input => { input.disabled = false })
-      busy = false
+      if (action === 'save') saving = false
+      else if (action === 'test-search') testingSearch = false
+      else testingModel = false
       refresh()
     }
   }
@@ -150,9 +256,13 @@ export async function mountSettings() {
     refresh()
     form.addEventListener('submit', event => { event.preventDefault(); void send('save') })
     test.addEventListener('click', () => void send('test'))
+    testSearch.addEventListener('click', () => void send('test-search'))
     load.addEventListener('click', () => void send('models'))
     form.addEventListener('input', event => {
       if (event.target === modelList) return
+      const name = (event.target as HTMLInputElement).name
+      if (name === 'search_url') searchMessage.textContent = ''
+      if (['model_url', 'model_id', 'api_key', 'clear_key'].includes(name)) modelMessage.textContent = ''
       if (['model_url', 'api_key', 'clear_key'].includes((event.target as HTMLInputElement).name)) {
         models = []
         showModels()
@@ -160,6 +270,7 @@ export async function mountSettings() {
       refresh()
     })
     modelList.addEventListener('change', () => {
+      modelMessage.textContent = ''
       if (modelList.value) field('model_id').value = modelList.value
       showModels()
       refresh()

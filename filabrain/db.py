@@ -20,6 +20,16 @@ class FilamentResearchSettings(Base):
     mcp_enabled: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
 
+class FilamentResearchSave(Base):
+    __tablename__ = "filabrain_saves"
+
+    owner_id: Mapped[int] = mapped_column(ForeignKey(User.__table__.c.id, ondelete="CASCADE"), primary_key=True)
+    draft_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    filament_id: Mapped[int | None] = mapped_column(
+        ForeignKey(Filament.__table__.c.id, ondelete="SET NULL"), index=True
+    )
+
+
 class FilamentResearchPairing(Base):
     __tablename__ = "filabrain_pairings"
 

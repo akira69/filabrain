@@ -7,6 +7,21 @@ from app.api.v1 import filamentdb_proxy as upstream
 from fastapi import HTTPException
 
 
+async def manufacturer_website(name: str) -> str | None:
+    try:
+        async with asyncio.timeout(4):
+            result = await upstream._proxy_get("/manufacturers", {"search": name, "page_size": 5})
+    except (TimeoutError, HTTPException, httpx.HTTPError, ValueError):
+        return None
+    matches = [
+        item for item in upstream._response_items(result)
+        if str(item.get("name", "")).strip().casefold() == name.strip().casefold()
+        and item.get("is_active") is not False
+    ]
+    website = matches[0].get("website") if len(matches) == 1 else None
+    return website if isinstance(website, str) else None
+
+
 async def lookup_filaments(
     search: str | None,
     manufacturer_name: str | None = None,

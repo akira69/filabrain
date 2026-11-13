@@ -3,6 +3,10 @@ use_default_settings: true
 search:
   formats: [json]
 
+engines:
+  - name: yandex
+    disabled: false
+
 server:
   limiter: false
   public_instance: false

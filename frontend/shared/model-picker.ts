@@ -20,6 +20,7 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
   let revision = 0
   let activeDefault = defaultModel
   let selected: string | undefined
+  let available: string[] | undefined
 
   menu.id = `${form.id || 'filabrain-chat'}-model-menu`
   trigger.setAttribute('popovertarget', menu.id)
@@ -107,6 +108,7 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
     const current = ++revision
     activeDefault = model
     selected = undefined
+    available = undefined
     options.replaceChildren()
     status.hidden = true
     updateSelection()
@@ -115,6 +117,8 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
     try {
       const { models } = await api.get<{ models: string[] }>('/filabrain/models', { cache: 'no-store' })
       if (current !== revision) return
+      available = models
+      if (selected && !models.includes(selected)) selected = undefined
       addOption(model, '')
       for (const id of models) if (id !== model) addOption(id, id)
       updateSelection()
@@ -129,8 +133,8 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
   void load(defaultModel)
   return {
     get selected() { return selected },
-    reset() {
-      selected = undefined
+    reset(model?: string) {
+      selected = model && (!available || available.includes(model)) ? model : undefined
       updateSelection()
     },
     setDefault: load,

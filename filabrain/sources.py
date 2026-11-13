@@ -10,18 +10,34 @@ import time
 from dataclasses import dataclass, replace
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import quote, urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
 from app.core.cache import TTLCache
 
 OFD = "https://api.openfilamentdatabase.org"
-MAX_BODY = 4 * 1024 * 1024  # Storefront HTML includes scripts that the parser discards.
+DEFAULT_SUPPLIER_DOWNLOAD_MIB = 8
+DEFAULT_SUPPLIER_DOWNLOAD_BYTES = DEFAULT_SUPPLIER_DOWNLOAD_MIB * 1024 * 1024
+SUPPLIER_TOO_LARGE = "Supplier page is too large"
 MAX_TEXT = 12_000
+MAX_SEARCH_RESPONSE_BYTES = 512 * 1024
 SHARED_SPEC = re.compile(r"\b(?:applies to all variants|same for all variants|all variants share)\b", re.IGNORECASE)
+DATASHEET_LABEL = re.compile(
+    r"technical[ _-]*data[ _-]*sheet|(?<![^\W_])tds(?![^\W_])", re.IGNORECASE
+)
+DATASHEET_HEADING = re.compile(r"(?:technical\s+data\s*sheets?(?:\s*\(tds\))?|tds)\s*:?", re.IGNORECASE)
+SAFETY_SHEET_LABEL = re.compile(
+    r"(?<![^\W_])(?:safety[ _-]*data[ _-]*sheet|m?sds)(?![^\W_])", re.IGNORECASE
+)
+HTML_HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+DOCUMENT_SECTIONS = {"main", "article", "section", "aside", "nav", "footer"}
 _supplier_cooldowns = TTLCache()
 _product_sitemaps = TTLCache()
+
+
+class SearchEnginesUnavailable(ValueError):
+    pass
 
 
 class SupplierRateLimited(ValueError):
@@ -35,6 +51,41 @@ class SupplierRateLimited(ValueError):
         except (ValueError, OverflowError, OSError):
             seconds = 60
         self.seconds = max(1, min(31_536_000, round(seconds)))
+
+
+def _supplier_url(value: str):
+    if len(value) > 2048 or any(ch.isspace() or ord(ch) < 32 or ch == "\\" for ch in value):
+        raise ValueError("Expected a public supplier HTTP or HTTPS URL")
+    parsed = urlsplit(value)
+    port = {"https": 443, "http": 80}.get(parsed.scheme)
+    if (
+        port is None or not parsed.hostname or parsed.username is not None
+        or parsed.password is not None or parsed.port not in (None, port)
+    ):
+        raise ValueError("Expected a public supplier HTTP or HTTPS URL")
+    return parsed, port
+
+
+def public_link(value) -> str | None:
+    if (
+        not isinstance(value, str)
+        or len(value) > 500
+        or any(ch.isspace() or ord(ch) < 32 or ch == "\\" for ch in value)
+    ):
+        return None
+    try:
+        url = urlsplit(value)
+        if (
+            url.scheme in ("https", "http")
+            and url.hostname
+            and url.username is None
+            and url.password is None
+            and url.port != 0
+        ):
+            return value
+    except ValueError:
+        pass
+    return None
 
 
 def supplier_page_url(url: str) -> str:
@@ -69,8 +120,14 @@ class _ProductPage(HTMLParser):
         self.title: list[str] = []
         self.products: list[dict] = []
         self.datasheets: list[str] = []
+        self.heading_datasheets: list[str] = []
         self._pdf_link: str | None = None
         self._link_text: list[str] = []
+        self._heading_tag: str | None = None
+        self._heading_depth = 0
+        self._heading_text: list[str] = []
+        self._document_depth = 0
+        self._datasheet_depth: int | None = None
         self._skip: str | None = None
         self._in_title = False
         self._structured: list[str] | None = None
@@ -84,6 +141,17 @@ class _ProductPage(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         if self._skip is None:
+            if tag in DOCUMENT_SECTIONS:
+                self._document_depth += 1
+                if tag in ("aside", "nav", "footer"):
+                    self._datasheet_depth = None
+            if tag == self._heading_tag:
+                self._heading_depth += 1
+            elif tag in HTML_HEADINGS or dict(attrs).get("role") == "heading":
+                self._heading_tag = tag
+                self._heading_depth = 1
+                self._heading_text.clear()
+                self._datasheet_depth = None
             if tag == self._main_tag:
                 self._main_depth += 1
             elif self._main_tag is None and (tag == "main" or dict(attrs).get("role") == "main"):
@@ -91,11 +159,19 @@ class _ProductPage(HTMLParser):
                 self._main_tag = tag
                 self._main_depth = 1
         if tag == "a" and self._skip is None:
-            href = dict(attrs).get("href") or ""
+            attributes = dict(attrs)
+            href = (attributes.get("href") or "").strip()
+            filename = attributes.get("download") or ""
+            decoded_href = unquote(href)
             # Keep only PDF links. The supplier fetcher validates every URL and redirect.
-            if re.search(r"\.pdf(?:[?#]|$)", href, re.IGNORECASE):
+            if href and not href.startswith("#") and (
+                re.search(r"\.pdf(?:[?#]|$)", decoded_href, re.IGNORECASE)
+                or filename.lower().endswith(".pdf")
+                or (attributes.get("type") or "").lower() == "application/pdf"
+                or self._datasheet_depth is not None and "download" in attributes
+            ):
                 self._pdf_link = href
-                self._link_text.clear()
+                self._link_text = [attributes.get("aria-label") or "", attributes.get("title") or "", filename, decoded_href]
         if tag in ("script", "style", "noscript", "template"):
             self._skip = tag
             if tag == "script" and dict(attrs).get("type") == "application/ld+json":
@@ -112,10 +188,25 @@ class _ProductPage(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag == "a" and self._pdf_link:
-            label = " ".join(self._link_text) + " " + self._pdf_link
-            if re.search(r"technical[ _-]*data[ _-]*sheet|\btds\b", label, re.IGNORECASE):
-                self.datasheets.append(self._pdf_link)
+            label = " ".join(self._link_text)
+            if not SAFETY_SHEET_LABEL.search(label):
+                if DATASHEET_LABEL.search(label):
+                    self.datasheets.append(self._pdf_link)
+                elif self._datasheet_depth is not None:
+                    self.heading_datasheets.append(self._pdf_link)
             self._pdf_link = None
+        if self._skip is None:
+            if tag == self._heading_tag:
+                self._heading_depth -= 1
+                if not self._heading_depth:
+                    heading = " ".join(" ".join(self._heading_text).split())
+                    if DATASHEET_HEADING.fullmatch(heading):
+                        self._datasheet_depth = self._document_depth
+                    self._heading_tag = None
+            if tag in DOCUMENT_SECTIONS and self._document_depth:
+                if self._datasheet_depth == self._document_depth:
+                    self._datasheet_depth = None
+                self._document_depth -= 1
         if tag == self._skip:
             self._skip = None
             if self._structured is not None:
@@ -198,6 +289,8 @@ class _ProductPage(HTMLParser):
         if self._structured is not None:
             self._structured.append(data)
         elif self._skip is None and data.strip():
+            if self._heading_tag:
+                self._heading_text.append(data.strip())
             if self._pdf_link:
                 self._link_text.append(data.strip())
             self.words.append(data.strip())
@@ -222,7 +315,12 @@ def _public_address(host: str, port: int) -> str:
     return min(addresses, key=lambda address: (":" in address, address))
 
 
-def _get_pinned(url, address: str, deadline: float) -> tuple[int, str, str, bytes]:
+def _get_pinned(
+    url, address: str, deadline: float, *, max_bytes: int, index: bool = False,
+) -> tuple[int, str, str, bytes]:
+    allowed = ("application/xml", "text/xml", "text/plain") if index else (
+        "text/html", "application/xhtml+xml", "text/plain", "application/pdf",
+    )
     connection_type = (
         http.client.HTTPSConnection
         if url.scheme == "https"
@@ -261,7 +359,7 @@ def _get_pinned(url, address: str, deadline: float) -> tuple[int, str, str, byte
             "GET",
             target,
             headers={
-                "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf",
+                "Accept": ",".join(allowed),
                 "Accept-Encoding": "identity",
                 "User-Agent": "FilaBrain",
             },
@@ -275,26 +373,21 @@ def _get_pinned(url, address: str, deadline: float) -> tuple[int, str, str, byte
         content_type = (
             response.getheader("Content-Type", "").split(";")[0].strip().lower()
         )
-        if response.status != 200 or content_type not in (
-            "text/html",
-            "application/xhtml+xml",
-            "text/plain",
-            "application/pdf",
-        ):
+        if response.status != 200 or content_type not in allowed:
             return response.status, location, content_type, b""
         body = bytearray()
-        while len(body) <= MAX_BODY:
+        while len(body) <= max_bytes:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("Supplier page timed out")
             if sock:
                 sock.settimeout(remaining)
-            chunk = response.read1(min(32_768, MAX_BODY + 1 - len(body)))
+            chunk = response.read1(min(32_768, max_bytes + 1 - len(body)))
             if not chunk:
                 break
             body.extend(chunk)
-        if len(body) > MAX_BODY:
-            raise ValueError("Supplier page is too large")
+        if len(body) > max_bytes:
+            raise ValueError(SUPPLIER_TOO_LARGE)
         if time.monotonic() >= deadline:
             raise TimeoutError("Supplier page timed out")
         return response.status, location, content_type, bytes(body)
@@ -309,27 +402,18 @@ def _get_pinned(url, address: str, deadline: float) -> tuple[int, str, str, byte
         connection.close()
 
 
-def _fetch_supplier(url: str, *, archive: bool = False) -> Evidence:
+def _fetch_supplier(
+    url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD_BYTES, archive: bool = False,
+) -> Evidence:
     deadline = time.monotonic() + 7
     for _ in range(4):
-        parsed = urlsplit(url)
-        port = 443 if parsed.scheme == "https" else 80
-        if (
-            parsed.scheme not in ("http", "https")
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.port not in (None, port)
-            or len(url) > 2048
-            or any(ch.isspace() or ord(ch) < 32 or ch == "\\" for ch in url)
-        ):
-            raise ValueError("Expected a public supplier HTTP or HTTPS URL")
+        parsed, port = _supplier_url(url)
         if _supplier_cooldowns.get(parsed.hostname):
             raise ValueError("HTTP 429 (rate limited; waiting before retry)")
         address = _public_address(parsed.hostname, port)
         if time.monotonic() >= deadline:
             raise TimeoutError("Supplier page timed out")
-        status, location, content_type, body = _get_pinned(parsed, address, deadline)
+        status, location, content_type, body = _get_pinned(parsed, address, deadline, max_bytes=max_bytes)
         if status in (301, 302, 303, 307, 308) and location:
             if archive:
                 raise ValueError("Archive snapshot redirected")
@@ -373,22 +457,24 @@ def _fetch_supplier(url: str, *, archive: bool = False) -> Evidence:
             (prefix + visible)[:MAX_TEXT],
             product,
             scopes=tuple(scope[:MAX_TEXT] for scope in scopes if scope)[:100],
-            datasheets=tuple(dict.fromkeys(urljoin(url, link) for link in parser.datasheets))[:4],
+            datasheets=tuple(dict.fromkeys(
+                urljoin(url, link) for link in (*parser.datasheets, *parser.heading_datasheets)
+            ))[:4],
             origin="openfilamentdatabase.org" if re.search(r"open filament database", visible, re.IGNORECASE) else "",
         )
     raise ValueError("Too many supplier redirects")
 
 
-async def fetch_supplier(url: str) -> Evidence:
+async def fetch_supplier(url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD_BYTES) -> Evidence:
     try:
-        return await asyncio.wait_for(asyncio.to_thread(_fetch_supplier, url), timeout=8)
+        return await asyncio.wait_for(asyncio.to_thread(_fetch_supplier, url, max_bytes=max_bytes), timeout=8)
     except SupplierRateLimited as error:
         _supplier_cooldowns.purge_expired()
         _supplier_cooldowns.set(error.host, True, ttl=error.seconds)
         raise
 
 
-async def fetch_archived_supplier(url: str) -> Evidence | None:
+async def fetch_archived_supplier(url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD_BYTES) -> Evidence | None:
     url = supplier_page_url(url)
     async with httpx.AsyncClient(timeout=4, trust_env=False) as client:
         response = await client.get("https://archive.org/wayback/available", params={"url": url})
@@ -403,9 +489,83 @@ async def fetch_archived_supplier(url: str) -> Evidence | None:
     path = f"web.archive.org/web/{timestamp}/{url}"
     if snapshot.get("url") not in (f"http://{path}", f"https://{path}"):
         return None
-    evidence = await asyncio.wait_for(asyncio.to_thread(_fetch_supplier, f"https://{path}", archive=True), timeout=8)
+    evidence = await asyncio.wait_for(
+        asyncio.to_thread(_fetch_supplier, f"https://{path}", max_bytes=max_bytes, archive=True), timeout=8,
+    )
     date = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
     return replace(evidence, archived_at=date, datasheets=())
+
+
+async def supplier_sitemap_urls(url: str) -> tuple[str, ...]:
+    parsed = urlsplit(url)
+    port = 443 if parsed.scheme == "https" else 80
+    if parsed.scheme not in ("https", "http") or not parsed.hostname or parsed.port not in (None, port):
+        return ()
+    origin = f"{parsed.scheme}://{parsed.hostname}"
+    cached = _product_sitemaps.get(origin)
+    if cached is not None:
+        return cached
+    if _supplier_cooldowns.get(parsed.hostname):
+        return ()
+
+    def read_index():
+        deadline = time.monotonic() + 4
+        address = _public_address(parsed.hostname, port)
+
+        def read(link):
+            # Sitemap declarations may be absolute. Keep index requests on the original host.
+            if len(link) > 2048 or any(ch.isspace() or ord(ch) < 32 or ch == "\\" for ch in link):
+                return b""
+            try:
+                target = urlsplit(link)
+                if (
+                    (target.scheme, target.netloc) == (parsed.scheme, parsed.hostname)
+                    and time.monotonic() < deadline
+                ):
+                    return _get_pinned(target, address, deadline, max_bytes=512 * 1024, index=True)[3]
+            except SupplierRateLimited:
+                raise
+            except (OSError, ValueError, http.client.HTTPException):
+                pass
+            return b""
+
+        def entries(link):
+            try:
+                xml = read(link).decode("utf-8-sig")
+                if not xml or "<!DOCTYPE" in xml.upper():
+                    return (), ()
+                root = ElementTree.fromstring(xml)
+            except (UnicodeError, ElementTree.ParseError):
+                return (), ()
+            products = tuple(node.text.strip() for node in root.findall("./{*}url/{*}loc") if node.text)
+            indexes = tuple(node.text.strip() for node in root.findall("./{*}sitemap/{*}loc") if node.text)
+            return products, indexes
+
+        robots = read(f"{origin}/robots.txt").decode("utf-8", errors="replace")
+        declared = re.findall(r"(?im)^[ \t]*sitemap:[ \t]*(https?://[^\s#]+)", robots)
+        children = []
+        products = []
+        for sitemap in dict.fromkeys([*declared[:1], f"{origin}/sitemap.xml", f"{origin}/sitemap_index.xml"]):
+            links, indexes = entries(sitemap)
+            products.extend(links)
+            children.extend(indexes)
+            if products or children:
+                break
+        # Prefer product indexes and read at most two children.
+        for child in sorted(dict.fromkeys(children), key=lambda link: "product" not in link.lower())[:2]:
+            products.extend(entries(child)[0])
+        return tuple(dict.fromkeys(products))
+
+    try:
+        urls = await asyncio.wait_for(asyncio.to_thread(read_index), timeout=5)
+    except SupplierRateLimited as error:
+        _supplier_cooldowns.set(error.host, True, ttl=error.seconds)
+        return ()
+    except (OSError, ValueError, http.client.HTTPException):
+        urls = ()
+    _product_sitemaps.purge_expired()
+    _product_sitemaps.set(origin, urls, ttl=3600 if urls else 300)
+    return urls
 
 
 async def paramount_product_urls() -> tuple[str, ...]:
@@ -438,19 +598,34 @@ async def paramount_product_urls() -> tuple[str, ...]:
 
 
 async def search_web(origin: str, query: str) -> list[str]:
-    async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
-        response = await client.get(
-            f"{origin.rstrip('/')}/search", params={"q": query, "format": "json"}
-        )
+    async with (
+        asyncio.timeout(8),
+        httpx.AsyncClient(timeout=5, trust_env=False) as client,
+        client.stream("GET", f"{origin.rstrip('/')}/search", params={"q": query, "format": "json"}) as response,
+    ):
         response.raise_for_status()
-        data = response.json()
-    if not data.get("results") and data.get("unresponsive_engines"):
-        raise ValueError("Upstream search engines failed to return results")
-    return [
-        row["url"]
-        for row in data.get("results", [])[:3]
-        if isinstance(row, dict) and isinstance(row.get("url"), str)
-    ]
+        raw = bytearray()
+        async for chunk in response.aiter_bytes():
+            if len(raw) + len(chunk) > MAX_SEARCH_RESPONSE_BYTES:
+                raise ValueError("SearXNG response is too large")
+            raw.extend(chunk)
+        data = json.loads(raw)
+    if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+        raise ValueError("Expected SearXNG JSON search results")
+    if not data["results"] and data.get("unresponsive_engines"):
+        raise SearchEnginesUnavailable("Upstream search engines failed to return results")
+    urls = []
+    for row in data["results"]:
+        if not isinstance(row, dict) or not (url := public_link(row.get("url"))):
+            continue
+        try:
+            _supplier_url(url)
+        except ValueError:
+            continue
+        urls.append(url)
+        if len(urls) == 3:
+            break
+    return urls
 
 
 async def ofd_candidates(manufacturer: str) -> tuple[list[dict], str]:
