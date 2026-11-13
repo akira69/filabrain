@@ -182,7 +182,7 @@ try {
       } })
     }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
-    if (path.endsWith('/colors')) return route.fulfill({ json: { items: [], total: 0 } })
+    if (path.endsWith('/colors')) return route.fulfill({ json: { items: [{ id: 1, name: 'Fixture Red' }], total: 1 } })
     if (path.endsWith('/filaments') && req.method() === 'GET') {
       libraryReads++
       const requestedToken = new URL(req.url()).searchParams.get('include_record_token') === 'true'
@@ -760,7 +760,10 @@ try {
   const researchTitle = /Find specifications · Fixture Brand Fixture PLA/
   await otherDraft.getByRole('button', { name: researchTitle }).click()
   await otherDraft.locator('#research-options > summary').click()
-  await otherDraft.getByLabel('Product name', { exact: true }).fill('Fixture ASA')
+  if (!await otherDraft.getByLabel('FilaMan palette color').isVisible()) {
+    await otherDraft.getByText('Search options', { exact: true }).click()
+  }
+  await otherDraft.getByLabel('FilaMan palette color').selectOption('1')
   await otherDraft.getByRole('button', { name: 'Find specifications' }).click()
   await otherDraft.getByRole('checkbox', { name: /Density/ }).check()
   await otherDraft.getByRole('button', { name: 'Save new filament' }).click()
@@ -775,7 +778,8 @@ try {
   assert.notEqual(savePaths[1], savePaths[0])
   await otherConfirm.click()
   await otherDraft.getByRole('link', { name: 'Open saved filament' }).nth(1).waitFor()
-  assert.deepEqual(writes.map(write => write.designation), ['Fixture PLA', 'Fixture PETG', 'Fixture ASA'])
+  assert.deepEqual(writes.map(write => write.designation), ['Fixture PLA', 'Fixture PETG', 'Fixture PETG'])
+  assert.deepEqual(writes[2].colors, [{ color_id: 1 }])
   assert.equal(new Set(savePaths).size, 3)
   await otherDraft.reload()
   for (const tab of [otherDraft, page]) {

@@ -1746,6 +1746,15 @@ async def research_products(
         if link := public_link(url):
             different_sites.setdefault(_site_host(link), supplier_page_url(link))
 
+    supplier_identity = identity
+    if snapshot is not None and variant_sku and not _norm(identity.sku):
+        proven = next(candidate for candidate in candidates if _norm(candidate.sku) == variant_sku)
+        supplier_identity = identity.model_copy(update={
+            "sku": proven.sku,
+            "color": identity.color or proven.color,
+            "weight_g": identity.weight_g if identity.weight_g is not None else proven.weight_g,
+        })
+
     async def find_supplier_page(domain):
         urls = await search(f"site:{domain} {supplier_query}")
         failed_pages = {}
@@ -1757,7 +1766,7 @@ async def research_products(
                         continue
                     link = supplier_page_url(url)
                     page = await supplier(link)
-                    if page and _supplier_scopes(identity, page, snapshot):
+                    if page and _supplier_scopes(supplier_identity, page, snapshot):
                         return {link: page}
                     if page is None:
                         failed_pages[link] = None
@@ -1794,15 +1803,6 @@ async def research_products(
     line = set(re.findall(r"[^\W_]+", " ".join(_line(identity.designation, identity.color))))
     color = set(_tokens(identity.color))
     sku = "-".join(_product_key(lookup_sku or variant_sku))
-
-    supplier_identity = identity
-    if snapshot is not None and variant_sku and not _norm(identity.sku):
-        proven = next(candidate for candidate in candidates if _norm(candidate.sku) == variant_sku)
-        supplier_identity = identity.model_copy(update={
-            "sku": proven.sku,
-            "color": identity.color or proven.color,
-            "weight_g": identity.weight_g if identity.weight_g is not None else proven.weight_g,
-        })
 
     known_variant = _known_variant_fields(supplier_identity, snapshot)
 

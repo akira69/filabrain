@@ -428,6 +428,8 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
         if (draft) {
           const sameProduct = previous && previous.fields.product_url === draft.fields.product_url &&
             previous.fields.sku_hint === draft.fields.sku_hint &&
+            previous.context.fields.manufacturer_id === draft.context.fields.manufacturer_id &&
+            previous.context.fields.color_id === draft.context.fields.color_id &&
             JSON.stringify(identity(previous.context.fields)) === JSON.stringify(identity(draft.context.fields))
           const saveId = sameProduct ? (previous.saveId ?? current.id) : newId()
           current.research = { ...draft, saveId }

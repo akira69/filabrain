@@ -636,6 +636,60 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
     assert catalogs == {"filamandb", "open_filament_database"}
 
 
+async def test_preferred_supplier_uses_catalog_verified_sku(installed, db_session, monkeypatch):
+    from filabrain import proposals
+
+    url = "https://supplier.example/fixture-pla"
+    maker = Manufacturer(name="Fixture Brand", url="https://manufacturer.example")
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(manufacturer_id=maker.id, designation="Fixture PLA", material_type="PLA", diameter_mm=1.75)
+    db_session.add(filament)
+    await db_session.commit()
+
+    async def catalog(_identity):
+        return [{
+            "name": "Fixture PLA", "manufacturer": {"name": maker.name},
+            "material_key": "PLA", "diameter_mm": 1.75, "sku": "AB-1234",
+        }], "https://catalog.example/fixture-pla", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    async def search(_origin, query):
+        if query.startswith("site:supplier.example "):
+            assert "ab-1234" in query.lower()
+            return [url]
+        return []
+
+    async def fetch(link, **_):
+        if link == url:
+            return proposals.Evidence(link, "Fixture PLA", "SKU: AB-1234 Density: 1.24 g/cm³")
+        raise ValueError("Unavailable")
+
+    async def extract(_base, _model, _key, _identity, evidence, **_kwargs):
+        return ([
+            {
+                "field": "density_g_cm3", "value": 1.24,
+                "sources": [{"url": url, "title": "Supplier", "evidence": "1.24 g/cm³"}],
+            }
+        ] if any(source.url == url for source in evidence) else []), []
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "request_extraction", extract)
+    assert (await installed.put(f"{BASE}/settings", json={
+        "search_url": "http://searxng:8080", "model_url": "http://model.example", "model_id": "fixture",
+        "supplier_sites": [{"domain": "supplier.example"}],
+    })).is_success
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.is_success
+    assert any(item["field"] == "density_g_cm3" and item["sources"][0]["url"] == url
+               for item in response.json()["suggestions"]), response.json()
+
+
 @pytest.mark.parametrize("catalog_has_site", [True, False])
 async def test_missing_manufacturer_site_is_discovered_and_can_be_saved(
     installed, db_session, monkeypatch, normal_user, catalog_has_site,
