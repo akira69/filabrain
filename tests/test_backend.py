@@ -9,7 +9,7 @@ from app.main import app
 from app.models import Filament, InstalledPlugin, Manufacturer, Spool
 from app.services import plugin_service
 from fastapi import HTTPException
-from httpx import ASGITransport, AsyncClient, MockTransport
+from httpx import ASGITransport, AsyncClient, MockTransport, Response
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -102,6 +102,55 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     assert (await installed.post(f"{BASE}/chat", json=chat)).status_code == 200
     assert calls == ["fixture:alternate", "fixture:default"]
     assert (await installed.get(f"{BASE}/settings")).json()["model_id"] == "fixture:default"
+
+
+@pytest.mark.parametrize(("upstream_response", "expected"), [
+    (Response(200, json={"results": []}), 200),
+    (Response(200, json={"status": "ok"}), 502),
+    (Response(403), 502),
+])
+async def test_searxng_connection_uses_unsaved_url(installed, monkeypatch, upstream_response, expected):
+    from filabrain import sources
+
+    original = (await installed.get(f"{BASE}/settings")).json()
+    requests = []
+
+    def upstream(request):
+        requests.append(request)
+        return upstream_response
+
+    monkeypatch.setattr(sources.httpx, "AsyncClient", lambda **kwargs: AsyncClient(
+        transport=MockTransport(upstream), **kwargs,
+    ))
+    path = f"{BASE}/settings/test-search"
+    assert (await installed.post(path, json={"search_url": "https://user:secret@searxng.test"})).status_code == 422
+    assert (await installed.post(path, json={"search_url": " "})).status_code == 422
+    response = await installed.post(path, json={"search_url": "http://searxng.test:8080/"})
+    assert response.status_code == expected, response.text
+    assert len(requests) == 1
+    request, = requests
+    assert request.method == "GET"
+    assert request.url.host == "searxng.test"
+    assert request.url.path == "/search"
+    assert request.url.params["format"] == "json"
+    assert "Authorization" not in request.headers
+    assert (await installed.get(f"{BASE}/settings")).json() == original
+
+
+async def test_searxng_connection_requires_plugin_admin(installed, normal_user, db_session):
+    from app.core.security import generate_token_secret, hash_token
+    from app.models import UserApiKey
+
+    secret = generate_token_secret()
+    key = UserApiKey(user_id=normal_user.id, name="Limited key", key_hash=hash_token(secret), scopes=["filaments:read"])
+    db_session.add(key)
+    await db_session.commit()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://filaman.test") as client:
+        response = await client.post(
+            f"{BASE}/settings/test-search", json={"search_url": "http://searxng.test"},
+            headers={"Authorization": f"ApiKey uak.{key.id}.{secret}"},
+        )
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize(("base_url", "limit"), [

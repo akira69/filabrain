@@ -101,6 +101,16 @@ try {
       mcpEnabled = req.postDataJSON().mcp_enabled
       return route.fulfill({ json: { mcp_enabled: mcpEnabled } })
     }
+    if (path.endsWith('/settings/test-search')) {
+      assert.deepEqual(req.postDataJSON(), { search_url: 'http://searxng:8080' })
+      return route.fulfill({ json: { ok: true } })
+    }
+    if (path.endsWith('/settings/test')) {
+      assert.deepEqual(req.postDataJSON(), {
+        model_url: 'http://ollama:11434', model_id: 'fixture:default', api_key: 'fixture-key', clear_key: false,
+      })
+      return route.fulfill({ json: { ok: true } })
+    }
     if (path.endsWith('/settings')) {
       const settings = req.method() === 'PUT' ? req.postDataJSON() : null
       if (settings) {
@@ -279,11 +289,33 @@ try {
   await settings.getByText('Off', { exact: true }).waitFor()
   const enableSearch = page.getByRole('button', { name: 'Enable web search' })
   const searchField = page.getByRole('textbox', { name: 'SearXNG URL (optional)' })
+  const searchTest = page.getByRole('button', { name: 'Test SearXNG' })
+  const modelTest = page.getByRole('button', { name: 'Test connection', exact: true })
   await page.getByText(/Some suppliers can be researched using/).waitFor()
   assert.equal(await searchField.isVisible(), false)
+  assert.equal(await searchTest.isVisible(), false)
+  assert.ok((await modelTest.boundingBox()).y < (await enableSearch.boundingBox()).y)
   await enableSearch.click()
   assert.equal(await searchField.evaluate(el => el === document.activeElement), true)
   await page.getByRole('link', { name: 'SearXNG Docker setup' }).waitFor()
+  assert.equal(await searchTest.isDisabled(), true)
+  await modelUrl.fill('invalid-model-url')
+  await searchField.fill('http://searxng:8080')
+  await searchTest.click()
+  await page.getByText('SearXNG returned a valid search response.').waitFor()
+  assert.equal(searchUrl, '')
+
+  await searchField.fill('invalid-search-url')
+  await page.getByText('SearXNG returned a valid search response.').waitFor({ state: 'hidden' })
+  await modelUrl.fill('http://ollama:11434')
+  if (!await modelId.isVisible()) await page.locator('#filabrain-settings summary').click()
+  await modelId.fill('fixture:default')
+  await page.locator('#filabrain-settings input[name=api_key]').fill('fixture-key')
+  await modelTest.click()
+  await page.getByText('The model returned a verified sample.').waitFor()
+  await modelUrl.fill('')
+  await modelId.fill('')
+  await page.locator('#filabrain-settings input[name=api_key]').fill('')
   await searchField.fill('http://searxng:8080')
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('Settings saved.').waitFor()

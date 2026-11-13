@@ -109,6 +109,8 @@
     "searchInstall": "Installer SearXNG avec Docker",
     "testConnection": "Tester la connexion",
     "testPassed": "Le modèle a renvoyé un exemple vérifié.",
+    "testSearch": "Tester SearXNG",
+    "testSearchPassed": "SearXNG a renvoyé une réponse de recherche valide.",
     "settingsSaved": "Paramètres enregistrés.",
     "keyConfigured": "Une clé est configurée. Laissez ce champ vide pour conserver la clé de cette URL.",
     "keyOptional": "Laissez vide si votre modèle ne nécessite pas de clé.",

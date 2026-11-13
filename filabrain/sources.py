@@ -438,17 +438,24 @@ async def paramount_product_urls() -> tuple[str, ...]:
 
 
 async def search_web(origin: str, query: str) -> list[str]:
-    async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
-        response = await client.get(
-            f"{origin.rstrip('/')}/search", params={"q": query, "format": "json"}
-        )
+    async with (
+        httpx.AsyncClient(timeout=5, trust_env=False) as client,
+        client.stream("GET", f"{origin.rstrip('/')}/search", params={"q": query, "format": "json"}) as response,
+    ):
         response.raise_for_status()
-        data = response.json()
-    if not data.get("results") and data.get("unresponsive_engines"):
+        raw = bytearray()
+        async for chunk in response.aiter_bytes():
+            raw.extend(chunk)
+            if len(raw) > MAX_BODY:
+                raise ValueError("SearXNG response is too large")
+        data = json.loads(raw)
+    if not isinstance(data, dict) or not isinstance(data.get("results"), list):
+        raise TypeError("Expected SearXNG JSON search results")
+    if not data["results"] and data.get("unresponsive_engines"):
         raise ValueError("Upstream search engines failed to return results")
     return [
         row["url"]
-        for row in data.get("results", [])[:3]
+        for row in data["results"][:3]
         if isinstance(row, dict) and isinstance(row.get("url"), str)
     ]
 

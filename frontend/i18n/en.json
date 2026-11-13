@@ -109,6 +109,8 @@
     "searchInstall": "SearXNG Docker setup",
     "testConnection": "Test connection",
     "testPassed": "The model returned a verified sample.",
+    "testSearch": "Test SearXNG",
+    "testSearchPassed": "SearXNG returned a valid search response.",
     "settingsSaved": "Settings saved.",
     "keyConfigured": "A key is configured. Leave this blank to keep the stored key for the same URL.",
     "keyOptional": "Leave blank if your model endpoint does not require a key.",

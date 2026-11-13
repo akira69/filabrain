@@ -1,3 +1,4 @@
+import asyncio
 import json
 from os import getenv
 from urllib.parse import urlsplit
@@ -8,12 +9,19 @@ from app.core.config import settings
 from app.core.oidc_crypto import decrypt_secret, encrypt_secret
 from app.models import InstalledPlugin
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, SecretStr, StrictBool, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    StrictBool,
+    field_validator,
+)
 from sqlalchemy import select, text
 
 from .db import FilamentResearchSettings
 from .model import request_extraction
-from .sources import Evidence
+from .sources import Evidence, search_web
 
 router = APIRouter(tags=["FilaBrain"])
 admin = RequirePermission("admin:plugins_manage")
@@ -43,6 +51,27 @@ def _model_base_url(value: str) -> str:
     return value
 
 
+def _validate_base_url(value: str) -> str:
+    value = value.strip().rstrip("/")
+    if value:
+        url = urlsplit(value)
+        if (
+            url.scheme not in ("https", "http")
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.query
+            or url.fragment
+            or "\\" in value
+            or any(ch.isspace() or ord(ch) < 32 for ch in value)
+            or url.port == 0
+        ):
+            raise ValueError(
+                "Use an HTTP(S) base URL without credentials, query or fragment"
+            )
+    return value
+
+
 class SettingsInput(BaseModel):
     model_url: str = Field("", max_length=500)
     model_id: str = Field("", max_length=150)
@@ -51,27 +80,7 @@ class SettingsInput(BaseModel):
     clear_key: bool = False
     mcp_enabled: StrictBool | None = None
 
-    @field_validator("model_url", "search_url")
-    @classmethod
-    def validate_url(cls, value: str) -> str:
-        value = value.strip().rstrip("/")
-        if value:
-            url = urlsplit(value)
-            if (
-                url.scheme not in ("https", "http")
-                or not url.hostname
-                or url.username is not None
-                or url.password is not None
-                or url.query
-                or url.fragment
-                or "\\" in value
-                or any(ch.isspace() or ord(ch) < 32 for ch in value)
-                or url.port == 0
-            ):
-                raise ValueError(
-                    "Use an HTTP(S) base URL without credentials, query or fragment"
-                )
-        return value
+    validate_url = field_validator("model_url", "search_url")(_validate_base_url)
 
     @field_validator("model_url")
     @classmethod
@@ -86,6 +95,13 @@ class SettingsInput(BaseModel):
 
 class McpSettingsInput(BaseModel):
     mcp_enabled: StrictBool
+
+
+class SearchTestInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    search_url: str = Field(max_length=500)
+
+    validate_url = field_validator("search_url")(_validate_base_url)
 
 
 def _deployment_model_url() -> str:
@@ -278,4 +294,16 @@ async def test_model(data: SettingsInput, db: DBSession, _principal=admin):
             502,
             "The model did not return a usable sample. Check the connection and model ID.",
         ) from None
+    return {"ok": True}
+
+
+@router.post("/settings/test-search")
+async def test_search(data: SearchTestInput, _principal=admin):
+    if not data.search_url:
+        raise HTTPException(422, "Enter the SearXNG URL")
+    try:
+        async with asyncio.timeout(8):
+            await search_web(data.search_url, "3D printing filament")
+    except (httpx.HTTPError, ValueError, TypeError, TimeoutError):
+        raise HTTPException(502, "Could not test SearXNG. Check the URL and enable JSON results.") from None
     return {"ok": True}
