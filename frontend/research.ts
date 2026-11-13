@@ -11,6 +11,7 @@ export type EditorContext = { mode: 'create' | 'edit'; filament_id: number | nul
 export type SelectionContext = { mode: 'selection'; filament_ids: number[] }
 
 const route = '/filabrain'
+const sourceNotes = new Set(['manufacturer_page', 'archived_page', 'unavailable_source', 'manual_datasheet'])
 const nativeFields = new Set([
   'manufacturer_id', 'color_id', 'designation', 'material_type', 'diameter_mm',
   'manufacturer_color_name', 'manufacturer_sku', 'density_g_cm3', 'raw_material_weight_g',
@@ -54,7 +55,7 @@ function externalLink(url: string, title: string) {
 function appendSources(row: HTMLElement, sources: ResearchOption['sources']) {
   for (const source of sources) {
     const p = document.createElement('p')
-    p.className = 'evidence'
+    p.className = 'research-note'
     p.append(source.url && /^https?:\/\//i.test(source.url) ? externalLink(source.url, source.title) : source.title,
       source.evidence ? ` — ${source.evidence}` : '')
     row.append(p)
@@ -187,16 +188,23 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     control.type = group ? 'radio' : 'checkbox'
     if (group) control.name = group
     choices.set(control, unit)
-    label.append(control, Object.entries(unit).map(([field, { old, value }]) => {
+    const changes = document.createElement('span')
+    for (const [field, { old, value }] of Object.entries(unit)) {
       const name = researchFieldLabel(field)
       const select = field === 'manufacturer_id' ? manufacturer : field === 'color_id' ? palette : undefined
       const display = select?.querySelector<HTMLOptionElement>(`option[value="${Number(value)}"]`)?.text
         || (select && sources[0]?.evidence) || valueText(value)
-      return `${name}: ${valueText(old)} → ${display}`
-    }).join(' · '))
+      const previous = document.createElement('span')
+      previous.className = 'research-note'
+      previous.textContent = `${valueText(old)} → `
+      if (changes.childNodes.length) changes.append(' · ')
+      changes.append(`${name}: `, previous, display)
+    }
+    label.append(control, changes)
     row.append(label)
     if (reason) {
       const p = document.createElement('p')
+      p.className = 'research-note'
       p.textContent = reason
       row.append(p)
     }
@@ -213,6 +221,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     const alternatives = new Set<string>()
     for (const issue of proposal.issues) {
       const p = document.createElement('p')
+      if (sourceNotes.has(issue.code)) p.className = 'research-note'
       const key = `filaBrain.${issue.code}`
       const explanation = t(key, { name: issue.name || '', source: issue.source || '' })
       p.textContent = explanation === key ? issue.code.replaceAll('_', ' ') : explanation
@@ -223,8 +232,16 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       if (issue.url && /^https?:\/\//i.test(issue.url)) {
         const url = issue.url
         const websiteFound = issue.code === 'manufacturer_website_found'
-        if (websiteFound) p.className = 'research-website-result'
-        p.append(' ', externalLink(url, websiteFound ? url : t('filaBrain.openSource')))
+        if (websiteFound) {
+          const note = document.createElement('span')
+          note.className = 'research-note'
+          note.textContent = p.textContent
+          p.className = 'research-website-result'
+          p.replaceChildren(note, document.createElement('br'))
+        } else {
+          p.append(' ')
+        }
+        p.append(externalLink(url, websiteFound ? url : t('filaBrain.openSource')))
         if (websiteFound && editor?.mode === 'edit' && status.can_update_manufacturer &&
             context.filament_id && typeof fields.manufacturer_id === 'number') {
           const saveWebsite = document.createElement('button')
@@ -302,9 +319,9 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     reply.hidden = !!editor && !results.childElementCount
   }
 
-  function message(text: string, fromUser = false) {
+  function message(text: string, kind: 'user' | 'note') {
     const item = document.createElement('p')
-    item.className = fromUser ? 'chat-message chat-user' : 'chat-message chat-assistant'
+    item.className = kind === 'user' ? 'chat-message chat-user' : 'chat-message research-note'
     item.textContent = text
     transcript.append(item)
     return item
@@ -322,8 +339,8 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     saved.hidden = true
     notice.textContent = ''
     conversation.hidden = false
-    message(prompt || (action === 'standardize' ? buttons[1].textContent! : buttons[0].textContent!), true)
-    const answer = message(t('filaBrain.searching'))
+    message(prompt || (action === 'standardize' ? buttons[1].textContent! : buttons[0].textContent!), 'user')
+    const answer = message(t('filaBrain.searching'), 'note')
     if (!prompt) {
       optionsSummary.hidden = false
       searchOptions.open = false
@@ -343,10 +360,15 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       })
       if (revision !== formRevision) return
       render(proposal, context)
-      answer.textContent = results.childElementCount ? t('filaBrain.researchReview') : t('filaBrain.noSuggestions')
+      const hasResults = results.childElementCount > 0
+      answer.textContent = t(hasResults ? 'filaBrain.researchReview' : 'filaBrain.noSuggestions')
+      if (!hasResults) answer.className = 'chat-message chat-assistant'
       if (prompt && guidance.value.trim() === prompt) guidance.value = ''
     } catch (error) {
-      if (revision === formRevision) answer.textContent = errorText(error)
+      if (revision === formRevision) {
+        answer.className = 'chat-message chat-assistant'
+        answer.textContent = errorText(error)
+      }
     } finally {
       if (revision === formRevision) {
         lastAction = action
