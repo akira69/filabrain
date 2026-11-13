@@ -2,13 +2,14 @@ import { element, errorText, hostRequest, type Status } from './main'
 import { api, fetchAllPages, getCsrfToken } from './shared/api'
 import { researchFieldLabel, researchOptionValue, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
+import type { ExpectedFilament } from './shared/filabrain-batches'
 import { mountModelPicker } from './shared/model-picker'
 
 type Value = ResearchOption['value'] | boolean | null
 type Fields = Record<string, Value>
 type Unit = Record<string, { old: Value; value: Value }>
 export type EditorContext = { mode: 'create' | 'edit'; filament_id: number | null; fields: Fields }
-export type SelectionContext = { mode: 'selection'; filament_ids: number[] }
+export type SelectionContext = { mode: 'selection'; filament_ids: number[]; expected_filaments?: ExpectedFilament[] }
 
 const route = '/filabrain'
 const nativeFields = new Set([

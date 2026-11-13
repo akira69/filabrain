@@ -44,6 +44,8 @@ export const errorText = (error: unknown) => error instanceof Error ? error.mess
 function mountLibrary(context?: SelectionContext) {
   const selected = new Set<number>(context?.filament_ids)
   const expectedFilaments = new Map<number, ExpectedFilament>()
+  const verifiesSelection = !context || context.expected_filaments !== undefined
+  for (const item of context?.expected_filaments ?? []) expectedFilaments.set(item.id, item)
   const form = element<HTMLFormElement>('library-research')
   const search = element<HTMLFormElement>('library-search')
   const rows = element('library-records')
@@ -62,14 +64,14 @@ function mountLibrary(context?: SelectionContext) {
   function updateSelection() {
     element('library-selected').textContent = `${selected.size} of 50 selected`
     submit.disabled = busy || !selected.size || selected.size > 50 || loadFailed ||
-      (!context && expectedFilaments.size !== selected.size)
+      (verifiesSelection && (expectedFilaments.size !== selected.size || [...selected].some(id => !expectedFilaments.has(id))))
     clearSelection.hidden = !!context || !selected.size
     clearSelection.disabled = busy
   }
 
   async function load(notice = '') {
     const generation = ++request
-    const query = new URLSearchParams({ page: String(currentPage), page_size: '25' })
+    const query = new URLSearchParams({ page: String(currentPage), page_size: '25', include_record_token: 'true' })
     const name = String(new FormData(search).get('search')).trim()
     if (name) query.set('search', name)
     rows.textContent = 'Loading filaments…'
@@ -132,7 +134,7 @@ function mountLibrary(context?: SelectionContext) {
       if (!Array.isArray(expected) || expected.length !== ids.length ||
           !expected.every(item => item && ids.includes(item.id) && Number.isSafeInteger(item.manufacturer_id) &&
             item.manufacturer_id > 0 && typeof item.designation === 'string' && typeof item.material_type === 'string' &&
-            (item.record_token === undefined || typeof item.record_token === 'string')) ||
+            (item.record_token == null || (typeof item.record_token === 'string' && /^[0-9a-f]{32}$/.test(item.record_token)))) ||
           new Set(expected.map(item => item.id)).size !== ids.length) return
       selected.clear()
       expectedFilaments.clear()
@@ -186,12 +188,16 @@ function mountLibrary(context?: SelectionContext) {
     updateSelection()
     message.textContent = 'Starting research…'
     try {
-      const batch = await createResearchBatch([...selected], mode, context ? undefined : [...expectedFilaments.values()])
+      const batch = await createResearchBatch([...selected], mode, verifiesSelection ? [...expectedFilaments.values()] : undefined)
       location.assign(batchHref(batch.id))
     } catch (error) {
       busy = false
-      if (!context && error instanceof ApiError && error.code === 'filament_selection_changed') {
-        clearLibrarySelection(true)
+      if (error instanceof ApiError && error.code === 'filament_selection_changed') {
+        if (context) {
+          selected.clear()
+          message.textContent = t('filaBrain.libraryInventoryChanged')
+          updateSelection()
+        } else clearLibrarySelection(true)
       } else {
         message.textContent = errorText(error)
         updateSelection()

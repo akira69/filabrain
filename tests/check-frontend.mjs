@@ -35,6 +35,8 @@ try {
   let hostPicker = false
   let staleBatchOnce = false
   let libraryReads = 0
+  let supportsRecordToken = true
+  let hostSendsIdentity = false
   await page.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
@@ -59,7 +61,9 @@ try {
       <script>window.addEventListener('message', event => {
         if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
         const { type, request_id } = event.data;
-        if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'selection', filament_ids:[10]}, location.origin)
+        if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'selection', filament_ids:[10],
+          ${hostSendsIdentity ? `expected_filaments: [{id:10,manufacturer_id:7,designation:'Fixture PLA',material_type:'PLA',record_token:'${pickerRecordToken}'}]` : ''}
+        }, location.origin)
       })</script>` })
     if (path === '/editor-fixture') return route.fulfill({ contentType: 'text/html', body: `
       <iframe style="width: 640px; height: 520px" sandbox="allow-scripts allow-same-origin allow-forms" src="${url}?filament_host=editor"></iframe>
@@ -129,7 +133,9 @@ try {
     if (path.endsWith('/colors')) return route.fulfill({ json: { items: [], total: 0 } })
     if (path.endsWith('/filaments') && req.method() === 'GET') {
       libraryReads++
-      return route.fulfill({ json: { items: [filament], total: 1 } })
+      const requestedToken = new URL(req.url()).searchParams.get('include_record_token') === 'true'
+      const record_token = requestedToken && supportsRecordToken ? pickerRecordToken : undefined
+      return route.fulfill({ json: { items: [{ ...filament, record_token }], total: 1 } })
     }
     if (path.endsWith('/filaments') && req.method() === 'POST') {
       writes.push(req.postDataJSON())
@@ -140,9 +146,9 @@ try {
       const { id, manufacturer_id, designation, material_type } = filament
       assert.deepEqual(req.postDataJSON(), {
         filament_ids: [10], mode: 'fill',
-        ...(hostSelection ? {} : { expected_filaments: [{
+        ...(hostSelection && !hostSendsIdentity ? {} : { expected_filaments: [{
           id, manufacturer_id, designation, material_type,
-          ...(hostPicker === 'current' ? { record_token: pickerRecordToken } : {}),
+          ...(hostPicker === 'current' || supportsRecordToken ? { record_token: pickerRecordToken } : {}),
         }] }),
       })
       if (staleBatchOnce) {
@@ -392,6 +398,7 @@ try {
   assert.equal(writes.length, 1)
 
   hostPicker = 'legacy'
+  supportsRecordToken = false
   await page.goto(`${url}?tab=library`)
   await page.getByLabel('Search filament library').waitFor()
   assert.equal(await page.locator('#library-picker').count(), 0)
@@ -416,6 +423,13 @@ try {
   assert.equal(await frame.getByLabel('Search filament library').isVisible(), false)
   await frame.getByRole('button', { name: 'Start research' }).click()
   await frame.getByRole('heading', { name: 'Review queue' }).waitFor()
+  hostSendsIdentity = true
+  staleBatchOnce = true
+  await page.goto('https://fila.test/selection-fixture')
+  const startHostBatch = frame.getByRole('button', { name: 'Start research' })
+  await startHostBatch.click()
+  await frame.getByText('The filament library changed. Select your filaments again.').waitFor()
+  assert.equal(await startHostBatch.isDisabled(), true)
   console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
 } finally {
   await browser.close()

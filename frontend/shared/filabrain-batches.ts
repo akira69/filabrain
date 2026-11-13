@@ -86,7 +86,7 @@ export type ExpectedFilament = {
   manufacturer_id: number
   designation: string
   material_type: string
-  record_token?: string
+  record_token?: string | null
 }
 
 export function createResearchBatch(filament_ids: number[], mode: BatchMode, expected_filaments?: ExpectedFilament[]) {

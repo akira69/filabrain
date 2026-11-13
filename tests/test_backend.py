@@ -302,7 +302,14 @@ async def test_stock_host_batch_claim_and_apply(
         assert stale.status_code == 409, stale.text
         assert stale.json()["detail"]["code"] == "filament_selection_changed"
         await db_session.rollback()
-        identity["record_token"] = replacement.json()["record_token"]
+        listed = await installed.get("/api/v1/filaments", params={
+            "include_record_token": "true", "filament_id": identity["id"],
+        })
+        assert listed.is_success, listed.text
+        identity["record_token"] = next(
+            item["record_token"] for item in listed.json()["items"] if item["id"] == identity["id"]
+        )
+        assert identity["record_token"] and identity["record_token"] != previous_token
     response = await installed.post(
         f"{BASE}/batches",
         json={"mode": "fill", "filament_ids": [identity["id"]],
