@@ -28,6 +28,8 @@ try {
   const writes = []
   let mcpEnabled = false
   let searchUrl = ''
+  let supplierSites = []
+  let disabledSources = []
   let chatModelId = 'fixture:default'
   let canConfigure = true
   let modelsUnavailable = false
@@ -105,11 +107,14 @@ try {
       const settings = req.method() === 'PUT' ? req.postDataJSON() : null
       if (settings) {
         searchUrl = settings.search_url
+        supplierSites = settings.supplier_sites ?? supplierSites
+        disabledSources = settings.disabled_sources ?? disabledSources
         if (settings.model_id) chatModelId = settings.model_id
       }
       return route.fulfill({ json: {
         model_url: settings?.model_url || '', model_id: settings?.model_id || '',
         search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
+        supplier_sites: supplierSites, disabled_sources: disabledSources,
       } })
     }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
@@ -280,6 +285,16 @@ try {
   const enableSearch = page.getByRole('button', { name: 'Enable web search' })
   const searchField = page.getByRole('textbox', { name: 'SearXNG URL (optional)' })
   await page.getByText(/Some suppliers can be researched using/).waitFor()
+  const sources = page.getByRole('region', { name: 'Research sources' })
+  const ofdSource = sources.getByRole('checkbox', { name: 'Open Filament Database' })
+  const searchSource = sources.getByRole('checkbox', { name: 'SearXNG web search' })
+  assert.equal(await ofdSource.isChecked(), true)
+  assert.equal(await searchSource.isChecked(), false)
+  await ofdSource.uncheck()
+  await sources.getByRole('textbox', { name: 'Supplier domain' }).fill('shop.example.org')
+  await sources.getByRole('button', { name: 'Add supplier' }).click()
+  const supplier = sources.getByRole('checkbox', { name: 'shop.example.org' })
+  assert.equal(await supplier.isChecked(), true)
   assert.equal(await searchField.isVisible(), false)
   await enableSearch.click()
   assert.equal(await searchField.evaluate(el => el === document.activeElement), true)
@@ -292,6 +307,17 @@ try {
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   await searchField.waitFor()
   assert.equal(await searchField.inputValue(), searchUrl)
+  assert.equal(await searchSource.isChecked(), true)
+  assert.equal(await ofdSource.isChecked(), false)
+  assert.equal(await supplier.isChecked(), true)
+  await supplier.uncheck()
+  await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByText('Settings saved.').waitFor()
+  assert.deepEqual(supplierSites, [{ domain: 'shop.example.org', enabled: false }])
+  await sources.getByRole('button', { name: 'Remove shop.example.org' }).click()
+  await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByText('Settings saved.').waitFor()
+  assert.deepEqual(supplierSites, [])
   assert.equal(await enableSearch.isVisible(), false)
   assert.equal(await settings.getByRole('textbox', { name: 'MCP URL' }).isVisible(), false)
   await settings.getByRole('switch').press('Space')
@@ -368,7 +394,7 @@ try {
   assert.equal(await frame.getByLabel('Search filament library').isVisible(), false)
   await frame.getByRole('button', { name: 'Start research' }).click()
   await frame.getByRole('heading', { name: 'Review queue' }).waitFor()
-  console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
+  console.log('FilaBrain plugin page: chat, research sources, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
 } finally {
   await browser.close()
 }

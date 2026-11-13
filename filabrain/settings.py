@@ -1,5 +1,7 @@
 import json
+import re
 from os import getenv
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -17,6 +19,8 @@ from .sources import Evidence
 
 router = APIRouter(tags=["FilaBrain"])
 admin = RequirePermission("admin:plugins_manage")
+ResearchSource = Literal["filamandb", "open_filament_database", "wayback"]
+SUPPLIER_DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]")
 
 
 async def lock_research_plugin(db: DBSession) -> bool:
@@ -43,6 +47,19 @@ def _model_base_url(value: str) -> str:
     return value
 
 
+class SupplierSite(BaseModel):
+    domain: str = Field(max_length=254)
+    enabled: StrictBool = True
+
+    @field_validator("domain")
+    @classmethod
+    def normalize_domain(cls, value: str) -> str:
+        domain = value.strip().lower().removesuffix(".").removeprefix("www.")
+        if not SUPPLIER_DOMAIN.fullmatch(domain):
+            raise ValueError("Enter a supplier domain such as example.com")
+        return domain
+
+
 class SettingsInput(BaseModel):
     model_url: str = Field("", max_length=500)
     model_id: str = Field("", max_length=150)
@@ -50,6 +67,15 @@ class SettingsInput(BaseModel):
     api_key: SecretStr | None = Field(None, max_length=1000)
     clear_key: bool = False
     mcp_enabled: StrictBool | None = None
+    disabled_sources: list[ResearchSource] = Field(default_factory=list, max_length=3)
+    supplier_sites: list[SupplierSite] = Field(default_factory=list, max_length=4)
+
+    @field_validator("supplier_sites")
+    @classmethod
+    def unique_supplier_domains(cls, sites: list[SupplierSite]) -> list[SupplierSite]:
+        if len({site.domain for site in sites}) != len(sites):
+            raise ValueError("Each supplier domain can only be added once")
+        return sites
 
     @field_validator("model_url", "search_url")
     @classmethod
@@ -102,6 +128,8 @@ async def config_record(db: DBSession) -> tuple[FilamentResearchSettings | None,
         "model_url": _deployment_model_url(),
         "model_id": getenv("FILABRAIN_MODEL_ID", "").strip(),
         "search_url": _deployment_search_url(),
+        "disabled_sources": [],
+        "supplier_sites": [],
     }
     config = fallback | (row.config or {} if row else {})
     config["model_url"] = _model_base_url(config["model_url"])
@@ -122,6 +150,8 @@ def public_config(config: dict, mcp_enabled: bool) -> dict:
         "model_url": config["model_url"],
         "model_id": config["model_id"],
         "search_url": config["search_url"],
+        "disabled_sources": config["disabled_sources"],
+        "supplier_sites": config["supplier_sites"],
         "mcp_enabled": mcp_enabled,
         "has_key": bool(config.get("encrypted_key"))
         or bool(
@@ -145,6 +175,9 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
     await lock_research_plugin(db)
     row, old = await config_record(db)
     config = data.model_dump(exclude={"api_key", "clear_key", "mcp_enabled"})
+    for key in ("disabled_sources", "supplier_sites"):
+        if key not in data.model_fields_set:
+            config[key] = old[key]
     if bool(data.model_id) != bool(data.model_url):
         raise HTTPException(422, "Enter both a model URL and a model ID")
     if data.api_key and data.api_key.get_secret_value() and not data.clear_key:

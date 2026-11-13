@@ -41,6 +41,27 @@
             <div><a href="https://docs.searxng.org/admin/installation-docker" target="_blank" rel="noopener noreferrer" data-i18n="filaBrain.searchInstall">SearXNG Docker setup</a></div>
           </div>
         </section>
+        <section class="research-web-search research-sources" aria-labelledby="research-sources-title">
+          <h3 id="research-sources-title" data-i18n="filaBrain.researchSources">Research sources</h3>
+          <p class="fm-field-hint" data-i18n="filaBrain.researchSourcesHint">Checked sources are enabled. FilaBrain uses each source when it applies to the lookup.</p>
+          <fieldset id="research-source-controls" aria-labelledby="research-sources-title" disabled>
+            <div class="research-source-list">
+              <label><input type="checkbox" checked disabled /> <span data-i18n="filaBrain.manufacturerLinks">Manufacturer and product links</span></label>
+              <label><input name="filamandb" type="checkbox" /> <span>FilaManDB</span></label>
+              <label><input name="open_filament_database" type="checkbox" /> <span>Open Filament Database</span></label>
+              <label><input name="wayback" type="checkbox" /> <span data-i18n="filaBrain.waybackSource">Wayback Machine fallback</span></label>
+              <label><input id="research-search-source" type="checkbox" disabled /> <span data-i18n="filaBrain.searxngSource">SearXNG web search</span></label>
+            </div>
+            <label for="research-supplier-domain" data-i18n="filaBrain.supplierDomain">Supplier domain</label>
+            <p id="research-supplier-hint" class="fm-field-hint" data-i18n="filaBrain.supplierHint">With SearXNG configured, FilaBrain runs targeted searches for checked supplier sites. Broad web search can still find unchecked sites.</p>
+            <div id="research-supplier-sites" class="research-source-list"></div>
+            <div class="research-supplier-add">
+              <input id="research-supplier-domain" class="fm-input" type="text" inputmode="url" maxlength="254" placeholder="example.com" aria-describedby="research-supplier-hint research-supplier-message" />
+              <button id="research-add-supplier" type="button" class="fm-btn fm-btn-outline" data-i18n="filaBrain.addSupplier">Add supplier</button>
+            </div>
+            <small id="research-supplier-message" class="fm-field-hint" role="status"></small>
+          </fieldset>
+        </section>
         <div class="research-settings-actions">
           <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-i18n="filaBrain.testConnection" disabled>Test connection</button>
           <button type="submit" class="fm-btn fm-btn-outline" data-i18n="common.save" disabled>Save</button>

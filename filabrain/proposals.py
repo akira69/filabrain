@@ -1161,6 +1161,7 @@ async def research_products(
         issues.extend({"code": "duplicate", "filament_id": ident} for ident in duplicates)
         return proposal
     _, config = await config_record(db)
+    disabled_sources = set(config["disabled_sources"])
     if release_read:
         # The worker supplies a detached authorized snapshot; do not hold a read
         # transaction across supplier, catalog or model calls.
@@ -1298,6 +1299,8 @@ async def research_products(
             try:
                 return await search_web(config["search_url"], term)
             except (httpx.HTTPError, ValueError, AttributeError, TypeError) as error:
+                if not search_available:
+                    return []
                 search_available = False
                 issue = {"code": "unavailable_source", "source": "Web search"}
                 if isinstance(error, ValueError):
@@ -1467,9 +1470,12 @@ async def research_products(
                 continue
             add(field, value, [{"url": url, "title": "Linked FilamentDB spool profile", "evidence": str(value)}], primary=True)
 
-    await asyncio.gather(
-        from_catalog("FilaManDB"), from_catalog("Open Filament Database"), from_linked_spool()
-    )
+    catalog_lookups = []
+    if "filamandb" not in disabled_sources:
+        catalog_lookups.extend((from_catalog("FilaManDB"), from_linked_spool()))
+    if "open_filament_database" not in disabled_sources:
+        catalog_lookups.append(from_catalog("Open Filament Database"))
+    await asyncio.gather(*catalog_lookups)
     all_matches = [row for matches, _, _ in catalog_matches for row in matches]
     candidates = [candidate for _, candidate in all_matches]
     variants = {
@@ -1592,8 +1598,9 @@ async def research_products(
                 source_url := public_link(row.get("shop_url"))
             ):
                 catalog_urls.append(source_url)
+    supplier_query = search_terms(identity.sku.strip() or variant_sku or sku_hint.strip() or imported_sku)
     if not early_web:
-        web_urls = await search(search_terms(identity.sku.strip() or variant_sku or sku_hint.strip() or imported_sku))
+        web_urls = await search(supplier_query)
     topic = guidance or "filament print settings spool dimensions"
     supplement = await search(f"{search_terms('')} {topic}")
     web_urls = list(dict.fromkeys(
@@ -1604,12 +1611,24 @@ async def research_products(
     for url in web_urls:
         if link := public_link(url):
             different_sites.setdefault(_site_host(link), supplier_page_url(link))
+
+    async def find_supplier_page(domain):
+        for url in await search(f"site:{domain} {supplier_query}"):
+            if _on_manufacturer_site(url, domain):
+                return supplier_page_url(url)
+        return None
+
+    preferred_urls = await asyncio.gather(*(
+        find_supplier_page(site["domain"]) for site in config["supplier_sites"]
+        if site["enabled"] and supplier_query and site["domain"] != manufacturer_domain
+    ))
     supplier_urls = [*direct_urls, *(supplement if guidance else []), *catalog_urls, *different_sites.values()]
     pages = first_pages | await check_pages(supplier_urls)
     if sum(bool(page and not _on_manufacturer_site(page.url, manufacturer_domain)) for page in pages.values()) < 2:
         pages.update(await check_pages(supplier_urls))
+    pages.update(await check_pages(preferred_urls))
     await check_datasheets(pages)
-    if not any(
+    if "wayback" not in disabled_sources and not any(
         page and _on_manufacturer_site(page.url, manufacturer_domain)
         and (
             _supplier_scopes(identity, replace(page, manufacturer_page=True), snapshot)

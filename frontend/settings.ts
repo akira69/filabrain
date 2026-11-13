@@ -1,6 +1,11 @@
 import { initI18n, t } from './shared/i18n'
 import { researchHeaders } from './shared/filabrain'
 
+const sourceNames = ['filamandb', 'open_filament_database', 'wayback'] as const
+const supplierDomain = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/
+const maxSupplierSites = 4
+type SupplierSite = { domain: string; enabled: boolean }
+
 export async function mountSettings() {
   await initI18n()
   document.querySelector<HTMLInputElement>('#research-mcp-url')!.value =
@@ -13,6 +18,12 @@ export async function mountSettings() {
   const save = form.querySelector<HTMLButtonElement>('button[type=submit]')!
   const enableSearch = document.getElementById('research-enable-search')!
   const searchSetup = document.getElementById('research-search-setup')!
+  const sourceControls = form.querySelector<HTMLFieldSetElement>('#research-source-controls')!
+  const searchSource = form.querySelector<HTMLInputElement>('#research-search-source')!
+  const supplierSites = document.getElementById('research-supplier-sites')!
+  const domainInput = form.querySelector<HTMLInputElement>('#research-supplier-domain')!
+  const addSupplier = form.querySelector<HTMLButtonElement>('#research-add-supplier')!
+  const supplierMessage = document.getElementById('research-supplier-message')!
   const load = form.querySelector<HTMLButtonElement>('#research-load-models')!
   const test = form.querySelector<HTMLButtonElement>('#research-test-model')!
   const modelList = form.elements.namedItem('available_model') as HTMLSelectElement
@@ -25,10 +36,13 @@ export async function mountSettings() {
   let saved: string | undefined
   let busy = false
   let models: string[] = []
+  let sites: SupplierSite[] = []
   const values = () => ({
     model_url: field('model_url').value.trim(), model_id: field('model_id').value.trim(),
     search_url: field('search_url').value.trim(), api_key: field('api_key').value || null,
     clear_key: field('clear_key').checked,
+    disabled_sources: sourceNames.filter(name => !field(name).checked),
+    supplier_sites: sites,
   })
   const connection = () => JSON.stringify([values().model_url, values().api_key, values().clear_key])
 
@@ -72,7 +86,71 @@ export async function mountSettings() {
     load.disabled = busy || !ready || !config.model_url
     test.disabled = load.disabled || !config.model_id
     modelList.disabled = busy || !ready
+    sourceControls.disabled = busy || !ready
+    searchSource.checked = !!config.search_url
+    domainInput.disabled = addSupplier.disabled = sites.length >= maxSupplierSites
   }
+
+  function renderSupplierSites() {
+    supplierSites.replaceChildren(...sites.map(site => {
+      const row = document.createElement('div')
+      row.className = 'research-supplier-row'
+      const label = document.createElement('label')
+      const checkbox = document.createElement('input')
+      checkbox.type = 'checkbox'
+      checkbox.checked = site.enabled
+      checkbox.addEventListener('change', () => {
+        site.enabled = checkbox.checked
+        refresh()
+      })
+      const domain = document.createElement('span')
+      domain.textContent = site.domain
+      label.append(checkbox, domain)
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.className = 'fm-btn fm-btn-outline'
+      remove.textContent = t('filaBrain.removeSupplier')
+      remove.setAttribute('aria-label', t('filaBrain.removeSupplierDomain', { domain: site.domain }))
+      remove.addEventListener('click', () => {
+        sites = sites.filter(entry => entry !== site)
+        supplierMessage.textContent = ''
+        renderSupplierSites()
+        refresh()
+        domainInput.focus()
+      })
+      row.append(label, remove)
+      return row
+    }))
+  }
+
+  function addSupplierSite() {
+    if (sourceControls.disabled || addSupplier.disabled) return
+    const domain = domainInput.value.trim().toLowerCase().replace(/\.$/, '').replace(/^www\./, '')
+    if (!supplierDomain.test(domain)) {
+      supplierMessage.textContent = t('filaBrain.invalidSupplierDomain')
+      domainInput.focus()
+      return
+    }
+    if (sites.some(site => site.domain === domain)) {
+      supplierMessage.textContent = t('filaBrain.duplicateSupplierDomain')
+      domainInput.focus()
+      return
+    }
+    sites.push({ domain, enabled: true })
+    domainInput.value = ''
+    supplierMessage.textContent = sites.length === maxSupplierSites ? t('filaBrain.supplierLimit') : ''
+    renderSupplierSites()
+    refresh()
+    if (domainInput.disabled) supplierSites.lastElementChild?.querySelector('input')?.focus()
+    else domainInput.focus()
+  }
+  addSupplier.addEventListener('click', addSupplierSite)
+  domainInput.addEventListener('input', () => { supplierMessage.textContent = '' })
+  domainInput.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    addSupplierSite()
+  })
 
   enableSearch.addEventListener('click', () => {
     enableSearch.hidden = true
@@ -88,13 +166,20 @@ export async function mountSettings() {
     modelList.value = selected
   }
 
-  function fill(config: { model_url: string; model_id: string; search_url: string; has_key: boolean }) {
+  function fill(config: {
+    model_url: string; model_id: string; search_url: string; has_key: boolean
+    disabled_sources?: string[]; supplier_sites?: SupplierSite[]
+  }) {
     for (const key of ['model_url', 'model_id', 'search_url'] as const) field(key).value = config[key]
     enableSearch.hidden = !!config.search_url
     searchSetup.hidden = !config.search_url
     field('api_key').value = ''
     field('clear_key').checked = false
     keyState.textContent = t(config.has_key ? 'filaBrain.keyConfigured' : 'filaBrain.keyOptional')
+    for (const name of sourceNames) field(name).checked = !config.disabled_sources?.includes(name)
+    sites = config.supplier_sites ?? []
+    renderSupplierSites()
+    supplierMessage.textContent = sites.length >= maxSupplierSites ? t('filaBrain.supplierLimit') : ''
     saved = JSON.stringify(values())
     showModels()
   }
@@ -104,7 +189,8 @@ export async function mountSettings() {
     if (action === 'save' && save.disabled) return
     const requestedConnection = connection()
     const payload = action === 'models' ? { ...values(), search_url: '' } : values()
-    const inputs = action === 'save' ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)')) : []
+    const inputs = action === 'save' ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)'))
+      .filter(input => !sourceControls.contains(input)) : []
     inputs.forEach(input => { input.disabled = true })
     busy = true
     refresh()
