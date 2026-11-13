@@ -1683,8 +1683,13 @@ async def research_products(
     for matches, url, name in catalog_matches:
         item, candidate = matches[0]
 
-        def cite(value, url=url, name=name):
-            return [{"url": url, "title": name, "evidence": str(value)}]
+        def cite(value, citation_item=item, url=url, name=name):
+            record_id = citation_item.get("id")
+            source_url = (
+                f"{settings.filamentdb_url.rstrip('/')}/api/v1/filaments/{record_id}"
+                if name == "FilaManDB" and type(record_id) is int and record_id > 0 else url
+            )
+            return [{"url": source_url, "title": name, "evidence": str(value)}]
 
         if snapshot is None and not await add_draft_identity(candidate, cite):
             return proposal
@@ -1716,9 +1721,9 @@ async def research_products(
             for row, variant in matches:
                 for field, value in row_values(row, variant).items():
                     if field in shared_fields:
-                        add(field, value, cite(value))
+                        add(field, value, cite(value, row))
                     elif field in conflict:
-                        remember(field, value, cite(value))
+                        remember(field, value, cite(value, row))
         else:
             for field, value in row_values(item, candidate).items():
                 add(field, value, cite(value))
@@ -1932,6 +1937,19 @@ async def research_products(
                     continue
                 recover_sheet = host == document_domain and bool(official_oversized)
                 recover_product = original not in oversized_sheets
+                if recover_sheet and recover_product and _site_host(original) == host and (
+                    without_slash := retry_without_slash(original)
+                ):
+                    try:
+                        # Leave time for indexed alternatives if this URL stalls.
+                        async with network_time(3):
+                            await recover_alternatives(
+                                host, original, [without_slash], recover_sheet=True, recover_product=True,
+                            )
+                    except TimeoutError:
+                        pass
+                    if has_usable_fallback():
+                        continue
                 matches = []
                 path_terms = url_words(original) - {"store", "shop", "products", "product"}
                 for url in await supplier_sitemap_urls(sitemap_origin):
@@ -1952,13 +1970,13 @@ async def research_products(
                 matches.sort(key=lambda match: (-match[1], -match[2], -match[3]))
                 alternative = await recover_alternatives(
                     host, original, [url for url, *_ in matches[:2]],
-                    recover_sheet=recover_sheet, recover_product=recover_product,
+                    recover_sheet=recover_sheet, recover_product=recover_product and original not in recovered_urls,
                 )
                 query = supplier_query if identity.designation or lookup_sku else " ".join(sorted(url_words(original)))
                 if query and (not alternative or (recover_sheet and oversized_sheets and not has_usable_fallback())):
                     await recover_alternatives(
                         host, original, await search(f"site:{host} {query} technical data sheet"),
-                        recover_sheet=recover_sheet, recover_product=recover_product and not alternative,
+                        recover_sheet=recover_sheet, recover_product=recover_product and original not in recovered_urls,
                     )
     except TimeoutError:
         pass
