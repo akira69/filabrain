@@ -188,7 +188,7 @@ async def get_edit_filament(db: DBSession, filament_id: int) -> Filament:
     return filament
 
 
-async def research(db: DBSession, data: ProposalRequest) -> dict:
+async def research(db: DBSession, data: ProposalRequest, *, deadline: float | None = None) -> dict:
     filament = None
     if data.mode == "edit":
         if data.filament_id is None:
@@ -223,14 +223,15 @@ async def research(db: DBSession, data: ProposalRequest) -> dict:
             "target": target,
             **await research_products(
                 db, identity, product_url=data.product_url, sku_hint=data.sku_hint,
-                guidance=data.guidance, model_id=data.model_id,
+                guidance=data.guidance, model_id=data.model_id, deadline=deadline,
+                release_read=deadline is not None,
             ),
         }
     snapshot = filament_snapshot(filament)
     result = await batch_proposal(
         db, snapshot, data.action,
         sku_hint=data.sku_hint, product_url=data.product_url, guidance=data.guidance,
-        release_read=False, model_id=data.model_id,
+        release_read=deadline is not None, model_id=data.model_id, deadline=deadline,
     )
     if data.action == "standardize":
         return {

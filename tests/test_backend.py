@@ -239,7 +239,8 @@ async def test_stock_host_session_pairing_and_built_in_proposals(
     assert (await installed.post(f"{BASE}/proposals", json=target)).status_code == 200
 
 
-async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_session, monkeypatch):
+@pytest.mark.parametrize("oversized", [False, True])
+async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_session, monkeypatch, oversized):
     from app.core.config import settings
     from app.models import AppSettings
 
@@ -251,10 +252,12 @@ async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_sess
     async def proposal(_db, identity, **hints):
         assert identity.sku == "ABC-123"
         assert hints["product_url"] == "https://manufacturer.test/pla"
+        assert hints["deadline"] is not None and hints["release_read"]
         return {
             "suggestions": [{
                 "field": "density_g_cm3", "value": 1.24,
-                "sources": [{"url": hints["product_url"], "evidence": "1.24 g/cm³"}],
+                "sources": [{"url": hints["product_url"], "evidence": "1.24 g/cm³"}]
+                * (1000 if oversized else 1),
             }],
             "issues": [],
         }
@@ -289,13 +292,45 @@ async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_sess
         }
         response = await client.post("/mcp", json=request, headers={"Authorization": f"ApiKey {token}"})
         result = response.json()["result"]
-        assert not result["isError"], result
-        suggestions = json.loads(result["content"][0]["text"])["proposal"]["suggestions"]
-        assert suggestions[0]["sources"][0]["evidence"] == "1.24 g/cm³"
+        parsed = json.loads(result["content"][0]["text"])
+        assert result["isError"] is oversized, result
+        if oversized:
+            assert parsed["http_status"] == 422
+        else:
+            assert parsed["proposal"]["suggestions"][0]["sources"][0]["evidence"] == "1.24 g/cm³"
         response = await client.post(f"{BASE}/mcp", json=listing, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 404
 
     assert not (await db_session.scalars(select(Filament))).all()
+
+
+async def test_research_deadline_preserves_verified_datasheet(installed, db_session, monkeypatch):
+    import asyncio
+    from filabrain import proposals
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def fetch(url):
+        return proposals.Evidence(url, "Technical Data Sheet", "Technical Data Sheet\nFixture PLA\nDensity 1.24 g/cm³", datasheet=True)
+
+    async def search(*_args):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "search_web", search)
+    assert (await installed.put(f"{BASE}/settings", json={"search_url": "http://searxng.test"})).is_success
+    snapshot = {"designation": "Fixture PLA", "manufacturer_name": "Fixture", "material_type": "PLA",
+                "manufacturer_url": "https://fixture.example", "datasheet_url": "https://fixture.example/specs.pdf"}
+    async with asyncio.timeout(1):
+        result = await proposals.research_products(
+            db_session, proposals.Identity(designation="Fixture PLA", manufacturer="Fixture", material="PLA"),
+            snapshot=snapshot, release_read=True,
+            deadline=asyncio.get_running_loop().time() + 0.1,
+        )
+    assert any(item["field"] == "density_g_cm3" and item["value"] == 1.24 for item in result["suggestions"])
+    assert any(issue["code"] == "unavailable_source" and issue["source"] == "Web search" for issue in result["issues"])
 
 
 async def test_stock_host_batch_claim_and_apply(

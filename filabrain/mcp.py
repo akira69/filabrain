@@ -82,9 +82,9 @@ class ResearchArguments(BaseModel):
     sku_hint: str = Field("", max_length=255)
 
 
-async def research_read_tool(args, db, _principal):
+async def research_read_tool(args, db, _principal, *, deadline=None):
     data = ProposalRequest(mode="edit" if args.filament_id is not None else "create", **args.model_dump())
-    return {"proposal": jsonable_encoder(await research(db, data))}
+    return {"proposal": jsonable_encoder(await research(db, data, deadline=deadline))}
 
 
 class ProposeArguments(BaseModel):

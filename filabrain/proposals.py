@@ -2,6 +2,7 @@ import asyncio
 import http.client
 import json
 import re
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import Annotated
 from urllib.parse import urlencode, urlsplit
@@ -1150,7 +1151,7 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
 
 async def research_products(
     db: DBSession, identity: Identity, *, product_url=None, sku_hint="", snapshot=None,
-    guidance="", release_read=False, model_id: str | None = None,
+    guidance="", release_read=False, model_id: str | None = None, deadline: float | None = None,
 ) -> dict:
     proposal = {"suggestions": [], "issues": []}
     issues = proposal["issues"]
@@ -1172,6 +1173,17 @@ async def research_products(
     conflict: set[str] = set()
     primary_fields: set[str] = set()
     field_options: dict[str, list[dict]] = {}
+
+    @asynccontextmanager
+    async def network_time(seconds=None):
+        limit = deadline
+        if seconds is not None:
+            local_limit = asyncio.get_running_loop().time() + seconds
+            limit = local_limit if limit is None else min(limit, local_limit)
+        if limit is not None and limit <= asyncio.get_running_loop().time():
+            raise TimeoutError
+        async with asyncio.timeout_at(limit):
+            yield
 
     def remember(field, value, citations):
         if is_missing(field, value) or (
@@ -1253,7 +1265,8 @@ async def research_products(
     async def supplier(url):
         if url not in checked_pages:
             try:
-                checked_pages[url] = await fetch_supplier(url)
+                async with network_time():
+                    checked_pages[url] = await fetch_supplier(url)
             except (OSError, ValueError, http.client.HTTPException) as exc:
                 checked_pages[url] = None
                 fetch_errors[url] = (
@@ -1271,7 +1284,7 @@ async def research_products(
 
         async def check_host(urls):
             try:
-                async with asyncio.timeout(8):
+                async with network_time(8):
                     for url in urls:
                         await supplier(url)
             except TimeoutError:
@@ -1296,8 +1309,9 @@ async def research_products(
         nonlocal search_available
         if term and search_available:
             try:
-                return await search_web(config["search_url"], term)
-            except (httpx.HTTPError, ValueError, AttributeError, TypeError) as error:
+                async with network_time():
+                    return await search_web(config["search_url"], term)
+            except (httpx.HTTPError, TimeoutError, ValueError, AttributeError, TypeError) as error:
                 search_available = False
                 issue = {"code": "unavailable_source", "source": "Web search"}
                 if isinstance(error, ValueError):
@@ -1357,6 +1371,8 @@ async def research_products(
                 func.lower(Manufacturer.name) == _norm(identity.manufacturer)
             ).limit(1)
         )
+    if release_read and db.in_transaction():
+        await db.rollback()
     manufacturer_domain = "paramount-3d.com" if verified_paramount_url else _site_host(manufacturer_site)
     direct_urls = [
         supplier_page_url(link) for url in (
@@ -1384,7 +1400,12 @@ async def research_products(
         )
 
     if manufacturer_domain == "paramount-3d.com" and not official_match():
-        first_pages.update(await check_pages(await _paramount_candidates(identity, lookup_sku)))
+        try:
+            async with network_time():
+                candidates = await _paramount_candidates(identity, lookup_sku)
+            first_pages.update(await check_pages(candidates))
+        except TimeoutError:
+            issues.append({"code": "unavailable_source", "source": "Paramount 3D"})
     if manufacturer_domain and not official_match():
         official_results = await search(f"site:{manufacturer_domain} {initial_query}")
         first_pages.update(await check_pages(
@@ -1423,12 +1444,13 @@ async def research_products(
 
     async def from_catalog(name):
         try:
-            if name == "FilaManDB":
-                items, url, complete = await catalog_candidates(identity)
-            else:
-                items, url = await ofd_candidates(identity.manufacturer)
-                complete = True
-        except (httpx.HTTPError, HTTPException, ValueError, AttributeError, TypeError):
+            async with network_time():
+                if name == "FilaManDB":
+                    items, url, complete = await catalog_candidates(identity)
+                else:
+                    items, url = await ofd_candidates(identity.manufacturer)
+                    complete = True
+        except (httpx.HTTPError, HTTPException, TimeoutError, ValueError, AttributeError, TypeError):
             issues.append({"code": "unavailable_source", "source": name})
             return
         possible_matches[name] = _possible_catalog_matches(identity, items, url, name)
@@ -1455,8 +1477,9 @@ async def research_products(
         ):
             return
         try:
-            profile = await linked_spool_profile(profile_id)
-        except (HTTPException, httpx.HTTPError, ValueError):
+            async with network_time():
+                profile = await linked_spool_profile(profile_id)
+        except (HTTPException, httpx.HTTPError, TimeoutError, ValueError):
             issues.append({"code": "unavailable_source", "source": "Linked FilamentDB spool profile"})
             return
         values = catalog_values({"spool_profile": profile})
@@ -1592,6 +1615,8 @@ async def research_products(
                 source_url := public_link(row.get("shop_url"))
             ):
                 catalog_urls.append(source_url)
+    if release_read and db.in_transaction():
+        await db.rollback()
     if not early_web:
         web_urls = await search(search_terms(identity.sku.strip() or variant_sku or sku_hint.strip() or imported_sku))
     topic = guidance or "filament print settings spool dimensions"
@@ -1624,7 +1649,7 @@ async def research_products(
         ]
         originals.sort(key=lambda url: (not _on_manufacturer_site(url, manufacturer_domain), url not in direct_urls))
         try:
-            async with asyncio.timeout(15):
+            async with network_time(15):
                 for original in originals[:3]:
                     try:
                         archived = await fetch_archived_supplier(original)
@@ -1760,10 +1785,10 @@ async def research_products(
     extraction_evidence = [*first_by_site.values(), *(source for source in evidence if source not in first_by_site.values())]
 
     if evidence and config["model_url"] and (config["model_id"] or model_id):
-        model = await resolve_model(config, model_id)
         try:
-            extracted, model_issues = await asyncio.wait_for(
-                request_extraction(
+            async with network_time(22):
+                model = await resolve_model(config, model_id)
+                extracted, model_issues = await request_extraction(
                     config["model_url"],
                     model,
                     model_key(config),
@@ -1772,9 +1797,7 @@ async def research_products(
                     } if snapshot is not None else {}),
                     extraction_evidence[:8],
                     guidance=guidance,
-                ),
-                timeout=22,
-            )
+                )
             for issue in model_issues:
                 if has_published_color and issue["field"] == "manufacturer_color_name":
                     continue
@@ -1884,7 +1907,7 @@ async def research_products(
 
 async def batch_proposal(
     db: DBSession, snapshot: dict, mode: str, *, sku_hint="", product_url=None,
-    guidance="", release_read=True, model_id: str | None = None,
+    guidance="", release_read=True, model_id: str | None = None, deadline: float | None = None,
 ) -> dict:
     if mode == "standardize":
         return await _local_conventions(db, snapshot)
@@ -1896,7 +1919,7 @@ async def batch_proposal(
         return {**result, "issues": [{"code": "needs_match", "field": "manufacturer_sku"}]}
     raw = await research_products(
         db, identity, product_url=product_url, sku_hint=sku_hint, snapshot=snapshot,
-        guidance=guidance, release_read=release_read, model_id=model_id,
+        guidance=guidance, release_read=release_read, model_id=model_id, deadline=deadline,
     )
     for suggestion in raw["suggestions"]:
         field = suggestion["field"]

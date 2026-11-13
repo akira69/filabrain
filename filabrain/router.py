@@ -1,9 +1,10 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from app.api.deps import PrincipalDep
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
 from . import batch_api, mcp, research, settings
@@ -32,8 +33,14 @@ for routes in (research.router, settings.router, mcp.router, batch_api.router):
 
 
 async def _research_tool(args, db, principal):
+    # Leave time for schema checks, local database work and serialization before the host's 60-second limit.
+    deadline = asyncio.get_running_loop().time() + 50
     await ensure_schema(db)
-    return await mcp.research_read_tool(args, db, principal)
+    result = await mcp.research_read_tool(args, db, principal, deadline=deadline)
+    # The host truncates text past 60,000 characters, which would break the proposal JSON.
+    if len(json.dumps(result, ensure_ascii=False)) > 60_000:
+        raise HTTPException(422, "The research proposal is too large for FilaMan MCP. Review it in FilaBrain.")
+    return result
 
 
 mcp_read_tools = {
