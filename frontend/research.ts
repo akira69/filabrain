@@ -2,15 +2,32 @@ import { element, errorText, hostRequest, type Status } from './main'
 import { api, fetchAllPages, getCsrfToken } from './shared/api'
 import { researchFieldLabel, researchOptionValue, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
-import { mountModelPicker } from './shared/model-picker'
+import type { Chat } from './chat'
+import type { ExpectedFilament } from './shared/filabrain-batches'
 
 type Value = ResearchOption['value'] | boolean | null
 type Fields = Record<string, Value>
 type Unit = Record<string, { old: Value; value: Value }>
-export type EditorContext = { mode: 'create' | 'edit'; filament_id: number | null; fields: Fields }
-export type SelectionContext = { mode: 'selection'; filament_ids: number[] }
+export type EditorContext = {
+  mode: 'create' | 'edit'; filament_id: number | null; fields: Fields; record_token?: string | null
+}
+export type ResearchDraft = {
+  fields: Record<string, string>
+  context: EditorContext
+  proposal: ResearchProposal
+  action: string
+  selection?: Unit[]
+  staged?: true
+  saveId?: string
+}
+export type SelectionContext = { mode: 'selection'; filament_ids: number[]; expected_filaments?: ExpectedFilament[] }
 
 const route = '/filabrain'
+const sourceNotes = new Set([
+  'manufacturer_page', 'archived_page', 'unavailable_source', 'manual_datasheet',
+  'supplier_alternative_found', 'supplier_download_limit',
+])
+const checkedSources = new Set(['manufacturer_page', 'archived_page'])
 const nativeFields = new Set([
   'manufacturer_id', 'color_id', 'designation', 'material_type', 'diameter_mm',
   'manufacturer_color_name', 'manufacturer_sku', 'density_g_cm3', 'raw_material_weight_g',
@@ -27,7 +44,7 @@ const draftFields = [
 const numericDraft = new Set(['manufacturer_id', 'color_id', 'diameter_mm'])
 const blank = (value: Value | undefined) => value == null || value === ''
 const equal = (a: Value | undefined, b: Value | undefined) => blank(a) && blank(b) || a === b
-const identity = (fields: Fields): ResearchIdentity => ({
+export const identity = (fields: Fields): ResearchIdentity => ({
   manufacturer: String(fields.manufacturer_name || ''),
   designation: String(fields.designation || ''),
   material: String(fields.material_type || ''),
@@ -54,44 +71,52 @@ function externalLink(url: string, title: string) {
 function appendSources(row: HTMLElement, sources: ResearchOption['sources']) {
   for (const source of sources) {
     const p = document.createElement('p')
-    p.className = 'evidence'
+    p.className = 'research-note'
     p.append(source.url && /^https?:\/\//i.test(source.url) ? externalLink(source.url, source.title) : source.title,
       source.evidence ? ` — ${source.evidence}` : '')
     row.append(p)
   }
 }
 
-export function mountResearch(status: Status, editor?: EditorContext) {
+function issueText(issue: ResearchProposal['issues'][number]) {
+  const key = `filaBrain.${issue.code}`
+  const message = t(key, {
+    name: issue.name || (issue.field ? researchFieldLabel(issue.field) : issue.source || ''),
+    source: issue.source || '',
+  })
+  const explanation = message === key ? issue.code.replaceAll('_', ' ') : message
+  return explanation + (issue.reason ? ` (${issue.reason})` : '')
+}
+
+export function mountResearch(status: Status, chat: Chat, openChat: () => void, editor?: EditorContext) {
   const form = element<HTMLFormElement>('product-research')
+  const researchMark = document.querySelector<SVGElement>('#plugin-header .filabrain-mark')!
   const results = element('research-results')
   const notice = element('research-status')
   const save = element<HTMLButtonElement>('save-filament')
   const confirm = element<HTMLDialogElement>('create-confirm')
   const createButton = element<HTMLButtonElement>('create-filament')
-  const saved = element<HTMLAnchorElement>('saved-filament')
-  const pairing = element<HTMLDetailsElement>('research-pairing')
+  const pairing = element('research-pairing')
   const pair = element<HTMLButtonElement>('pair-client')
   const credentials = element('pair-credentials')
+  const pairStatus = element('pair-status')
   const manufacturer = form.elements.namedItem('manufacturer_id') as HTMLSelectElement
   const palette = form.elements.namedItem('color_id') as HTMLSelectElement
   const buttons = [...form.querySelectorAll<HTMLButtonElement>('button[type=submit]')]
-  const followUp = element<HTMLFormElement>('research-follow-up')
-  const guidance = element<HTMLTextAreaElement>('research-guidance')
-  const sendFollowUp = followUp.querySelector<HTMLButtonElement>('button[type=submit]')!
-  const startActions = element('research-start-actions')
-  const picker = startActions.querySelector<HTMLElement>('.chat-model-picker')!
   const advanced = element<HTMLDetailsElement>('research-advanced-fields')
-  const modelPicker = mountModelPicker(form, status.chat_model)
   const searchOptions = element<HTMLDetailsElement>('research-options')
   const optionsSummary = searchOptions.querySelector('summary')!
   const conversation = element('research-conversation')
-  const transcript = element('research-transcript')
   const reply = element('research-reply')
+  const inputs = element('research-inputs')
+  const chatInput = document.querySelector('[data-chat-research-input]')!
+  const chatResults = document.querySelector('[data-chat-research-results]')!
   const mcpTarget = (context: EditorContext) => ({
     mode: context.mode, filament_id: context.filament_id, identity: identity(context.fields),
   })
   let choices = new Map<HTMLInputElement, Unit>()
   let bound: EditorContext | undefined
+  let boundProposal: ResearchProposal | undefined
   let draft: Fields | undefined
   let pairId: string | undefined
   let pairGeneration = 0
@@ -101,15 +126,19 @@ export function mountResearch(status: Status, editor?: EditorContext) {
   let duplicate = false
   let lastAction = 'fill'
   let formRevision = 0
-  function showFollowUp(visible: boolean) {
-    if (visible) sendFollowUp.before(picker)
-    else buttons[0].before(picker)
-    followUp.hidden = !visible
-  }
-  document.addEventListener('filaman:model-change', () => { void modelPicker.setDefault(status.chat_model) })
 
+  function showInChat(movePicker = true, reveal = true) {
+    if (reveal) openChat()
+    if (movePicker) document.querySelector('[data-chat-form] .chat-toolbar')!.prepend(chat.picker)
+    if (inputs.parentElement !== chatInput) chatInput.append(inputs)
+    if (conversation.parentElement !== chatResults) chatResults.append(conversation)
+    chat.startResearch()
+  }
+
+  let pendingOptions: Promise<unknown> = Promise.resolve()
   if (editor) {
     document.documentElement.dataset.researchEditor = ''
+    buttons[0].before(chat.picker)
     element('draft-fields').hidden = true
     advanced.hidden = true
     element('research-identity').append(element('research-sku-hint'))
@@ -129,8 +158,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
         notice.textContent = errorText(error)
       }
     }
-    void options('/api/v1/manufacturers', manufacturer)
-    void options('/api/v1/colors', palette)
+    pendingOptions = Promise.all([options('/api/v1/manufacturers', manufacturer), options('/api/v1/colors', palette)])
   }
 
   function localFields() {
@@ -144,17 +172,42 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     return fields
   }
 
-  function target() {
-    return editor ? hostRequest<EditorContext>('filaman:filament-context')
-      : Promise.resolve<EditorContext>({ mode: 'create', filament_id: null, fields: localFields() })
+  let editorRecordToken = editor?.record_token
+  async function recordToken(id: number) {
+    const record = await api.get<{ record_token: string | null }>(
+      `${route}/filaments/${id}/research-record`, { cache: 'no-store' },
+    )
+    return record.record_token
+  }
+  const initialRecord = editor?.filament_id && editorRecordToken === undefined
+    ? recordToken(editor.filament_id).then(token => { editorRecordToken = token }).catch(() => {})
+    : undefined
+
+  async function target(): Promise<EditorContext> {
+    if (!editor) return { mode: 'create', filament_id: null, fields: localFields() }
+    const context = await hostRequest<EditorContext>('filaman:filament-context')
+    if (!context.filament_id) return context
+    await initialRecord
+    const token = await recordToken(context.filament_id)
+    if (editorRecordToken !== undefined && token !== editorRecordToken) {
+      throw new Error(t('filaBrain.identityChanged'))
+    }
+    editorRecordToken = token
+    return { ...context, record_token: token }
   }
 
   function clearResults() {
     choices.clear()
     results.replaceChildren()
     bound = undefined
+    boundProposal = undefined
     updateSave()
     reply.hidden = true
+  }
+
+  function showResearchError(error: unknown) {
+    conversation.hidden = false
+    notice.textContent = errorText(error)
   }
 
   function selected() {
@@ -173,11 +226,17 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     const count = editor ? selected().reduce((total, unit) => total + Object.keys(unit).length, 0) : 0
     save.disabled = !bound || duplicate || busy || saving || (!!editor && count === 0)
     if (editor) {
+      for (const control of results.querySelectorAll<HTMLInputElement>('input[type=checkbox], input[type=radio]')) {
+        control.disabled = saving
+      }
       save.textContent = t(count === 0 ? 'filaBrain.stageFields' : count === 1 ? 'filaBrain.stageOne' : 'filaBrain.stageMany', { count })
     }
   }
 
-  results.addEventListener('change', updateSave)
+  results.addEventListener('change', () => {
+    updateSave()
+    chat.saveSelection(selected())
+  })
 
   function option(unit: Unit, sources: ResearchOption['sources'], reason?: string, group?: string) {
     const row = document.createElement('div')
@@ -187,59 +246,136 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     control.type = group ? 'radio' : 'checkbox'
     if (group) control.name = group
     choices.set(control, unit)
-    label.append(control, Object.entries(unit).map(([field, { old, value }]) => {
+    const changes = document.createElement('span')
+    for (const [field, { old, value }] of Object.entries(unit)) {
       const name = researchFieldLabel(field)
       const select = field === 'manufacturer_id' ? manufacturer : field === 'color_id' ? palette : undefined
       const display = select?.querySelector<HTMLOptionElement>(`option[value="${Number(value)}"]`)?.text
         || (select && sources[0]?.evidence) || valueText(value)
-      return `${name}: ${valueText(old)} → ${display}`
-    }).join(' · '))
-    row.append(label)
-    if (reason) {
-      const p = document.createElement('p')
-      p.textContent = reason
-      row.append(p)
+      const previous = document.createElement('span')
+      previous.className = 'research-note'
+      previous.textContent = `${valueText(old)} → `
+      if (changes.childNodes.length) changes.append(' · ')
+      changes.append(`${name}: `, previous, display)
     }
-    appendSources(row, sources)
+    label.append(control, changes)
+    row.append(label)
+    if (reason || sources.length) {
+      const evidence = document.createElement('div')
+      evidence.className = 'proposal-evidence'
+      if (reason) {
+        const p = document.createElement('p')
+        p.className = 'research-note'
+        p.textContent = reason
+        evidence.append(p)
+      }
+      appendSources(evidence, sources)
+      row.append(evidence)
+    }
     return row
   }
 
   function render(proposal: ResearchProposal, context: EditorContext) {
     clearResults()
     bound = context
+    boundProposal = proposal
     const fields = context.fields
     const unitFor = (field: string, value: Value): Unit => ({ [field]: { old: fields[field] ?? null, value } })
     duplicate = proposal.issues.some(issue => issue.code === 'duplicate')
     const alternatives = new Set<string>()
+    const checks = document.createElement('details')
+    checks.className = 'research-checks research-note'
+    const summary = document.createElement('summary')
+    checks.append(summary)
+    const seenChecks = new Set<string>()
     for (const issue of proposal.issues) {
       const p = document.createElement('p')
-      const key = `filaBrain.${issue.code}`
-      const explanation = t(key, { name: issue.name || '', source: issue.source || '' })
-      p.textContent = explanation === key ? issue.code.replaceAll('_', ' ') : explanation
-      if (issue.reason) p.append(` (${issue.reason})`)
+      if (sourceNotes.has(issue.code)) p.className = 'research-note'
+      p.textContent = issueText(issue)
+      const productUrl = issue.product_url && /^https?:\/\//i.test(issue.product_url) ? issue.product_url : undefined
+      const actions = productUrl ? document.createElement('span') : null
       if (issue.filament_id && issue.code === 'duplicate') {
         p.append(' ', externalLink(`/filaments/${issue.filament_id}`, t('filaBrain.openExisting')))
       }
-      if (issue.url && /^https?:\/\//i.test(issue.url)) p.append(' ', externalLink(issue.url, t('filaBrain.openSource')))
-      if (issue.product_url && /^https?:\/\//i.test(issue.product_url)) {
+      if (issue.url && /^https?:\/\//i.test(issue.url)) {
+        const url = issue.url
+        const websiteFound = issue.code === 'manufacturer_website_found'
+        if (websiteFound) {
+          const note = document.createElement('span')
+          note.className = 'research-note'
+          note.textContent = p.textContent
+          p.className = 'research-website-result'
+          p.replaceChildren(note, document.createElement('br'))
+        } else if (!productUrl) {
+          p.append(' ')
+        }
+        const sourceLink = externalLink(url, websiteFound ? url : t('filaBrain.openSource'))
+        const linkRow = actions ?? p
+        linkRow.append(sourceLink)
+        if (websiteFound && editor?.mode === 'edit' && status.can_update_manufacturer &&
+            context.filament_id && typeof fields.manufacturer_id === 'number') {
+          const saveWebsite = document.createElement('button')
+          saveWebsite.type = 'button'
+          saveWebsite.textContent = t('filaBrain.saveManufacturerWebsite')
+          saveWebsite.addEventListener('click', async () => {
+            saveWebsite.disabled = true
+            try {
+              const current = await target()
+              if (current.filament_id !== context.filament_id ||
+                  current.record_token !== context.record_token || current.fields.manufacturer_id !== fields.manufacturer_id) {
+                throw new Error(t('filaBrain.manufacturerChanged'))
+              }
+              await api.put(`${route}/filaments/${context.filament_id}/manufacturer-website`, {
+                manufacturer_id: fields.manufacturer_id, name: issue.name, url, record_token: context.record_token,
+              })
+              saveWebsite.replaceWith(t('filaBrain.manufacturerWebsiteSaved'))
+            } catch (error) {
+              notice.textContent = errorText(error)
+              saveWebsite.disabled = false
+            }
+          })
+          const action = document.createElement('span')
+          action.className = 'research-website-action'
+          action.setAttribute('aria-live', 'polite')
+          action.append(saveWebsite)
+          p.append(action)
+        }
+      }
+      if (productUrl && actions) {
+        actions.className = 'research-match-actions'
         const choose = document.createElement('button')
         choose.type = 'button'
-        choose.textContent = t('filaBrain.useProductPage')
+        choose.className = 'fm-btn fm-btn-outline research-page-action'
+        const label = t('filaBrain.useProductPage')
+        choose.append(researchMark.cloneNode(true), label)
         choose.addEventListener('click', () => {
-          ;(form.elements.namedItem('product_url') as HTMLInputElement).value = issue.product_url!
-          form.requestSubmit(buttons[0])
+          const input = form.elements.namedItem('product_url') as HTMLInputElement
+          input.value = productUrl
+          if (form.reportValidity()) void search('fill', '', label).catch(showResearchError)
         })
-        p.append(' ', choose)
+        actions.append(choose)
+        p.append(actions)
       }
-      results.append(p)
+      if (checkedSources.has(issue.code)) {
+        const check = issue.url || p.textContent
+        if (!seenChecks.has(check)) {
+          seenChecks.add(check)
+          checks.append(p)
+        }
+      } else results.append(p)
       const field = issue.field
       if (field && nativeFields.has(field) && issue.options?.length && blank(fields[field]) &&
-          !alternatives.has(field) && !issue.requires_product_choice) {
+          !alternatives.has(field)) {
         alternatives.add(field)
         const group = document.createElement('fieldset')
         const legend = document.createElement('legend')
         legend.textContent = researchFieldLabel(field)
         group.append(legend)
+        if (issue.requires_product_choice) {
+          appendVariantChoices(group, field, issue.options)
+          results.append(group)
+          continue
+        }
         const none = document.createElement('label')
         const noChoice = document.createElement('input')
         noChoice.type = 'radio'
@@ -247,8 +383,11 @@ export function mountResearch(status: Status, editor?: EditorContext) {
         noChoice.checked = true
         none.append(noChoice, t('filaBrain.leaveBlank'))
         group.append(none)
+        const preferred = proposal.suggestions.find(suggestion => suggestion.field === field)
         for (const candidate of issue.options) {
-          group.append(option(unitFor(field, candidate.value), candidate.sources, undefined, noChoice.name))
+          const recommended = preferred && JSON.stringify(candidate.value) === JSON.stringify(preferred.value)
+          group.append(option(unitFor(field, candidate.value), candidate.sources,
+            recommended ? t('filaBrain.recommendedValue') : undefined, noChoice.name))
         }
         results.append(group)
       }
@@ -265,63 +404,65 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       const sources = proposalUnit.sources.map(source => ({ title: source.title, url: source.url, evidence: source.quote }))
       results.append(option(unit, sources, proposalUnit.reason))
     }
+    if (seenChecks.size) {
+      summary.textContent = t('filaBrain.sourcesChecked', { count: seenChecks.size })
+      results.append(checks)
+    }
     updateSave()
     reply.hidden = !!editor && !results.childElementCount
   }
 
-  function message(text: string, fromUser = false) {
-    const item = document.createElement('p')
-    item.className = fromUser ? 'chat-message chat-user' : 'chat-message research-assistant'
-    item.textContent = text
-    transcript.append(item)
-    return item
-  }
-
-  async function search(action: string, prompt = '') {
+  async function search(action: string, prompt = '', label?: string) {
     if (busy || saving) return
     const revision = formRevision
-    const selectedModel = modelPicker.selected
+    const context = await target()
+    if (revision !== formRevision || busy || saving) return
+    const formData = new FormData(form)
+    const productUrl = String(formData.get('product_url') || '').trim()
+    const sku = String(formData.get('sku_hint') || '').trim()
+    const product = identity(context.fields)
+    const actionLabel = buttons[action === 'standardize' ? 1 : 0].textContent?.trim() || ''
+    const proposalTitle = [product.manufacturer, product.designation].filter(Boolean).join(' ') || productUrl || sku
+    if (!product.designation && !product.sku && !productUrl && !sku) {
+      conversation.hidden = false
+      notice.textContent = t('filaBrain.chatResearchStart')
+      return
+    }
+    showInChat()
     busy = true
-    modelPicker.setBusy(true)
     buttons.forEach(button => { button.disabled = true })
-    sendFollowUp.disabled = true
     updateSave()
-    saved.hidden = true
     notice.textContent = ''
     conversation.hidden = false
-    message(prompt || (action === 'standardize' ? buttons[1].textContent! : buttons[0].textContent!), true)
-    const answer = message(t('filaBrain.searching'))
     if (!prompt) {
       optionsSummary.hidden = false
       searchOptions.open = false
     }
-    if (editor) answer.scrollIntoView({ block: 'nearest' })
     try {
-      const context = await target()
-      if (revision !== formRevision) return
-      const formData = new FormData(form)
-      const proposal = await api.post<ResearchProposal>(route + '/proposals', {
-        ...mcpTarget(context),
-        action,
-        product_url: String(formData.get('product_url') || '').trim() || undefined,
-        sku_hint: String(formData.get('sku_hint') || '').trim(),
-        guidance: prompt,
-        model_id: action === 'fill' ? selectedModel : undefined,
+      await chat.researchTurn(prompt || label || (proposalTitle && !editor ? `${actionLabel} · ${proposalTitle}` : actionLabel), async () => {
+        try {
+          const proposal = await api.post<ResearchProposal>(route + '/proposals', {
+            ...mcpTarget(context),
+            record_token: context.record_token,
+            action,
+            product_url: productUrl || undefined,
+            sku_hint: sku,
+            guidance: prompt,
+            model_id: action === 'fill' ? chat.model : undefined,
+          })
+          if (revision !== formRevision) return { reply: t('filaBrain.identityChanged') }
+          render(proposal, context)
+          lastAction = action
+          return {
+            reply: t(results.childElementCount ? 'filaBrain.researchReview' : 'filaBrain.noSuggestions'),
+            draft: { fields: Object.fromEntries([...formData].map(([key, value]) => [key, String(value)])), context, proposal, action },
+          }
+        } catch (error) {
+          return { reply: errorText(error) }
+        }
       })
-      if (revision !== formRevision) return
-      render(proposal, context)
-      answer.textContent = results.childElementCount ? t('filaBrain.researchReview') : t('filaBrain.noSuggestions')
-      if (prompt && guidance.value.trim() === prompt) guidance.value = ''
-    } catch (error) {
-      if (revision === formRevision) answer.textContent = errorText(error)
     } finally {
-      if (revision === formRevision) {
-        lastAction = action
-        showFollowUp(true)
-      }
       buttons.forEach(button => { button.disabled = false })
-      sendFollowUp.disabled = false
-      modelPicker.setBusy(false)
       busy = false
       updateSave()
     }
@@ -329,48 +470,150 @@ export function mountResearch(status: Status, editor?: EditorContext) {
 
   form.addEventListener('submit', event => {
     event.preventDefault()
-    void search((event.submitter as HTMLButtonElement | null)?.value || 'fill')
+    void search((event.submitter as HTMLButtonElement | null)?.value || 'fill').catch(showResearchError)
   })
 
-  followUp.addEventListener('submit', event => {
-    event.preventDefault()
-    const prompt = guidance.value.trim()
-    if (prompt) void search(lastAction, prompt)
-  })
-  guidance.addEventListener('keydown', event => {
-    if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
-    event.preventDefault()
-    if (!busy) followUp.requestSubmit()
-  })
+  function reset() {
+    formRevision++
+    form.reset()
+    searchOptions.open = true
+    optionsSummary.hidden = true
+    conversation.hidden = true
+    clearResults()
+    notice.textContent = ''
+    lastAction = 'fill'
+    if (editor) buttons[0].before(chat.picker)
+    void disconnect()
+  }
+
+  function archivedValue(field: string, value: Value, sources: ResearchOption['sources']) {
+    const item = document.createElement('div')
+    item.className = 'research-history-value'
+    item.textContent = `${researchFieldLabel(field)}: ${valueText(value)}`
+    appendSources(item, sources)
+    return item
+  }
+
+  function appendVariantChoices(group: HTMLElement, field: string, options: ResearchOption[]) {
+    const warning = document.createElement('p')
+    warning.textContent = t('filaBrain.chooseProductFirst')
+    group.append(warning)
+    for (const option of options) group.append(archivedValue(field, option.value, option.sources))
+  }
 
   form.addEventListener('input', () => {
     formRevision++
-    showFollowUp(false)
-    guidance.value = ''
-    transcript.replaceChildren()
-    conversation.hidden = true
     clearResults()
-    saved.hidden = true
     notice.textContent = ''
     void disconnect()
   })
 
+  chat.setResearch({
+    start: showInChat,
+    reset,
+    archive(proposal) {
+      const details = document.createElement('details')
+      details.className = 'research-history research-note'
+      const heading = document.createElement('summary')
+      heading.textContent = t('filaBrain.earlierFindings')
+      details.append(heading)
+      for (const result of proposal.suggestions) details.append(archivedValue(result.field, result.value, result.sources))
+      for (const unit of proposal.proposals || []) {
+        for (const [field, change] of Object.entries(unit.fields)) {
+          details.append(archivedValue(field, change.value, unit.sources.map(source => ({ ...source, evidence: source.quote }))))
+        }
+      }
+      const seenIssues = new Set<string>()
+      for (const issue of proposal.issues) {
+        const explanation = issueText(issue)
+        const url = issue.url && /^https?:\/\//i.test(issue.url) ? issue.url : undefined
+        const line = document.createElement('p')
+        line.textContent = explanation
+        if (url) line.append(' ', externalLink(url, t('filaBrain.openSource')))
+        if (issue.field && issue.options?.length) {
+          const group = document.createElement('fieldset')
+          const legend = document.createElement('legend')
+          legend.textContent = researchFieldLabel(issue.field)
+          group.append(legend, line)
+          if (issue.requires_product_choice) {
+            appendVariantChoices(group, issue.field, issue.options)
+          } else for (const option of issue.options) group.append(archivedValue(issue.field, option.value, option.sources))
+          details.append(group)
+        } else {
+          const key = JSON.stringify([explanation, url])
+          if (!seenIssues.has(key)) {
+            seenIssues.add(key)
+            details.append(line)
+          }
+        }
+      }
+      return details
+    },
+    async resume(draft) {
+      await pendingOptions
+      for (const [key, value] of Object.entries(draft.fields)) {
+        const field = form.elements.namedItem(key)
+        if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) field.value = value
+      }
+      const context = await target()
+      if (draft.context.mode !== context.mode || draft.context.filament_id !== context.filament_id ||
+          JSON.stringify(identity(draft.context.fields)) !== JSON.stringify(identity(context.fields))) {
+        conversation.hidden = false
+        notice.textContent = t('filaBrain.identityChanged')
+        return false
+      }
+      if (context.mode === 'edit' && (!context.record_token || context.record_token !== draft.context.record_token)) {
+        conversation.hidden = false
+        notice.textContent = t('filaBrain.researchHistoryReadOnly')
+        return false
+      }
+      conversation.hidden = false
+      lastAction = draft.action
+      optionsSummary.hidden = false
+      searchOptions.open = false
+      render(draft.proposal, context)
+      const checked = new Set(draft.selection?.map(unit => JSON.stringify(unit)))
+      for (const [control, unit] of choices) control.checked = checked.has(JSON.stringify(unit))
+      updateSave()
+      return true
+    },
+    followUp: prompt => search(lastAction, prompt),
+  })
+
   save.addEventListener('click', async () => {
     if (!bound || save.disabled) return
+    if (!editor && chat.savedDraft) {
+      clearResults()
+      chat.completeResearch(chat.draftId, true)
+      return
+    }
     const snapshot = bound
     const units = selected()
     saving = true
+    if (editor) chat.setStaging(true)
     updateSave()
     try {
       const context = await target()
       if (bound !== snapshot || context.mode !== snapshot.mode || context.filament_id !== snapshot.filament_id ||
-          JSON.stringify(identity(context.fields)) !== JSON.stringify(identity(snapshot.fields))) {
+          context.record_token !== snapshot.record_token || JSON.stringify(identity(context.fields)) !== JSON.stringify(identity(snapshot.fields))) {
         clearResults()
         throw new Error(t('filaBrain.identityChanged'))
       }
       if (editor) {
         const { staged, skipped } = await hostRequest<{ staged: string[]; skipped: string[] }>('filaman:filament-stage', { units })
-        clearResults()
+        if (bound !== snapshot) return
+        if (!staged.length) {
+          notice.textContent = t('filaBrain.identityChanged')
+          return
+        }
+        const fields = { ...context.fields }
+        for (const unit of units) {
+          for (const [field, change] of Object.entries(unit)) {
+            if (staged.includes(field)) fields[field] = change.value
+          }
+        }
+        chat.archiveResearch()
+        if (boundProposal) render(boundProposal, { ...context, fields })
         notice.textContent = `${staged.length} field${staged.length === 1 ? '' : 's'} staged. Save in the FilaMan editor to keep the changes.`
           + (skipped.length ? ` ${skipped.length} skipped because the form changed or the field is unavailable.` : '')
         return
@@ -404,26 +647,33 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       notice.textContent = errorText(error)
     } finally {
       saving = false
+      if (editor) chat.setStaging(false)
       updateSave()
     }
   })
   element('create-cancel').addEventListener('click', () => confirm.close())
   confirm.addEventListener('cancel', event => { if (createButton.disabled) event.preventDefault() })
   createButton.addEventListener('click', async () => {
-    if (!draft || createButton.disabled) return
+    const draftId = chat.draftId
+    if (!draft || !draftId || createButton.disabled) return
+    if (chat.savedDraft) {
+      confirm.close()
+      clearResults()
+      draft = undefined
+      chat.completeResearch(draftId, true)
+      return
+    }
     const cancel = element<HTMLButtonElement>('create-cancel')
     const { color_id, ...data } = draft
     createButton.disabled = cancel.disabled = true
     try {
-      const created = await api.post<{ id: number }>('/filaments', {
+      const result = await api.post<{ already_saved: boolean }>(`${route}/saved-filaments/${encodeURIComponent(draftId)}`, {
         ...data, ...(color_id ? { colors: [{ color_id }] } : {}),
       })
       confirm.close()
       clearResults()
       draft = undefined
-      saved.href = `/filaments/${created.id}`
-      saved.hidden = false
-      notice.textContent = 'Filament saved.'
+      chat.completeResearch(draftId, result.already_saved)
     } catch (error) {
       element('create-message').textContent = errorText(error)
     } finally {
@@ -439,6 +689,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     pairGeneration++
     window.clearTimeout(pairPoll)
     credentials.hidden = true
+    pairStatus.textContent = ''
     element<HTMLInputElement>('pair-url').value = ''
     element<HTMLInputElement>('pair-token').value = ''
     pair.disabled = false
@@ -447,25 +698,30 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     if (id) return revoke(id)
   }
 
+  let draftOpen = !!editor
   function showPairing(enabled: boolean) {
-    pairing.hidden = !enabled
-    if (!enabled) {
-      pairing.open = false
-      void disconnect()
-    }
+    pairing.hidden = !enabled || !draftOpen
+    if (pairing.hidden) void disconnect()
   }
   showPairing(status.mcp_enabled)
   document.addEventListener('filaman:mcp-state', event => showPairing((event as CustomEvent<boolean>).detail))
+  document.addEventListener('filabrain:chat-mode', event => {
+    if (!editor) {
+      draftOpen = (event as CustomEvent<boolean>).detail
+      showPairing(status.mcp_enabled)
+    }
+  })
   window.addEventListener('focus', async () => {
     if (form.closest<HTMLElement>('[data-view]')?.hidden) return
     try {
       const current = await api.get<Status>(route + '/status', { cache: 'no-store' })
-      if (status.chat_model !== current.chat_model) {
+      if ((status.chat_model ?? null) !== (current.chat_model ?? null)) {
         status.chat_model = current.chat_model
-        void modelPicker.setDefault(current.chat_model)
+        document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: current.chat_model }))
       }
+      status.mcp_enabled = current.mcp_enabled
       showPairing(current.mcp_enabled)
-    } catch { /* Pairing endpoints enforce current access. */ }
+    } catch { /* Keep the last known settings while the server is unreachable. */ }
   })
   element('pair-revoke').addEventListener('click', () => { void disconnect() })
   window.addEventListener('pagehide', () => { void disconnect() })
@@ -492,24 +748,43 @@ export function mountResearch(status: Status, editor?: EditorContext) {
           const incoming = await api.get<{ proposal_id?: string; proposal?: ResearchProposal }>(path, { cache: 'no-store' })
           if (pairId !== session.id) return
           if (incoming.proposal && incoming.proposal_id && incoming.proposal_id !== lastId) {
-            lastId = incoming.proposal_id
-            conversation.hidden = false
-            render(incoming.proposal, context)
-            notice.textContent = t('filaBrain.pairReceived')
+            const proposal = incoming.proposal
+            const current = await target()
+            if (pairId !== session.id) return
+            if (current.filament_id !== context.filament_id || current.record_token !== context.record_token ||
+                JSON.stringify(identity(current.fields)) !== JSON.stringify(identity(context.fields))) {
+              void disconnect()
+              pairStatus.textContent = t('filaBrain.identityChanged')
+              return
+            }
+            if (!busy && !saving) {
+              showInChat(true, false)
+              if (await chat.researchTurn(t('filaBrain.pairReceived'), async () => {
+                conversation.hidden = false
+                lastAction = 'fill'
+                render(proposal, current)
+                return {
+                  reply: t(results.childElementCount ? 'filaBrain.researchReview' : 'filaBrain.noSuggestions'),
+                  draft: { fields: Object.fromEntries(new FormData(form).entries()) as Record<string, string>,
+                    context: current, proposal, action: 'fill' },
+                }
+              })) lastId = incoming.proposal_id
+            }
           }
           pairPoll = window.setTimeout(poll, 2000)
         } catch {
           if (pairId !== session.id) return
           void disconnect()
-          notice.textContent = t('filaBrain.pairExpired')
+          pairStatus.textContent = t('filaBrain.pairExpired')
         }
       }
       pairPoll = window.setTimeout(poll, 2000)
     } catch (error) {
       if (generation !== pairGeneration) return
-      conversation.hidden = false
-      notice.textContent = errorText(error)
       void disconnect()
+      pairStatus.textContent = errorText(error)
     }
   })
+  if (editor) showInChat(false)
+  return showInChat
 }

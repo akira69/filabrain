@@ -11,65 +11,72 @@
   <header id="plugin-header">
     <h1 class="filabrain-heading"><!-- mark --><span data-i18n="filaBrain.title">FilaBrain</span></h1>
     <nav aria-label="FilaBrain">
-      <button type="button" data-tab="chat" hidden>Chat</button>
-      <button type="button" data-tab="new" hidden>Research new filament</button>
-      <button type="button" data-tab="library" hidden>Research library</button>
-      <button type="button" data-tab="batches" data-i18n="researchBatches.title" hidden>Research batches</button>
-      <button type="button" data-tab="settings" hidden>Model &amp; MCP settings</button>
-      <!-- docs-button -->
+      <button type="button" data-tab="chat" hidden>
+        <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 15.5a2 2 0 0 1-2 2h-8L5 21v-3.5H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h14.5a2 2 0 0 1 2 2zM7 9h8.5M7 13h6"/></svg>
+        <span>Chat</span>
+      </button>
+      <button type="button" data-tab="new" hidden>
+        <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 13.5c-2.5-2.1-5.5-2.6-9-1.5v8c3.5-1 6.5-.5 9 1.5 2.5-2 5.5-2.5 9-1.5v-8c-3.5-1.1-6.5-.6-9 1.5v8"/><circle cx="12" cy="6.5" r="4"/><circle cx="12" cy="6.5" r="1.2"/></svg>
+        <span>Research new filament</span>
+      </button>
+      <button type="button" data-tab="library" hidden>
+        <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="4" height="16" rx="1"/><rect x="7" y="3" width="5" height="17" rx="1"/><path d="m13 5 4-1 4 15-4 1zM3 8h4m0 7h5"/></svg>
+        <span>Research library</span>
+      </button>
+      <button type="button" data-tab="batches" hidden>
+        <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="16" height="12" rx="2"/><path d="M7 20h12a3 3 0 0 0 3-3V8M7 8h8m-8 4h5"/></svg>
+        <span data-i18n="researchBatches.title">Research batches</span>
+      </button>
+      <button type="button" data-tab="settings" hidden>
+        <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.4 3h3.2l.6 2.3 1.6.9 2.3-.6 1.6 2.8-1.7 1.7v1.8l1.7 1.7-1.6 2.8-2.3-.6-1.6.9-.6 2.3h-3.2l-.6-2.3-1.6-.9-2.3.6-1.6-2.8 1.7-1.7v-1.8L4.3 8.4l1.6-2.8 2.3.6 1.6-.9z"/><circle cx="12" cy="11" r="2.6"/></svg>
+        <span>Model &amp; MCP settings</span>
+      </button>
     </nav>
+    <!-- docs-button -->
   </header>
   <p id="plugin-status" role="status">Loading…</p>
   <section data-view="chat" hidden><!-- chat --></section>
   <section data-view="new" hidden>
     <div class="research-scroll">
-      <div class="fm-card">
-        <div class="filabrain-heading">
-          <!-- mark -->
+      <div class="fm-card" id="research-inputs">
+        <header class="fm-section-header">
           <h2 id="research-heading">Research a new filament</h2>
+        </header>
+        <div class="research-input-body">
+          <p id="research-target" class="fm-field-hint" hidden></p>
+          <details id="research-options" open>
+            <summary data-i18n="filaBrain.researchOptions" hidden>Search options</summary>
+            <form id="product-research">
+              <div class="field-grid" id="research-identity">
+                <div id="draft-fields" class="draft-fields">
+                  <div class="form-field"><label for="draft-manufacturer" data-i18n="filaBrain.manufacturer">Manufacturer</label><select name="manufacturer_id" id="draft-manufacturer"><option value="" data-i18n="filaBrain.chooseManufacturer">Choose a manufacturer</option></select></div>
+                  <label><span data-i18n="filaBrain.designation">Product name</span><input name="designation" maxlength="255"></label>
+                  <label><span data-i18n="filaBrain.color">Color name</span><input name="manufacturer_color_name" maxlength="255"></label>
+                </div>
+                <label><span data-i18n="filaBrain.productUrl">Product URL (optional)</span><input type="url" name="product_url" maxlength="2048" placeholder="https://…"></label>
+              </div>
+              <details id="research-advanced-fields">
+                <summary data-i18n="filaBrain.researchOptions">Search options</summary>
+                <div class="field-grid">
+                  <label><span data-i18n="filaBrain.material">Material</span><input name="material_type" maxlength="50"></label>
+                  <label><span data-i18n="filaBrain.diameter">Diameter (mm)</span><input name="diameter_mm" type="number" step="any" min="0.01"></label>
+                  <div class="form-field"><label for="draft-palette">FilaMan palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select></div>
+                  <label>Manufacturer SKU<input name="manufacturer_sku" maxlength="255"></label>
+                  <label id="research-sku-hint">SKU to look up<input name="sku_hint" maxlength="255"></label>
+                </div>
+              </details>
+              <div class="actions" id="research-start-actions">
+                <button class="fm-btn fm-btn-primary" type="submit" value="fill">
+                  <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/></svg>
+                  <span>Find specifications</span>
+                </button>
+                <button class="fm-btn fm-btn-outline" type="submit" value="standardize" hidden>Standardize this filament</button>
+              </div>
+            </form>
+          </details>
         </div>
-        <p id="research-target" class="fm-field-hint" hidden></p>
-        <details id="research-pairing" hidden>
-          <summary data-i18n="filaBrain.researchAdvanced">Advanced options</summary>
-          <p class="fm-field-hint" data-i18n="filaBrain.researchPairHint">Connect an external MCP client to send proposals to this draft.</p>
-          <button type="button" class="fm-btn fm-btn-outline" id="pair-client" data-i18n="filaBrain.pair">Pair a client</button>
-          <div class="field-grid" id="pair-credentials" hidden>
-            <label><span data-i18n="filaBrain.mcpUrl">MCP URL</span><input id="pair-url" readonly></label>
-            <label><span data-i18n="filaBrain.mcpToken">Bearer token (expires in 15 minutes)</span><input id="pair-token" readonly></label>
-            <div><button class="fm-btn fm-btn-outline" type="button" id="pair-revoke" data-i18n="filaBrain.revoke">Disconnect</button></div>
-          </div>
-        </details>
-        <details id="research-options" open>
-          <summary data-i18n="filaBrain.researchOptions" hidden>Search options</summary>
-          <form id="product-research">
-            <div class="field-grid" id="research-identity">
-              <div id="draft-fields" class="draft-fields">
-                <div class="form-field"><label for="draft-manufacturer" data-i18n="filaBrain.manufacturer">Manufacturer</label><select name="manufacturer_id" id="draft-manufacturer"><option value="" data-i18n="filaBrain.chooseManufacturer">Choose a manufacturer</option></select></div>
-                <label><span data-i18n="filaBrain.designation">Product name</span><input name="designation" maxlength="255"></label>
-                <label><span data-i18n="filaBrain.color">Color name</span><input name="manufacturer_color_name" maxlength="255"></label>
-              </div>
-              <label><span data-i18n="filaBrain.productUrl">Product URL (optional)</span><input type="url" name="product_url" maxlength="2048" placeholder="https://…"></label>
-            </div>
-            <details id="research-advanced-fields">
-              <summary data-i18n="filaBrain.researchOptions">Search options</summary>
-              <div class="field-grid">
-                <label><span data-i18n="filaBrain.material">Material</span><input name="material_type" maxlength="50"></label>
-                <label><span data-i18n="filaBrain.diameter">Diameter (mm)</span><input name="diameter_mm" type="number" step="any" min="0.01"></label>
-                <div class="form-field"><label for="draft-palette">FilaMan palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select></div>
-                <label>Manufacturer SKU<input name="manufacturer_sku" maxlength="255"></label>
-                <label id="research-sku-hint">SKU to look up<input name="sku_hint" maxlength="255"></label>
-              </div>
-            </details>
-            <div class="actions" id="research-start-actions">
-              <!-- model-picker -->
-              <button class="fm-btn fm-btn-primary" type="submit" value="fill">Find specifications</button>
-              <button class="fm-btn fm-btn-outline" type="submit" value="standardize" hidden>Standardize this filament</button>
-            </div>
-          </form>
-        </details>
       </div>
       <section id="research-conversation" aria-label="Filament research" hidden>
-        <div id="research-transcript" class="chat-log" role="log" aria-live="polite" aria-relevant="additions text"></div>
         <p id="research-status" class="fm-field-hint" role="status"></p>
         <div id="research-reply" class="fm-card" hidden>
           <div id="research-results"></div>
@@ -77,32 +84,13 @@
             <button type="button" id="save-filament" class="fm-btn fm-btn-primary" disabled>Save new filament</button>
           </div>
         </div>
-        <div class="actions">
-          <a id="saved-filament" target="_blank" rel="noopener noreferrer" hidden>Open saved filament</a>
-        </div>
       </section>
     </div>
-    <form id="research-follow-up" class="message-composer" hidden>
-      <textarea id="research-guidance" rows="2" maxlength="400" aria-label="Follow up on this search" data-i18n-aria-label="filaBrain.followUp" data-i18n-placeholder="filaBrain.followUpHint" placeholder="Try a datasheet, a different store, or focus on empty spool weight" required></textarea>
-      <div class="chat-toolbar">
-        <button type="submit" class="fm-btn fm-btn-primary chat-send" aria-label="Send follow-up" data-i18n-aria-label="filaBrain.sendFollowUp">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>
-        </button>
-      </div>
-    </form>
-    <dialog id="create-confirm" aria-labelledby="create-heading">
-      <h2 id="create-heading">Confirm new filament</h2>
-      <dl id="create-preview"></dl>
-      <div class="actions">
-        <button type="button" class="fm-btn fm-btn-outline" id="create-cancel" autofocus>Cancel</button>
-        <button type="button" class="fm-btn fm-btn-primary" id="create-filament">Create filament</button>
-      </div>
-      <p id="create-message" role="status"></p>
-    </dialog>
   </section>
   <section data-view="library" hidden>
-    <div class="fm-card">
-      <h2>Research existing filaments</h2>
+    <section class="fm-card fm-section" aria-labelledby="library-heading">
+      <header class="fm-section-header"><h2 id="library-heading">Research library</h2></header>
+      <div class="fm-section-body">
       <p id="library-hint" class="fm-field-hint">Select up to 50 filaments. Review their proposals before applying changes.</p>
       <iframe id="library-picker" title="Filament library" hidden></iframe>
       <div id="library-fallback" hidden>
@@ -117,7 +105,10 @@
         </div>
       </div>
       <form id="library-research">
-        <p id="library-selected" role="status"></p>
+        <div class="actions">
+          <p id="library-selected" role="status"></p>
+          <button id="library-clear-selection" class="fm-btn fm-btn-outline" type="button" data-i18n="filaBrain.clearLibrarySelection" hidden>Clear selection</button>
+        </div>
         <div class="actions">
           <div class="form-field"><label for="library-mode">Research mode</label><select name="mode" id="library-mode">
             <option value="fill" data-i18n="researchBatches.mode.fill">Fill missing specs</option>
@@ -127,10 +118,20 @@
         </div>
         <p id="library-status" class="fm-field-hint" role="status"></p>
       </form>
-    </div>
+      </div>
+    </section>
   </section>
   <section data-view="batches" hidden><!-- batches --></section>
   <section data-view="settings" hidden><!-- settings --></section>
+    <dialog id="create-confirm" aria-labelledby="create-heading">
+      <h2 id="create-heading">Confirm new filament</h2>
+      <dl id="create-preview"></dl>
+      <div class="actions">
+        <button type="button" class="fm-btn fm-btn-outline" id="create-cancel" autofocus>Cancel</button>
+        <button type="button" class="fm-btn fm-btn-primary" id="create-filament">Create filament</button>
+      </div>
+      <p id="create-message" role="status"></p>
+    </dialog>
   <!-- docs -->
 </main>
 <script><!-- script --></script>

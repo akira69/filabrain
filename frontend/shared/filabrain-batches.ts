@@ -81,8 +81,16 @@ export function batchHref(id: string) {
   return `${page}?tab=batches&id=${encodeURIComponent(id)}`
 }
 
-export function createResearchBatch(filament_ids: number[], mode: BatchMode) {
-  return api.post<Batch>(route, { filament_ids, mode })
+export type ExpectedFilament = {
+  id: number
+  manufacturer_id: number
+  designation: string
+  material_type: string
+  record_token?: string | null
+}
+
+export function createResearchBatch(filament_ids: number[], mode: BatchMode, expected_filaments?: ExpectedFilament[]) {
+  return api.post<Batch>(route, { filament_ids, mode, expected_filaments })
 }
 
 function fieldRows(proposal: Proposal) {
@@ -207,8 +215,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
     if (state === cardState) return
     cardState = state
     if (!item) {
-      card.innerHTML = `<h2 tabindex="-1">${escapeHtml(tr('review'))}</h2><p>${escapeHtml(tr(
-        working ? 'waiting' : 'chooseItem'))}</p>`
+      card.innerHTML = `<header class="fm-section-header"><h2 tabindex="-1">${escapeHtml(tr('review'))}</h2></header>
+        <div class="fm-section-body"><p>${escapeHtml(tr(working ? 'waiting' : 'chooseItem'))}</p></div>`
       return
     }
     const identity = item.identity
@@ -222,7 +230,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       ['ready', 'no_change', 'failed', 'needs_match', 'stale'].includes(item.status)
     const previous = batch.items.indexOf(item) > 0 ? button('back', 'back') : ''
     card.innerHTML = `
-      <div class="batch-row"><h2 tabindex="-1">${escapeHtml(label(item))}</h2><span class="batch-status">${escapeHtml(status(item))}</span></div>
+      <header class="fm-section-header"><h2 tabindex="-1">${escapeHtml(label(item))}</h2><span class="batch-status">${escapeHtml(status(item))}</span></header>
+      <div class="fm-section-body">
       <p class="batch-muted">${escapeHtml([tr('record', { id: item.filament_id }), ...details].join(' · '))}</p>
       ${editor ? `<p>${editor}</p>` : ''}
       ${item.proposals.length ? `<ul class="batch-proposals">${item.proposals
@@ -250,7 +259,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
         ${canReopen ? button('reopen', 'reopen') : ''}
         ${editable && item.decision !== 'skipped' && (choosing || canRetry(item)) ? button('skip', 'skip') : ''}
         ${choosing ? button('approve', 'approve', true) : ''}
-      </div>`
+      </div></div>`
     updateApproveButton()
   }
 
@@ -280,7 +289,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
     report.hidden = !lastApply.length && !categories.slice(0, 2).some(([, items]) => items.length)
     const expanded = new Set(Array.from(report.querySelectorAll<HTMLDetailsElement>('details[open]'), el => el.dataset.result))
     report.innerHTML = report.hidden ? '' : `
-      <h2 tabindex="-1">${escapeHtml(tr('report'))}</h2>
+      <header class="fm-section-header"><h2 tabindex="-1">${escapeHtml(tr('report'))}</h2></header>
+      <div class="fm-section-body">
       ${categories.filter(([key, items]) => items.length || ['applied', 'stale', 'pending'].includes(key))
         .map(([key, items]) => `<details data-result="${key}" ${expanded.has(key) ? 'open' : ''}>
           <summary>${escapeHtml(tr('result.' + key))} (${items.length})</summary>
@@ -288,7 +298,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
             <button class="batch-text-button" data-item="${item.id}" type="button">${escapeHtml(label(item))}</button>
             ${item.live_filament_id ? link(`/filaments/${item.live_filament_id}?edit=1`, tr('openEditor')) : ''}
           </li>`).join('')}</ul>
-        </details>`).join('')}`
+        </details>`).join('')}</div>`
   }
 
   function render() {
@@ -309,12 +319,13 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
     renderCard(selectedItem())
     const groups = available ? groupsFor(batch.items) : new Map<string, Binding[]>()
     repeated.hidden = !groups.size
-    repeated.innerHTML = groups.size ? `<h2>${escapeHtml(tr('groups'))}</h2>${[...groups].map(([key, items]) => {
+    repeated.innerHTML = groups.size ? `<header class="fm-section-header"><h2>${escapeHtml(tr('groups'))}</h2></header>
+      <div class="fm-section-body">${[...groups].map(([key, items]) => {
       const first = batch.items.find(item => item.id === items[0].item_id)!
       const changes = first.proposals.filter(proposal => items[0].approved_ids.includes(proposal.id)).map(fieldsList).join('')
       return `<div class="batch-group">${changes}<button type="button" class="fm-btn fm-btn-outline" data-group="${escapeHtml(key)}">
         ${escapeHtml(tr('previewGroup', { count: items.length }))}</button></div>`
-    }).join('')}` : ''
+    }).join('')}</div>` : ''
     renderReport()
   }
 
@@ -504,7 +515,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       const summaries = await api.get<Summary[]>(route, { cache: 'no-store' })
       history.hidden = false
       history.innerHTML = summaries.length ? `<ul class="batch-history">${summaries.map(summary => `
-        <li class="fm-card batch-row">
+        <li class="batch-row">
           <a href="${escapeHtml(batchHref(summary.id))}">${escapeHtml(tr('mode.' + summary.mode))}</a>
           <span>${escapeHtml(new Date(summary.created_at).toLocaleString(document.documentElement.lang))}</span>
           <small>${escapeHtml(tr('historyState', { status: tr('status.' + summary.status), total: summary.total }))}</small>

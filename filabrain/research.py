@@ -5,12 +5,19 @@ from urllib.parse import urlencode
 
 import httpx
 from app.api.deps import DBSession, PrincipalDep, ensure_any_permission
-from app.models import Filament, InstalledPlugin
-from fastapi import APIRouter, HTTPException
+from app.api.v1.schemas_filament import FilamentCreate
+from app.core.cache import response_cache
+from app.core.db_utils import get_next_available_id
+from app.core.event_bus import event_bus
+from app.models import Filament, FilamentColor, InstalledPlugin, Manufacturer
+from fastapi import APIRouter, HTTPException, Path
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from .db import FilamentResearchSave
 from .model import request_completion
 from .proposals import (
     Identity,
@@ -19,11 +26,13 @@ from .proposals import (
     filament_identity,
     filament_snapshot,
     identity_matches,
+    manufacturer_site_url,
     research_products,
 )
 from .settings import (
     config_record,
     configured_models,
+    lock_research_plugin,
     mcp_access_enabled,
     model_key,
     resolve_model,
@@ -39,6 +48,8 @@ CHAT_PAGES = {
     "model_settings": ("/admin/system/filabrain", "admin:plugins_manage"),
 }
 PAGE_MARKER = re.compile(r"(?m)^\[\[open:([a-z_]+)(?:\|([^\]\r\n]{1,255}))?\]\][ \t]*$")
+RecordToken = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
+DraftId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")]
 ModelId = Annotated[str, StringConstraints(min_length=1, max_length=150, pattern=r"^\S+$")]
 
 
@@ -46,6 +57,7 @@ class ProposalRequest(BaseModel):
     mode: Literal["create", "edit"]
     filament_id: Annotated[int, Field(gt=0)] | None = None
     identity: Identity | None = None
+    record_token: RecordToken | None = None
     product_url: Annotated[str, Field(max_length=2048)] | None = None
     sku_hint: Text = ""
     guidance: Annotated[str, Field(max_length=400)] = ""
@@ -56,6 +68,13 @@ class ProposalRequest(BaseModel):
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8000)]
+
+
+class ManufacturerWebsite(BaseModel):
+    manufacturer_id: Annotated[int, Field(gt=0)]
+    name: Text
+    url: Annotated[str, Field(max_length=500)]
+    record_token: RecordToken | None = None
 
 
 class ChatRequest(BaseModel):
@@ -85,6 +104,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "filaments:create",
                 "filaments:update",
                 "filaments:read",
+                "manufacturers:update",
                 "admin:plugins_manage",
             )
         except HTTPException as exc:
@@ -102,6 +122,8 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         "mcp_enabled": enabled and await mcp_access_enabled(db),
         "can_create": enabled and "filaments:create" in permissions,
         "can_update": "filaments:update" in permissions,
+        "can_update_manufacturer": enabled and principal.auth_type == "session"
+        and {"filaments:update", "manufacturers:update"} <= permissions,
         "can_configure": enabled and "admin:plugins_manage" in permissions,
         "can_chat": can_chat,
         "chat_model": chat_model,
@@ -188,12 +210,14 @@ async def get_edit_filament(db: DBSession, filament_id: int) -> Filament:
     return filament
 
 
-async def research(db: DBSession, data: ProposalRequest) -> dict:
+async def research(db: DBSession, data: ProposalRequest, *, deadline: float | None = None) -> dict:
     filament = None
     if data.mode == "edit":
         if data.filament_id is None:
             raise HTTPException(422, "An existing filament is required")
         filament = await get_edit_filament(db, data.filament_id)
+        if data.record_token is not None and data.record_token != getattr(filament, "record_token", None):
+            raise HTTPException(409, "The filament record changed. Reload the editor.")
         identity = filament_identity(filament)
         if data.identity is not None and not identity_matches(data.identity, identity):
             raise HTTPException(
@@ -223,14 +247,15 @@ async def research(db: DBSession, data: ProposalRequest) -> dict:
             "target": target,
             **await research_products(
                 db, identity, product_url=data.product_url, sku_hint=data.sku_hint,
-                guidance=data.guidance, model_id=data.model_id,
+                guidance=data.guidance, model_id=data.model_id, deadline=deadline,
+                release_read=deadline is not None,
             ),
         }
     snapshot = filament_snapshot(filament)
     result = await batch_proposal(
         db, snapshot, data.action,
         sku_hint=data.sku_hint, product_url=data.product_url, guidance=data.guidance,
-        release_read=False, model_id=data.model_id,
+        release_read=deadline is not None, model_id=data.model_id, deadline=deadline,
     )
     if data.action == "standardize":
         return {
@@ -268,3 +293,112 @@ async def research_proposal(
         db, principal, "filaments:update" if data.mode == "edit" else "filaments:create"
     )
     return await research(db, data)
+
+
+@router.post("/saved-filaments/{draft_id}")
+async def save_research_filament(draft_id: DraftId, data: FilamentCreate, db: DBSession, principal: PrincipalDep):
+    owner = principal.user_id
+    if principal.auth_type != "session" or owner is None:
+        raise HTTPException(403, "A browser session is required")
+    if not await lock_research_plugin(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    await ensure_any_permission(db, principal, "filaments:create")
+
+    receipt = await db.get(FilamentResearchSave, (owner, draft_id), with_for_update=True)
+    if receipt is not None:
+        if receipt.filament_id is None:
+            raise HTTPException(409, "The filament saved from this draft was deleted. Start a new draft.")
+        return {"id": receipt.filament_id, "already_saved": True}
+
+    manufacturer = await db.get(Manufacturer, data.manufacturer_id)
+    if manufacturer is None:
+        raise HTTPException(404, "Manufacturer not found")
+    values = data.model_dump(exclude={"colors"})
+    for field, default in (
+        ("default_spool_weight_g", manufacturer.empty_spool_weight_g),
+        ("spool_outer_diameter_mm", manufacturer.spool_outer_diameter_mm),
+        ("spool_width_mm", manufacturer.spool_width_mm),
+        ("spool_material", manufacturer.spool_material),
+    ):
+        if values[field] is None:
+            values[field] = default
+
+    try:
+        filament_id = await get_next_available_id(db, Filament)
+        db.add(Filament(id=filament_id, **values))
+        # Persist the filament and its receipt together so retries can recover a committed save.
+        await db.flush()
+        for color in data.colors or []:
+            db.add(FilamentColor(filament_id=filament_id, **color.model_dump()))
+        db.add(FilamentResearchSave(owner_id=owner, draft_id=draft_id, filament_id=filament_id))
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(409, "The filament library changed during the save. Review the draft and try again.") from None
+    response_cache.delete("filament_types")
+    response_cache.delete("filter_options:filaments")
+    await event_bus.publish({"event": "filaments_changed"})
+    return {"id": filament_id, "already_saved": False}
+
+
+@router.get("/saved-filaments/{draft_id}", response_class=RedirectResponse)
+async def open_saved_filament(draft_id: DraftId, db: DBSession, principal: PrincipalDep):
+    if principal.auth_type != "session" or principal.user_id is None:
+        raise HTTPException(403, "A browser session is required")
+    await ensure_any_permission(db, principal, "filaments:read", "filaments:create")
+    if not await is_enabled(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    receipt = await db.get(FilamentResearchSave, (principal.user_id, draft_id))
+    if receipt is None or receipt.filament_id is None:
+        raise HTTPException(404, "Saved filament not found")
+    return RedirectResponse(f"/filaments/{receipt.filament_id}", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/filaments/{filament_id}/research-record")
+async def research_record(filament_id: int, db: DBSession, principal: PrincipalDep):
+    if not await is_enabled(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    if principal.auth_type != "session":
+        raise HTTPException(403, "A browser session is required")
+    await ensure_any_permission(db, principal, "filaments:update")
+    filament = await db.get(Filament, filament_id)
+    if filament is None:
+        raise HTTPException(404, "Filament not found")
+    return {"record_token": getattr(filament, "record_token", None)}
+
+
+@router.put("/filaments/{filament_id}/manufacturer-website", status_code=204)
+async def save_manufacturer_website(
+    filament_id: int, data: ManufacturerWebsite, db: DBSession, principal: PrincipalDep,
+):
+    if not await is_enabled(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    if principal.auth_type != "session":
+        raise HTTPException(403, "A browser session is required")
+    required = {"filaments:update", "manufacturers:update"}
+    if not required <= await ensure_any_permission(db, principal, *required):
+        raise HTTPException(403, "Manufacturer update permission is required")
+    if not (website := manufacturer_site_url(data.url)):
+        raise HTTPException(422, "Enter a manufacturer website")
+    filament = select(Filament.id).where(
+        Filament.id == filament_id, Filament.manufacturer_id == data.manufacturer_id,
+    )
+    token_column = getattr(Filament, "record_token", None)
+    if token_column is not None:
+        if data.record_token is None:
+            raise HTTPException(409, "Reload the filament to verify its record.")
+        filament = filament.where(token_column == data.record_token)
+    result = await db.execute(
+        update(Manufacturer)
+        .where(
+            Manufacturer.id == data.manufacturer_id,
+            Manufacturer.name == data.name,
+            or_(Manufacturer.url.is_(None), func.trim(Manufacturer.url) == ""),
+            filament.exists(),
+        )
+        .values(url=website)
+    )
+    if not result.rowcount:
+        raise HTTPException(409, "The manufacturer changed or already has a website. Reload the filament.")
+    await db.commit()
+    await event_bus.publish({"event": "manufacturers_changed"})

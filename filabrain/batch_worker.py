@@ -208,7 +208,7 @@ async def _store_result(db: AsyncSession, claim: Claim, result: dict) -> None:
             codes = {issue["code"] for issue in item.issues}
             if item.proposals:
                 item.status = "ready"
-            elif "unavailable_source" in codes:
+            elif codes & {"unavailable_source", "supplier_download_limit"}:
                 item.status = "failed"
             elif "needs_match" in codes:
                 item.status = "needs_match"
@@ -234,7 +234,8 @@ async def _research_claim(sessions, claim: Claim) -> dict | None:
     async def propose():
         async with sessions() as db, asyncio.timeout(RESEARCH_TIMEOUT):
             return await batch_proposal(
-                db, claim.snapshot, claim.mode, sku_hint=claim.sku_hint, product_url=claim.product_url
+                db, claim.snapshot, claim.mode, sku_hint=claim.sku_hint, product_url=claim.product_url,
+                skip_complete=True,
             )
 
     task = asyncio.create_task(propose())
