@@ -80,7 +80,7 @@ function appendSources(row: HTMLElement, sources: ResearchOption['sources']) {
 function issueText(issue: ResearchProposal['issues'][number]) {
   const key = `filaBrain.${issue.code}`
   const message = t(key, {
-    name: issue.name || (issue.field ? researchFieldLabel(issue.field) : ''),
+    name: issue.name || (issue.field ? researchFieldLabel(issue.field) : issue.source || ''),
     source: issue.source || '',
   })
   const explanation = message === key ? issue.code.replaceAll('_', ' ') : message

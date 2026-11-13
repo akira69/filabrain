@@ -157,7 +157,7 @@ try {
         ...(target.product_url ? [
           variantIssue,
           { code: 'ambiguous_match', source: 'Fixture catalog' },
-          { code: 'unavailable_source', name: 'Fixture catalog', url: evidence[0].url, reason: 'Timed out' },
+          { code: 'unavailable_source', source: 'Fixture catalog', url: evidence[0].url, reason: 'Timed out' },
         ] : []),
       ] : [] } })
     }
