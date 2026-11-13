@@ -1825,12 +1825,25 @@ async def research_products(
     def has_usable_fallback():
         return any(not needs_variant(authoritative_docs[url]) for url in fallback_docs)
 
+    def retry_without_slash(link):
+        parsed = urlsplit(link)
+        if fetch_errors.get(link) == SUPPLIER_TOO_LARGE and parsed.path.endswith("/"):
+            return urlunsplit(parsed._replace(path=parsed.path.rstrip("/")))
+        return None
+
     async def check_alternatives(host, urls, *, recover_sheet=False, recover_product=True):
         links = list(dict.fromkeys(
             supplier_page_url(link) for url in urls if (link := public_link(url))
             and _site_host(link) == host and urlsplit(link).path not in ("", "/")
         ))[:3]
         alternatives = await check_pages(links)
+        if recover_sheet:
+            # Some sitemap URLs redirect to a larger storefront only when the path ends in a slash.
+            for link in links:
+                if without_slash := retry_without_slash(link):
+                    await check_pages([without_slash])
+                    links = list(dict.fromkeys([*links, without_slash]))
+                    break
         alternative = None
         for link in links:
             page = checked_pages.get(link)
@@ -1905,7 +1918,10 @@ async def research_products(
                 for url in await supplier_sitemap_urls(sitemap_origin):
                     if not (link := public_link(url)) or _site_host(link) != host:
                         continue
-                    if supplier_page_url(link) in checked_pages and not checked_pages[supplier_page_url(link)]:
+                    checked_link = supplier_page_url(link)
+                    if checked_link in checked_pages and not checked_pages[checked_link] and not (
+                        recover_sheet and retry_without_slash(checked_link)
+                    ):
                         continue
                     words = url_words(link)
                     path = "-".join(_product_key(unquote(urlsplit(link).path)))

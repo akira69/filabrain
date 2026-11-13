@@ -605,19 +605,20 @@ async def test_datasheet_link_parser_recognizes_filename_and_accessible_labels()
     ]
 
 
-async def test_datasheet_discovery_from_official_sitemap_without_search(installed, monkeypatch):
+@pytest.mark.parametrize("direct_product_url", [False, True])
+async def test_datasheet_discovery_from_official_sitemap_without_search(installed, monkeypatch, direct_product_url):
     from filabrain import proposals, sources
 
     site = "https://fixture-maker.example"
-    original = "https://shop.fixture-maker.example/products/polyterra-pla"
-    product = site + "/product/polyterra-pla/"
+    product = site + "/product/polyterra-pla"
+    original = product + "/" if direct_product_url else "https://shop.fixture-maker.example/products/polyterra-pla"
     sheet = site + "/docs/TDS_PolyTerra_PLA_V6.0.pdf"
 
     async def fetch(url, *, max_bytes):
         assert max_bytes == 2 * 1024 * 1024
         if url == site + "/":
             return proposals.Evidence(url, "Fixture Maker", "3D printing filament")
-        if url == original:
+        if url in (original, product + "/"):
             raise ValueError(sources.SUPPLIER_TOO_LARGE)
         if url == sheet:
             return proposals.Evidence(
@@ -632,7 +633,7 @@ async def test_datasheet_discovery_from_official_sitemap_without_search(installe
         return proposals.Evidence(url, "Downloads", "")
 
     async def sitemap(_url):
-        return (site + "/faq/does-polyterra-pla-print-fast/", site + "/library/polyterra-pla-sds/", product)
+        return (site + "/faq/does-polyterra-pla-print-fast/", site + "/library/polyterra-pla-sds/", product + "/")
 
     async def no_search(*_):
         pytest.fail("Search must stay disabled")
