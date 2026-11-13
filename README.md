@@ -38,7 +38,11 @@ The search service stays on that Docker network and serves JSON results. When a 
 
 **Research sources** lists the built-in sources. Add supplier domains under **Internet search** to include them in targeted SearXNG searches. General search can still find unchecked sites.
 
-When a manufacturer's website is missing, FilaBrain checks FilaManDB first and can look for a matching brand site through SearXNG. In the filament editor, users with manufacturer update permission can review and save a suggested website to the manufacturer record.
+![FilaBrain research sources and SearXNG supplier settings](assets/filabrain-research-settings.png)
+
+When a manufacturer's website is missing, FilaBrain checks FilaManDB first and can look for a matching brand site through SearXNG. In the filament editor, users who can edit both the filament and its manufacturer can review the suggested URL and select **Save manufacturer website** to update the manufacturer record.
+
+![FilaBrain confirms that the Polymaker website found through SearXNG was saved](assets/filabrain-manufacturer-website.png)
 
 ## External MCP connections
 
