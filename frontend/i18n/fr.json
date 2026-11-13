@@ -44,6 +44,7 @@
     "otherModelsUnavailable": "Impossible de charger les autres modèles.",
     "researchNoModel": "Aucun modèle configuré",
     "researchReview": "Voici ce que j’ai trouvé. Consultez les résultats ci-dessous.",
+    "sourcesChecked": "Sources consultées ({count})",
     "sendFollowUp": "Envoyer la demande",
     "title": "FilaBrain",
     "description": "Recherchez un filament et vérifiez les sources avant d’appliquer les suggestions.",

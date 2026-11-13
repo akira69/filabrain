@@ -128,6 +128,16 @@ dialog dd { margin: 0; overflow-wrap: anywhere; }
 #research-options > summary, #research-advanced-fields > summary { color: var(--text-muted); cursor: pointer; margin-block: .6rem; }
 #research-start-actions { align-items: center; }
 #research-conversation { margin-block: 1rem; }
-#research-reply { margin-block-start: .75rem; background: var(--bg); }
-#research-reply #research-results { margin-block-start: 0; }
+[data-chat-research-results] #research-conversation { margin-block-start: .55rem; }
+#research-reply { padding: .65rem .8rem; background: var(--bg); }
+#research-reply #research-results { margin-block: 0 .5rem; }
+#research-results > p { margin-block: .35rem; overflow-wrap: anywhere; }
+#research-results .proposal-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .75rem; margin: 0; padding: .4rem 0; }
+#research-results .proposal-row > label { padding: 0; }
+#research-results .proposal-row input { margin: 0; }
+.proposal-evidence { display: flex; flex-wrap: wrap; gap: .1rem .7rem; }
+#research-results .proposal-evidence p { margin: 0; }
+.research-checks { border-top: 1px solid var(--border); padding-block-start: .45rem; }
+.research-checks summary { cursor: pointer; }
+.research-checks p { margin: .25rem 0; overflow-wrap: anywhere; }
 #save-filament:disabled { background: var(--bg-soft); border-color: var(--border); color: var(--text-muted); }

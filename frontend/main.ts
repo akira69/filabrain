@@ -181,10 +181,8 @@ async function main() {
       if (hostMode === 'editor' && (context.mode === 'create' || context.mode === 'edit')) {
         if (context.mode === 'create' ? !status.can_create : !status.can_update) throw new Error('Filament access is required.')
         element('plugin-header').hidden = true
-        document.querySelector<HTMLElement>('[data-view="new"]')!.hidden = false
         const chat = mountChat(status.chat_model, undefined, context.filament_id ? 'editor:' + context.filament_id : '')
         mountResearch(status, chat, () => {
-          document.querySelector<HTMLElement>('[data-view="new"]')!.hidden = true
           document.querySelector<HTMLElement>('[data-view="chat"]')!.hidden = false
         }, context)
       } else if (hostMode === 'selection' && context.mode === 'selection' && status.can_update) {

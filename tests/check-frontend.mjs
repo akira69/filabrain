@@ -37,6 +37,7 @@ try {
   let hostPicker = false
   let account = 7
   let chatRequests = 0
+  let proposalRequests = 0
   await page.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
@@ -84,6 +85,7 @@ try {
       return route.fulfill({ json: { reply: 'PLA is easier to print.', action: null } })
     }
     if (path.endsWith('/proposals')) {
+      proposalRequests++
       const target = req.postDataJSON()
       if (target.filament_id === 10 && target.action === 'fill') assert.equal(target.model_id, 'fixture:alternate')
       if (target.product_url) assert.equal(target.product_url, evidence[0].url)
@@ -107,6 +109,8 @@ try {
         { field: 'density_g_cm3', value: 1.24, sources: evidence },
         { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
       ], issues: target.mode === 'edit' ? [
+        { code: 'manufacturer_page', name: 'Fixture datasheet', url: evidence[0].url },
+        { code: 'manufacturer_page', name: 'Fixture datasheet', url: evidence[0].url },
         { code: 'manufacturer_color_reference', name: 'RAL 9005 Signal Black', url: evidence[0].url },
         { code: 'manufacturer_website_found', name: manufacturer.name, source: 'FilaManDB', url: 'https://manufacturer.test/' },
         { code: 'possible_match', name: 'Fixture PLA', source: 'FilaManDB', url: evidence[0].url, product_url: evidence[0].url },
@@ -421,6 +425,13 @@ try {
   await frame.getByRole('heading', { name: 'Chat', exact: true }).waitFor()
   const densityChoice = frame.getByRole('checkbox', { name: /Density/ })
   await densityChoice.waitFor()
+  const checks = frame.getByText('Sources checked (1)', { exact: true })
+  await checks.waitFor()
+  const checkedSheet = frame.getByText('Manufacturer page checked: Fixture datasheet', { exact: false })
+  assert.equal(await checkedSheet.isVisible(), false)
+  await checks.click()
+  assert.equal(await checkedSheet.getByRole('link', { name: 'Open source' }).getAttribute('href'), evidence[0].url)
+  await checks.click()
   assert.equal(await frame.getByRole('button', { name: 'Stage fields in FilaMan editor' }).isDisabled(), true)
   await densityChoice.check()
   await frame.getByRole('button', { name: 'Stage 1 field' }).waitFor()
@@ -468,6 +479,14 @@ try {
     material_subgroup: { old: null, value: 'Silk' },
   }])
   assert.equal(writes.length, 1)
+
+  const requestsBeforeReopen = proposalRequests
+  await page.reload()
+  await frame.locator('[data-chat-history] summary').click({ timeout: 2000 })
+  await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
+  await frame.getByRole('log').getByText('Focus on the material finish', { exact: true }).waitFor()
+  await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).waitFor()
+  assert.equal(proposalRequests, requestsBeforeReopen, 'reopening editor research does not run another lookup')
 
   hostPicker = true
   await page.goto(`${url}?tab=library`)

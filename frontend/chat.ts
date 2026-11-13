@@ -44,6 +44,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   let researching = false
   let research: Research | undefined
   const modelPicker = mountModelPicker(form, model, openSettings)
+  const picker = form.querySelector<HTMLElement>('.chat-model-picker')!
   status.removeAttribute('data-i18n')
   status.textContent = ''
   submit.removeAttribute('data-i18n-aria-label')
@@ -51,7 +52,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   function scrollToEnd() { transcript.scrollTop = transcript.scrollHeight }
 
   function updateControls() {
-    form.hidden = !researching && !model
+    form.hidden = (!researching && !model) || (editorScope !== undefined && !form.contains(picker))
     input.disabled = researching && !current.messages.length && !busyResearch
     input.maxLength = researching ? 400 : 2000
     input.placeholder = t(researching ? 'filaBrain.followUpHint' : 'filaBrain.chatPlaceholder')
@@ -63,6 +64,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     submit.toggleAttribute('data-busy', !!request)
     input.readOnly = !!request || busyResearch
     modelPicker.setBusy(!!request || busyResearch)
+    status.toggleAttribute('data-chat-running', !!request)
     newChat.disabled = busyResearch || !researching && !request && !current.messages.length && !input.value
     prompts.hidden = researching || form.hidden || !!request || current.messages.length > 0
     setup.hidden = researching || !!model || current.messages.length > 0
@@ -122,7 +124,10 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
           busyResearch = false
           renderHistory()
           updateControls()
-          scrollToEnd()
+          if (conversation.research) {
+            const lastQuestion = log.querySelectorAll<HTMLElement>('.chat-user')
+            transcript.scrollTop = (lastQuestion[lastQuestion.length - 1]?.offsetTop ?? 0) - 8
+          } else scrollToEnd()
           history.querySelector('summary')?.focus()
         }
       })
@@ -278,8 +283,8 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     else if (!researching) {
       researching = true
       document.dispatchEvent(new CustomEvent('filabrain:chat-mode', { detail: true }))
-      updateControls()
     }
+    updateControls()
     const field = researchInput.querySelector<HTMLElement>('input[name="designation"]:not([type="hidden"])')
     if (field?.getClientRects().length) field.focus()
   }
@@ -287,7 +292,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   updateControls()
   return {
     get model() { return modelPicker.selected },
-    picker: form.querySelector<HTMLElement>('.chat-model-picker')!,
+    picker,
     startResearch,
     setResearch(value: Research) { research = value; renderHistory() },
     showChat() {
@@ -298,9 +303,10 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     async researchTurn(content: string, run: () => Promise<{ reply: string; draft?: ResearchDraft }>) {
       if (busyResearch) return
       const question: Message = { role: 'user', content }
-      append(question)
+      const questionBubble = append(question)
       const note = append({ role: 'assistant', content: t('filaBrain.searching') })
       note.className = 'chat-message research-note'
+      note.setAttribute('data-chat-running', '')
       busyResearch = true
       status.textContent = ''
       updateControls()
@@ -317,9 +323,10 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
           note.className = 'chat-message chat-assistant'
         }
       } finally {
+        note.removeAttribute('data-chat-running')
         busyResearch = false
         updateControls()
-        scrollToEnd()
+        transcript.scrollTop = questionBubble.offsetTop - 8
       }
     },
   }

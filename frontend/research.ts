@@ -21,6 +21,7 @@ const sourceNotes = new Set([
   'manufacturer_page', 'archived_page', 'unavailable_source', 'manual_datasheet',
   'supplier_alternative_found', 'supplier_download_limit',
 ])
+const checkedSources = new Set(['manufacturer_page', 'archived_page'])
 const nativeFields = new Set([
   'manufacturer_id', 'color_id', 'designation', 'material_type', 'diameter_mm',
   'manufacturer_color_name', 'manufacturer_sku', 'density_g_cm3', 'raw_material_weight_g',
@@ -109,9 +110,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   let lastAction = 'fill'
   let formRevision = 0
 
-  function showInChat() {
+  function showInChat(movePicker = true) {
     openChat()
-    document.querySelector('[data-chat-form] .chat-toolbar')!.prepend(chat.picker)
+    if (movePicker) document.querySelector('[data-chat-form] .chat-toolbar')!.prepend(chat.picker)
     if (inputs.parentElement !== chatInput) chatInput.append(inputs)
     if (conversation.parentElement !== chatResults) chatResults.append(conversation)
     chat.startResearch()
@@ -211,13 +212,18 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     }
     label.append(control, changes)
     row.append(label)
-    if (reason) {
-      const p = document.createElement('p')
-      p.className = 'research-note'
-      p.textContent = reason
-      row.append(p)
+    if (reason || sources.length) {
+      const evidence = document.createElement('div')
+      evidence.className = 'proposal-evidence'
+      if (reason) {
+        const p = document.createElement('p')
+        p.className = 'research-note'
+        p.textContent = reason
+        evidence.append(p)
+      }
+      appendSources(evidence, sources)
+      row.append(evidence)
     }
-    appendSources(row, sources)
     return row
   }
 
@@ -228,6 +234,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     const unitFor = (field: string, value: Value): Unit => ({ [field]: { old: fields[field] ?? null, value } })
     duplicate = proposal.issues.some(issue => issue.code === 'duplicate')
     const alternatives = new Set<string>()
+    const checks = document.createElement('details')
+    checks.className = 'research-checks research-note'
+    const summary = document.createElement('summary')
+    checks.append(summary)
+    const seenChecks = new Set<string>()
     for (const issue of proposal.issues) {
       const p = document.createElement('p')
       if (sourceNotes.has(issue.code)) p.className = 'research-note'
@@ -299,7 +310,13 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         actions.append(choose)
         p.append(actions)
       }
-      results.append(p)
+      if (checkedSources.has(issue.code)) {
+        const check = issue.url || p.textContent
+        if (!seenChecks.has(check)) {
+          seenChecks.add(check)
+          checks.append(p)
+        }
+      } else results.append(p)
       const field = issue.field
       if (field && nativeFields.has(field) && issue.options?.length && blank(fields[field]) &&
           !alternatives.has(field) && !issue.requires_product_choice) {
@@ -332,6 +349,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       const unit = Object.fromEntries(changes.map(([field, change]) => [field, { old: fields[field] ?? null, value: change.value }]))
       const sources = proposalUnit.sources.map(source => ({ title: source.title, url: source.url, evidence: source.quote }))
       results.append(option(unit, sources, proposalUnit.reason))
+    }
+    if (seenChecks.size) {
+      summary.textContent = t('filaBrain.sourcesChecked', { count: seenChecks.size })
+      results.append(checks)
     }
     updateSave()
     reply.hidden = !!editor && !results.childElementCount
@@ -411,6 +432,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     saved.hidden = true
     notice.textContent = ''
     lastAction = 'fill'
+    if (editor) buttons[0].before(chat.picker)
     void disconnect()
   }
 
@@ -605,5 +627,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       void disconnect()
     }
   })
+  if (editor) showInChat(false)
   return showInChat
 }
