@@ -1073,10 +1073,24 @@ def _possible_catalog_matches(identity: Identity, items: list[dict], url: str, s
 
 
 def _product_titles(identity: Identity) -> set[str]:
-    return {
-        _norm(value) for value in (identity.designation, identity.material, " ".join(_line(identity.designation, identity.color)))
-        if len(_tokens(value)) > 1
-    }
+    words = _line(identity.designation, identity.color)
+    color = _tokens(identity.color)
+    if color and words[:len(color)] == color:
+        words = words[len(color):]
+    line = " ".join(words).rstrip(" -")
+    designation = _norm(identity.designation)
+    titles = {title for title in (designation, line) if title}
+    material = _norm(identity.material)
+    # A generic material must not stand in for a more specific grade.
+    if len(_tokens(material)) > 1 and not _literal_in(material, line):
+        titles.add(material)
+    return titles
+
+
+def _sheet_title(value: str) -> str:
+    value = re.sub(r"[™®]|\btm\b", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"^(?:产品名称\s*)?product name\s*[:：]\s*", "", _norm(value))
+    return re.sub(r"\+\s*(?=\d)", "+", value)
 
 
 def _sheet_variant_values(page: Evidence) -> dict[str, set]:
@@ -1121,13 +1135,14 @@ def _known_variant_fields(identity: Identity, snapshot) -> dict:
 
 
 def _sheet_matches(page: Evidence, titles: set[str], identity: Identity, snapshot=None) -> bool:
-    header = [
-        _norm(re.sub(r"[™®]|\btm\b", " ", row, flags=re.IGNORECASE))
-        for row in [line for line in page.text.splitlines() if line.strip()][:8]
-    ]
+    header = [line.strip() for line in page.text.splitlines() if line.strip()][:8]
+    cells = {
+        _sheet_title(cell)
+        for line in header for cell in re.split(r"[ \t]{3,}", line)
+    }
     if not (
-        page.datasheet and re.search(r"\btechnical data\s*sheet\b", " ".join(header))
-        and titles.intersection(header)
+        page.datasheet and re.search(r"\btechnical data\s*sheet\b|物性表", _norm(" ".join(header)))
+        and cells.intersection(_sheet_title(title) for title in titles)
     ):
         return False
     known = _known_variant_fields(identity, snapshot)
@@ -1140,47 +1155,56 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
     # printing settings and the oven drying fields in the filament record.
     lines = page.text.splitlines()
     rows = [" ".join(line.split()) for line in lines]
-    page = replace(page, text="\n".join(rows))
-    heading = re.compile(r"recommended printing (?:settings|conditions)", re.IGNORECASE)
+    page = replace(page, text=" ".join(rows).strip())
+    heading = re.compile(r"(?:建议打印参数\s+)?recommended printing (?:settings|conditions|parameters)(?: data)?", re.IGNORECASE)
     has_heading = any(heading.fullmatch(row) for row in rows)
     degrees = r"(?:[°˚]\s*C|℃)"
+    density_unit = r"g\s*/\s*cm\s*[³3]"
     entries = []
     printing = False
 
     def add(field, value, quote):
         entries.append({"field": field, "value": value, "source": 1, "quote": quote})
 
-    for line, row in zip(lines, rows):
-        if re.search(r"\bspecimen (?:test|printing)\b", row, re.IGNORECASE):
+    for index, (line, row) in enumerate(zip(lines, rows)):
+        if re.search(r"\b(?:specimen (?:test|printing)|printing test conditions)\b", row, re.IGNORECASE):
             break
         if heading.fullmatch(row) or (not has_heading and row.startswith("•")):
             printing = True
+        density_row = row.removeprefix("密度 ")
         density = re.fullmatch(
-            rf"Density\b.*?\s(\d+(?:\.\d+)?)\s*g\s*/\s*cm[³3](?:\s+at\s+\d+(?:\.\d+)?\s*{degrees})?",
-            row, re.IGNORECASE,
+            rf"Density\b.*?\s(\d+(?:\.\d+)?)\s*{density_unit}(?:\s+at\s+\d+(?:\.\d+)?\s*{degrees})?",
+            density_row, re.IGNORECASE,
         )
         if density:
-            add("density_g_cm3", float(density[1]), row)
+            add("density_g_cm3", float(density[1]), density_row)
+        elif (
+            re.fullmatch(rf"Density\b.*\s{density_unit}", density_row, re.IGNORECASE)
+            and index + 1 < len(rows) and re.fullmatch(r"\d+\.\d+", rows[index + 1])
+            and lines[index + 1].startswith(" ")
+        ):
+            add("density_g_cm3", float(rows[index + 1]), f"{density_row} {rows[index + 1]}")
         if not printing:
             continue
         for column in re.split(r"[ \t]{3,}(?=[a-zA-Z])", line.strip()):
-            column = " ".join(column.split())
+            column = " ".join(column.split()).removeprefix("平台温度 ")
             temperature = re.fullmatch(
-                rf"(Nozzle|Bed|Build plate) Temperature\s*:?\s*(\d+)"
-                rf"(?:\s*[-–]\s*(\d+))?\s*(?:{degrees}|\({degrees}\))",
+                rf"(Nozzle|Bed|Plate|Build plate|Build platform) Temp(?:erature|\.)\s*:?\s*(\d+)"
+                rf"(?:\s*[-–~]\s*(\d+))?\s*(?:{degrees}|\({degrees}\))",
                 column, re.IGNORECASE,
             )
             if temperature:
                 field = "extruder_temp_range_c" if temperature[1].casefold() == "nozzle" else "bed_temp_range_c"
                 add(field, {"min": int(temperature[2]), "max": int(temperature[3] or temperature[2])}, column)
             drying = re.fullmatch(
-                rf"(?:Blast Drying Oven|Drying (?:Oven|temp\.? and time))\s*:?\s*(\d+)\s*{degrees}"
-                r"(?:\s*[,，]\s*|\s+for\s+)(\d+)\s*h(?:ours?)?",
+                rf"(?:Blast Drying Oven|Drying (?:Oven|Preparation|temp\.? and time))\s*:?\s*(\d+)\s*{degrees}"
+                r"(?:\s*[,，]\s*|\s+for\s+)(\d+)(?:\s*[-–~]\s*(\d+))?\s*h(?:ours?)?",
                 column, re.IGNORECASE,
             )
             if drying:
                 add("drying_temp_c", int(drying[1]), column)
-                add("drying_time_hours", int(drying[2]), column)
+                if drying[3] is None:
+                    add("drying_time_hours", int(drying[2]), column)
     return extract_proposal({"suggestions": entries}, [page])
 
 
@@ -1412,7 +1436,7 @@ async def research_products(
             brand = re.sub(r"[^a-z0-9]", "", _norm(identity.manufacturer))
             homepages = []
             if len(brand) >= 3:
-                product_publisher = _publisher(product_url)
+                product_publisher = _publisher(product_url or (snapshot or {}).get("shop_url"))
                 if re.sub(r"[^a-z0-9]", "", product_publisher.split(".")[0]) == brand:
                     homepages.append(f"https://{product_publisher}/")
                 for url in await search(f"{identity.manufacturer} filament official website"):
@@ -1483,16 +1507,16 @@ async def research_products(
     authoritative_docs: dict[str, Evidence] = {}
     archived_official_urls: set[str] = set()
 
+    document_domain = manufacturer_domain or search_domain
+
     async def check_datasheets(pages):
         linked = []
         for page in pages.values():
-            if not page or not _on_manufacturer_site(page.url, manufacturer_domain):
+            if not page or not _on_manufacturer_site(page.url, document_domain):
                 continue
             if _sheet_matches(page, titles, identity, snapshot):
                 authoritative_docs[page.url] = replace(page, manufacturer_page=True)
-            page_title = _norm(re.split(r"\s*[|–]\s*", page.title, maxsplit=1)[0])
-            if page_title in titles:
-                linked.extend(link for url in page.datasheets if (link := public_link(url)))
+            linked.extend(link for url in page.datasheets if (link := public_link(url)))
         links = list(dict.fromkeys(linked))[:3]
         await check_pages(links)
         for link in links:
@@ -1741,7 +1765,6 @@ async def research_products(
                 return page.url
         return None
 
-    document_domain = manufacturer_domain or search_domain
     product_line = " ".join(_line(identity.designation, identity.color))
     try:
         async with asyncio.timeout(15):

@@ -32,7 +32,7 @@ SPEC_LABELS = {
     "drying_temp_c": r"\b(?:dry|drying|dehydrat\w*)\b",
     "drying_time_hours": r"\b(?:dry|drying|dehydrat\w*)\b",
     "extruder_temp_range_c": r"\b(?:nozzle|extrud\w*|print(?:ing)?\s+temp\w*)\b",
-    "bed_temp_range_c": r"\b(?:bed|build\s+plate|platform)\b",
+    "bed_temp_range_c": r"\b(?:bed|plate\s+temp|build\s+plate|platform)\b",
     "default_spool_weight_g": r"\b(?:empty\s+(?:spool|reel)|(?:spool|reel)\s+tare|tare\s+weight)\b",
     "spool_outer_diameter_mm": r"\b(?:(?:spool|reel).*(?:outer\s+diameter|OD)|(?:outer\s+diameter|OD).*(?:spool|reel))\b",
     "spool_width_mm": r"\b(?:spool|reel).*(?:width|depth)\b",
@@ -88,7 +88,7 @@ def _valid_value(field: str, value, evidence: str) -> bool:
         return False
     degrees = r"(?:[°˚]\s*c|℃)"
     unit_patterns = {
-        "density_g_cm3": r"g\s*/\s*cm(?:³|3|\^3)",
+        "density_g_cm3": r"g\s*/\s*cm\s*(?:³|3|\^3)",
         "raw_material_weight_g": r"(?:kg|g)\b",
         "drying_temp_c": degrees,
         "drying_time_hours": r"(?:hours?|hrs?|h)\b",
@@ -118,9 +118,13 @@ def _valid_value(field: str, value, evidence: str) -> bool:
             float(match[1].replace(",", ".")) == value
             for match in re.finditer(rf"{SPEC_LABELS[field]}\s*[:=]?\s*({number})(?![\w.])", evidence, re.IGNORECASE)
         )
+    if field == "density_g_cm3" and (match := re.fullmatch(
+        rf"Density\b.*?\s{unit}\s+({number})", evidence, re.IGNORECASE,
+    )):
+        return float(match[1].replace(",", ".")) == value
     pattern = (
         rf"(?<![\w.,+−-])(?P<start>{number})"
-        rf"(?:\s*(?P<start_unit>{unit})?\s*(?:[-–—]|\bto\b)\s*(?P<end>{number}))?"
+        rf"(?:\s*(?P<start_unit>{unit})?\s*(?:[-–—~]|\bto\b)\s*(?P<end>{number}))?"
         rf"\s*(?P<unit>{unit})"
     )
     for match in re.finditer(pattern, evidence, re.IGNORECASE):

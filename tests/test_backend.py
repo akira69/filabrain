@@ -255,6 +255,93 @@ async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(install
             assert spec["sources"][0]["evidence"] in " ".join(sheet_text.split())
 
 
+@pytest.mark.parametrize(("designation", "material", "color", "text", "expected"), [
+    ("PLA+", "PLA+", "", (
+        "PLA+                          Technical Data Sheet\n"
+        "Density     GB/T 1033           1.24g/cm 3\n"
+        "Recommended Printing Parameters                   Data\n"
+        "Drying Preparation        50℃，8~12h\n"
+        "Nozzle Temperature        210-230℃\n"
+        "Build Platform Temperature        45~60℃\n"
+        "Printing Test Conditions\n"
+        "Build Platform Temperature       65℃"
+    ), {"density_g_cm3": 1.24, "drying_temp_c": 50,
+        "extruder_temp_range_c": {"min": 210, "max": 230},
+        "bed_temp_range_c": {"min": 45, "max": 60}}),
+    ("Black PLA+ 2.0", "PLA+", "Black", (
+        "三绿物性表 ISO                 页码/总页数 1/4\n"
+        "产品名称 Product Name: PLA+2.0\n"
+        "密度 Density      ISO 1183     23℃    g/cm 3\n"
+        "                                          1.21\n"
+        "建议打印参数 Recommended Printing Parameters\n"
+        "喷嘴温度 Nozzle Temp.\n"
+        "                        205-215          50-100\n"
+        "                        215-245         100-200\n"
+        "平台温度 Plate Temp.            50-60℃"
+    ), {"density_g_cm3": 1.21, "bed_temp_range_c": {"min": 50, "max": 60}}),
+])
+async def test_datasheet_layout_keeps_exact_identity_and_cites_only_supported_values(
+    designation, material, color, text, expected,
+):
+    from filabrain import proposals
+
+    identity = proposals.Identity(designation=designation, material=material, color=color)
+    url = "https://manufacturer.example/technical.pdf"
+    page = proposals.Evidence(url, "Technical data sheet", text, datasheet=True)
+    titles = proposals._product_titles(identity)
+    assert proposals._sheet_matches(page, titles, identity)
+    wrong = proposals.replace(page, text=text.replace("PLA+", "High Speed PLA+", 1))
+    assert not proposals._sheet_matches(wrong, titles, identity)
+    specs, issues = proposals._sheet_specs(page)
+    assert not issues
+    assert {item["field"]: item["value"] for item in specs} == expected
+    assert all(item["sources"][0]["url"] == url for item in specs)
+
+
+async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed, db_session, monkeypatch):
+    from filabrain import proposals
+
+    site = "https://manufacturer.example/"
+    product = site + "products/pla-basic"
+    sheet = "https://cdn.example/technical.pdf"
+    unrelated = "https://other.example/products/pla-basic"
+    pdf = proposals.Evidence(
+        sheet, "Technical data sheet",
+        "Technical Data Sheet\nPLA Basic\nDensity 1.24 g/cm³", datasheet=True,
+    )
+
+    async def fetch(url, **_):
+        if url == sheet:
+            return pdf
+        return proposals.Evidence(url, "PLA Basic | Fixture Brand", "PLA Basic", datasheets=(sheet,) if url == product else ())
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    db_session.add(Manufacturer(name="Fixture Brand", url=site))
+    await db_session.commit()
+
+    for url in (product, unrelated):
+        response = await installed.post(f"{BASE}/proposals", json={
+            "mode": "create", "product_url": url,
+            "identity": {"manufacturer": "Fixture Brand", "designation": "PLA Basic"},
+        })
+        assert response.is_success, response.text
+        density = next((s for s in response.json()["suggestions"] if s["field"] == "density_g_cm3"), None)
+        if url == product:
+            assert density and density["sources"][0]["url"] == sheet
+        else:
+            assert density is None
+
+
 async def test_supplier_sitemap_follows_product_index_without_fetching_pages(monkeypatch):
     from filabrain import sources
 
