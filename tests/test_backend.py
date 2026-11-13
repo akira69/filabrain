@@ -812,9 +812,49 @@ async def test_stock_host_batch_claim_and_apply(
     )
     db_session.add(filament)
     await db_session.commit()
+    identity = {
+        "id": filament.id,
+        "manufacturer_id": maker.id,
+        "designation": filament.designation,
+        "material_type": filament.material_type,
+    }
+    previous_token = getattr(filament, "record_token", None)
+    stale = await installed.post(
+        f"{BASE}/batches",
+        json={"mode": "fill", "filament_ids": [filament.id],
+              "expected_filaments": [{**identity, "designation": "Old filament"}]},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "filament_selection_changed"
+    await db_session.rollback()
+    if previous_token is not None:
+        assert (await installed.delete(f"/api/v1/filaments/{identity['id']}")).status_code == 204
+        replacement = await installed.post("/api/v1/filaments", json={
+            **{key: value for key, value in identity.items() if key != "id"},
+            "diameter_mm": 2.85,
+        })
+        assert replacement.status_code == 201, replacement.text
+        assert replacement.json()["id"] == identity["id"]
+        stale = await installed.post(
+            f"{BASE}/batches",
+            json={"mode": "fill", "filament_ids": [identity["id"]],
+                  "expected_filaments": [{**identity, "record_token": previous_token}]},
+        )
+        assert stale.status_code == 409, stale.text
+        assert stale.json()["detail"]["code"] == "filament_selection_changed"
+        await db_session.rollback()
+        listed = await installed.get("/api/v1/filaments", params={
+            "include_record_token": "true", "filament_id": identity["id"],
+        })
+        assert listed.is_success, listed.text
+        identity["record_token"] = next(
+            item["record_token"] for item in listed.json()["items"] if item["id"] == identity["id"]
+        )
+        assert identity["record_token"] and identity["record_token"] != previous_token
     response = await installed.post(
         f"{BASE}/batches",
-        json={"mode": "fill", "filament_ids": [filament.id]},
+        json={"mode": "fill", "filament_ids": [identity["id"]],
+              "expected_filaments": [identity]},
     )
     assert response.status_code == 200, response.text
     path = f"{BASE}/batches/{response.json()['id']}"
@@ -836,8 +876,8 @@ async def test_stock_host_batch_claim_and_apply(
     selection["decision_revision"] = decision.json()["items"][0]["decision_revision"]
     applied = await installed.post(f"{path}/apply", json={"items": [selection]})
     assert applied.status_code == 200, applied.text
-    await db_session.refresh(filament)
-    assert filament.density_g_cm3 == 1.24
+    current = await db_session.get(Filament, identity["id"], populate_existing=True)
+    assert current.density_g_cm3 == 1.24
 
 
 async def test_stock_filamentdb_partial_fuzzy_search_is_incomplete(monkeypatch):

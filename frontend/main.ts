@@ -2,9 +2,9 @@ import { mountChat } from './chat'
 import { mountDocs } from './docs'
 import { mountSettings } from './settings'
 import { mountResearch, type EditorContext, type SelectionContext } from './research'
-import { api } from './shared/api'
-import { batchHref, createResearchBatch, mountResearchBatches, type BatchMode } from './shared/filabrain-batches'
-import { initI18n } from './shared/i18n'
+import { ApiError, api } from './shared/api'
+import { batchHref, createResearchBatch, mountResearchBatches, type BatchMode, type ExpectedFilament } from './shared/filabrain-batches'
+import { initI18n, t } from './shared/i18n'
 
 export type Status = {
   enabled: boolean
@@ -44,6 +44,9 @@ export const errorText = (error: unknown) => error instanceof Error ? error.mess
 
 function mountLibrary(context?: SelectionContext) {
   const selected = new Set<number>(context?.filament_ids)
+  const expectedFilaments = new Map<number, ExpectedFilament>()
+  const verifiesSelection = !context || context.expected_filaments !== undefined
+  for (const item of context?.expected_filaments ?? []) expectedFilaments.set(item.id, item)
   const form = element<HTMLFormElement>('library-research')
   const search = element<HTMLFormElement>('library-search')
   const rows = element('library-records')
@@ -52,6 +55,8 @@ function mountLibrary(context?: SelectionContext) {
   const next = element<HTMLButtonElement>('library-next')
   const submit = form.querySelector<HTMLButtonElement>('button[type=submit]')!
   const message = element('library-status')
+  const picker = element<HTMLIFrameElement>('library-picker')
+  const clearSelection = element<HTMLButtonElement>('library-clear-selection')
   let currentPage = 1
   let request = 0
   let busy = false
@@ -59,21 +64,24 @@ function mountLibrary(context?: SelectionContext) {
 
   function updateSelection() {
     element('library-selected').textContent = `${selected.size} of 50 selected`
-    submit.disabled = busy || !selected.size || selected.size > 50 || loadFailed
+    submit.disabled = busy || !selected.size || selected.size > 50 || loadFailed ||
+      (verifiesSelection && (expectedFilaments.size !== selected.size || [...selected].some(id => !expectedFilaments.has(id))))
+    clearSelection.hidden = !!context || !selected.size
+    clearSelection.disabled = busy
   }
 
-  async function load() {
+  async function load(notice = '') {
     const generation = ++request
-    const query = new URLSearchParams({ page: String(currentPage), page_size: '25' })
+    const query = new URLSearchParams({ page: String(currentPage), page_size: '25', include_record_token: 'true' })
     const name = String(new FormData(search).get('search')).trim()
     if (name) query.set('search', name)
     rows.textContent = 'Loading filaments…'
     pages.hidden = true
     try {
-      const { items, total } = await api.get<{ items: { id: number; designation: string; material_type: string; manufacturer?: { name: string } }[]; total: number }>(`/filaments?${query}`, { cache: 'no-store' })
+      const { items, total } = await api.get<{ items: (ExpectedFilament & { manufacturer?: { name: string } })[]; total: number }>(`/filaments?${query}`, { cache: 'no-store' })
       if (generation !== request) return
       loadFailed = false
-      message.textContent = ''
+      message.textContent = notice
       rows.replaceChildren()
       for (const item of items) {
         const label = document.createElement('label')
@@ -85,8 +93,14 @@ function mountLibrary(context?: SelectionContext) {
             checkbox.checked = false
             return
           }
-          if (checkbox.checked) selected.add(item.id)
-          else selected.delete(item.id)
+          if (checkbox.checked) {
+            const { id, manufacturer_id, designation, material_type, record_token } = item
+            selected.add(id)
+            expectedFilaments.set(id, { id, manufacturer_id, designation, material_type, record_token })
+          } else {
+            selected.delete(item.id)
+            expectedFilaments.delete(item.id)
+          }
           updateSelection()
         })
         label.append(checkbox, [item.designation, item.manufacturer?.name, item.material_type].filter(Boolean).join(' · '))
@@ -111,29 +125,61 @@ function mountLibrary(context?: SelectionContext) {
     search.addEventListener('submit', event => { event.preventDefault(); currentPage = 1; void load() })
     prev.addEventListener('click', () => { currentPage--; void load() })
     next.addEventListener('click', () => { currentPage++; void load() })
-    const picker = element<HTMLIFrameElement>('library-picker')
     window.addEventListener('message', event => {
       if (picker.hidden || event.source !== picker.contentWindow || event.origin !== location.origin ||
           event.data?.type !== 'filaman:filament-picker-selection') return
       const ids: unknown = event.data.filament_ids
       if (!Array.isArray(ids) || ids.length > 50 ||
           !ids.every(id => Number.isSafeInteger(id) && id > 0)) return
+      const expected: unknown = event.data.expected_filaments
+      if (!Array.isArray(expected) || expected.length !== ids.length ||
+          !expected.every(item => item && ids.includes(item.id) && Number.isSafeInteger(item.manufacturer_id) &&
+            item.manufacturer_id > 0 && typeof item.designation === 'string' && typeof item.material_type === 'string' &&
+            (item.record_token == null || (typeof item.record_token === 'string' && /^[0-9a-f]{32}$/.test(item.record_token)))) ||
+          new Set(expected.map(item => item.id)).size !== ids.length) return
       selected.clear()
-      for (const id of ids) selected.add(id)
+      expectedFilaments.clear()
+      for (const item of expected) {
+        const { id, manufacturer_id, designation, material_type, record_token } = item
+        selected.add(id)
+        expectedFilaments.set(id, { id, manufacturer_id, designation, material_type, record_token })
+      }
+      const resetNotice = t('filaBrain.libraryInventoryChanged')
+      if (event.data.inventory_changed === true) message.textContent = resetNotice
+      else if (ids.length && message.textContent === resetNotice) message.textContent = ''
       updateSelection()
     })
     message.textContent = 'Loading filaments…'
     picker.addEventListener('load', () => {
-      if (picker.contentDocument?.querySelector('[data-filament-picker]')) {
+      if (picker.contentDocument?.querySelector('[data-filament-picker="1"]')) {
         message.textContent = ''
         picker.hidden = false
       } else {
+        picker.remove()
         element('library-fallback').hidden = false
         void load()
       }
     }, { once: true })
     picker.src = '/filament-picker/'
   }
+
+  function clearLibrarySelection(refresh = false) {
+    const notice = refresh ? t('filaBrain.libraryInventoryChanged') : ''
+    selected.clear()
+    expectedFilaments.clear()
+    message.textContent = notice
+    if (picker.hidden) {
+      if (refresh) void load(notice)
+      else for (const checkbox of rows.querySelectorAll<HTMLInputElement>('input:checked')) checkbox.checked = false
+      search.querySelector('input')?.focus()
+    } else {
+      picker.contentWindow?.postMessage({ type: 'filaman:filament-picker-clear-selection', refresh }, location.origin)
+      picker.focus()
+    }
+    updateSelection()
+  }
+
+  clearSelection.addEventListener('click', () => clearLibrarySelection())
 
   form.addEventListener('submit', async event => {
     event.preventDefault()
@@ -143,12 +189,20 @@ function mountLibrary(context?: SelectionContext) {
     updateSelection()
     message.textContent = 'Starting research…'
     try {
-      const batch = await createResearchBatch([...selected], mode)
+      const batch = await createResearchBatch([...selected], mode, verifiesSelection ? [...expectedFilaments.values()] : undefined)
       location.assign(batchHref(batch.id))
     } catch (error) {
-      message.textContent = errorText(error)
       busy = false
-      updateSelection()
+      if (error instanceof ApiError && error.code === 'filament_selection_changed') {
+        if (context) {
+          selected.clear()
+          message.textContent = t('filaBrain.libraryInventoryChanged')
+          updateSelection()
+        } else clearLibrarySelection(true)
+      } else {
+        message.textContent = errorText(error)
+        updateSelection()
+      }
     }
   })
   updateSelection()

@@ -1,5 +1,7 @@
 {
   "filaBrain": {
+    "clearLibrarySelection": "Auswahl aufheben",
+    "libraryInventoryChanged": "Die Filamentbibliothek wurde geändert. Wähle die Filamente erneut aus.",
     "docs": "Anleitung",
     "chatChipAdd": "Filament hinzufügen",
     "chatPromptAdd": "Öffne das Formular zum Hinzufügen eines Filaments.",

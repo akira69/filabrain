@@ -6,6 +6,7 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright-c
 const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE_PATH })
 const url = 'https://fila.test/plugin-page/filabrain'
 const manufacturer = { id: 7, name: 'Fixture Brand' }
+const pickerRecordToken = 'a'.repeat(32)
 const filament = {
   id: 10, designation: 'Fixture PLA', manufacturer_id: 7, manufacturer,
   material_type: 'PLA', diameter_mm: 1.75, color_mode: 'single',
@@ -40,21 +41,37 @@ try {
   let proposalRequests = 0
   let pairedProposal = null
   let heldModelList
+  let staleBatchOnce = false
+  let libraryReads = 0
+  let supportsRecordToken = true
+  let hostSendsIdentity = false
   await page.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
     if (path.startsWith('/plugin-page/')) return route.fulfill({ contentType: 'text/html', body: html })
     if (path === '/filament-picker/' && hostPicker) return route.fulfill({ contentType: 'text/html', body: `
-      <label data-filament-picker><input type="checkbox"> Fixture PLA</label>
-      <script>document.querySelector('input').onchange = event => parent.postMessage({
-        type: 'filaman:filament-picker-selection', filament_ids: event.target.checked ? [10] : [],
-      }, location.origin)</script>` })
+      <label data-filament-picker${hostPicker === "current" ? '="1"' : ""}><input type="checkbox"> Fixture PLA</label>
+      <script>
+        const checkbox = document.querySelector('input')
+        checkbox.onchange = () => parent.postMessage({
+          type: 'filaman:filament-picker-selection', filament_ids: checkbox.checked ? [10] : [],
+          expected_filaments: checkbox.checked ? [{id:10,manufacturer_id:7,designation:'Fixture PLA',material_type:'PLA',record_token:'${pickerRecordToken}'}] : [],
+        }, location.origin)
+        window.addEventListener('message', event => {
+          if (event.source !== parent || event.origin !== location.origin ||
+              event.data?.type !== 'filaman:filament-picker-clear-selection') return
+          checkbox.checked = false
+          checkbox.onchange()
+        })
+      </script>` })
     if (path === '/selection-fixture') return route.fulfill({ contentType: 'text/html', body: `
       <iframe sandbox="allow-scripts allow-same-origin allow-forms" src="${url}?filament_host=selection"></iframe>
       <script>window.addEventListener('message', event => {
         if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
         const { type, request_id } = event.data;
-        if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'selection', filament_ids:[10]}, location.origin)
+        if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'selection', filament_ids:[10],
+          ${hostSendsIdentity ? `expected_filaments: [{id:10,manufacturer_id:7,designation:'Fixture PLA',material_type:'PLA',record_token:'${pickerRecordToken}'}]` : ''}
+        }, location.origin)
       })</script>` })
     if (path === '/editor-fixture') return route.fulfill({ contentType: 'text/html', body: `
       <iframe style="width: 640px; height: 520px" sandbox="allow-scripts allow-same-origin allow-forms" src="${url}?filament_host=editor"></iframe>
@@ -151,13 +168,30 @@ try {
     }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
     if (path.endsWith('/colors')) return route.fulfill({ json: { items: [], total: 0 } })
-    if (path.endsWith('/filaments') && req.method() === 'GET') return route.fulfill({ json: { items: [filament], total: 1 } })
+    if (path.endsWith('/filaments') && req.method() === 'GET') {
+      libraryReads++
+      const requestedToken = new URL(req.url()).searchParams.get('include_record_token') === 'true'
+      const record_token = requestedToken && supportsRecordToken ? pickerRecordToken : undefined
+      return route.fulfill({ json: { items: [{ ...filament, record_token }], total: 1 } })
+    }
     if (path.endsWith('/filaments') && req.method() === 'POST') {
       writes.push(req.postDataJSON())
       return route.fulfill({ json: { id: 11 } })
     }
     if (path.endsWith('/batches') && req.method() === 'POST') {
-      assert.deepEqual(req.postDataJSON(), { filament_ids: [10], mode: 'fill' })
+      const hostSelection = new URL(req.frame().url()).searchParams.get('filament_host') === 'selection'
+      const { id, manufacturer_id, designation, material_type } = filament
+      assert.deepEqual(req.postDataJSON(), {
+        filament_ids: [10], mode: 'fill',
+        ...(hostSelection && !hostSendsIdentity ? {} : { expected_filaments: [{
+          id, manufacturer_id, designation, material_type,
+          ...(hostPicker === 'current' || supportsRecordToken ? { record_token: pickerRecordToken } : {}),
+        }] }),
+      })
+      if (staleBatchOnce) {
+        staleBatchOnce = false
+        return route.fulfill({ status: 409, json: { detail: { code: 'filament_selection_changed', message: 'Stale selection' } } })
+      }
       return route.fulfill({ json: fixtureBatch })
     }
     if (path.endsWith('/batches/fixture-batch')) return route.fulfill({ json: fixtureBatch })
@@ -340,7 +374,21 @@ try {
   account = 7
 
   await page.getByRole('button', { name: 'Research library' }).click()
-  await page.getByRole('checkbox', { name: /Fixture PLA/ }).check()
+  const fallbackFilament = page.getByRole('checkbox', { name: /Fixture PLA/ })
+  const clearSelection = page.getByRole('button', { name: 'Clear selection' })
+  await fallbackFilament.check()
+  await clearSelection.click()
+  assert.equal(await fallbackFilament.isChecked(), false)
+  assert.equal(await page.getByRole('button', { name: 'Start research' }).isDisabled(), true)
+  await fallbackFilament.check()
+  const readsBeforeConflict = libraryReads
+  staleBatchOnce = true
+  await page.getByRole('button', { name: 'Start research' }).click()
+  await page.getByText('The filament library changed. Select your filaments again.').waitFor()
+  await fallbackFilament.waitFor()
+  assert.equal(libraryReads, readsBeforeConflict + 1)
+  assert.equal(await fallbackFilament.isChecked(), false)
+  await fallbackFilament.check()
   await page.getByRole('button', { name: 'Start research' }).click()
   await page.getByText('Confirmed density').waitFor()
   assert.equal(await page.getByRole('link', { name: /Back to Filaments/i }).count(), 0)
@@ -555,15 +603,22 @@ try {
   await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).waitFor()
   pairedProposal = null
 
-  hostPicker = true
+  hostPicker = 'legacy'
+  supportsRecordToken = false
+  await page.goto(`${url}?tab=library`)
+  await page.getByLabel('Search filament library').waitFor()
+  assert.equal(await page.locator('#library-picker').count(), 0)
+
+  hostPicker = 'current'
   await page.goto(`${url}?tab=library`)
   const picker = page.frameLocator('#library-picker')
   const pickFilament = picker.getByRole('checkbox', { name: 'Fixture PLA' })
   await pickFilament.check()
   await page.getByText('1 of 50 selected').waitFor()
   assert.equal(await page.getByLabel('Search filament library').isVisible(), false)
-  await pickFilament.uncheck()
+  await clearSelection.click()
   await page.getByText('0 of 50 selected').waitFor()
+  await pickFilament.locator('xpath=..').locator('input:not(:checked)').waitFor()
   assert.equal(await page.getByRole('button', { name: 'Start research' }).isDisabled(), true)
   await pickFilament.check()
   await page.getByRole('button', { name: 'Start research' }).click()
@@ -574,7 +629,14 @@ try {
   assert.equal(await frame.getByLabel('Search filament library').isVisible(), false)
   await frame.getByRole('button', { name: 'Start research' }).click()
   await frame.getByRole('heading', { name: 'Review queue' }).waitFor()
-  console.log('FilaBrain plugin page: chat, research sources, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
+  hostSendsIdentity = true
+  staleBatchOnce = true
+  await page.goto('https://fila.test/selection-fixture')
+  const startHostBatch = frame.getByRole('button', { name: 'Start research' })
+  await startHostBatch.click()
+  await frame.getByText('The filament library changed. Select your filaments again.').waitFor()
+  assert.equal(await startHostBatch.isDisabled(), true)
+  console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
 } finally {
   await browser.close()
 }

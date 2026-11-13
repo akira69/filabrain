@@ -3,6 +3,7 @@ import { api, fetchAllPages, getCsrfToken } from './shared/api'
 import { researchFieldLabel, researchOptionValue, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
 import type { Chat } from './chat'
+import type { ExpectedFilament } from './shared/filabrain-batches'
 
 type Value = ResearchOption['value'] | boolean | null
 type Fields = Record<string, Value>
@@ -15,7 +16,7 @@ export type ResearchDraft = {
   action: string
   selection?: Unit[]
 }
-export type SelectionContext = { mode: 'selection'; filament_ids: number[] }
+export type SelectionContext = { mode: 'selection'; filament_ids: number[]; expected_filaments?: ExpectedFilament[] }
 
 const route = '/filabrain'
 const sourceNotes = new Set([

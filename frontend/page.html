@@ -108,7 +108,10 @@
         </div>
       </div>
       <form id="library-research">
-        <p id="library-selected" role="status"></p>
+        <div class="actions">
+          <p id="library-selected" role="status"></p>
+          <button id="library-clear-selection" class="fm-btn fm-btn-outline" type="button" data-i18n="filaBrain.clearLibrarySelection" hidden>Clear selection</button>
+        </div>
         <div class="actions">
           <div class="form-field"><label for="library-mode">Research mode</label><select name="mode" id="library-mode">
             <option value="fill" data-i18n="researchBatches.mode.fill">Fill missing specs</option>

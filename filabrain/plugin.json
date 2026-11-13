@@ -2,7 +2,7 @@
   "plugin_key": "filabrain",
   "plugin_type": "integration",
   "name": "FilaBrain",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "icon": "icon.svg",
   "description": "Development preview. Research filament specifications and review source-backed proposals in FilaMan.",
   "author": "akira69",

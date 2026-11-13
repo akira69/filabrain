@@ -81,8 +81,16 @@ export function batchHref(id: string) {
   return `${page}?tab=batches&id=${encodeURIComponent(id)}`
 }
 
-export function createResearchBatch(filament_ids: number[], mode: BatchMode) {
-  return api.post<Batch>(route, { filament_ids, mode })
+export type ExpectedFilament = {
+  id: number
+  manufacturer_id: number
+  designation: string
+  material_type: string
+  record_token?: string | null
+}
+
+export function createResearchBatch(filament_ids: number[], mode: BatchMode, expected_filaments?: ExpectedFilament[]) {
+  return api.post<Batch>(route, { filament_ids, mode, expected_filaments })
 }
 
 function fieldRows(proposal: Proposal) {
