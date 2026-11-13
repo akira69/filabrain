@@ -44,6 +44,19 @@ class SupplierRateLimited(ValueError):
         self.seconds = max(1, min(31_536_000, round(seconds)))
 
 
+def _supplier_url(value: str):
+    if len(value) > 2048 or any(ch.isspace() or ord(ch) < 32 or ch == "\\" for ch in value):
+        raise ValueError("Expected a public supplier HTTP or HTTPS URL")
+    parsed = urlsplit(value)
+    port = {"https": 443, "http": 80}.get(parsed.scheme)
+    if (
+        port is None or not parsed.hostname or parsed.username is not None
+        or parsed.password is not None or parsed.port not in (None, port)
+    ):
+        raise ValueError("Expected a public supplier HTTP or HTTPS URL")
+    return parsed, port
+
+
 def public_link(value) -> str | None:
     if (
         not isinstance(value, str)
@@ -343,18 +356,7 @@ def _fetch_supplier(
 ) -> Evidence:
     deadline = time.monotonic() + 7
     for _ in range(4):
-        parsed = urlsplit(url)
-        port = 443 if parsed.scheme == "https" else 80
-        if (
-            parsed.scheme not in ("http", "https")
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.port not in (None, port)
-            or len(url) > 2048
-            or any(ch.isspace() or ord(ch) < 32 or ch == "\\" for ch in url)
-        ):
-            raise ValueError("Expected a public supplier HTTP or HTTPS URL")
+        parsed, port = _supplier_url(url)
         if _supplier_cooldowns.get(parsed.hostname):
             raise ValueError("HTTP 429 (rate limited; waiting before retry)")
         address = _public_address(parsed.hostname, port)
@@ -561,10 +563,15 @@ async def search_web(origin: str, query: str) -> list[str]:
         raise SearchEnginesUnavailable("Upstream search engines failed to return results")
     urls = []
     for row in data["results"]:
-        if isinstance(row, dict) and (url := public_link(row.get("url"))):
-            urls.append(url)
-            if len(urls) == 3:
-                break
+        if not isinstance(row, dict) or not (url := public_link(row.get("url"))):
+            continue
+        try:
+            _supplier_url(url)
+        except ValueError:
+            continue
+        urls.append(url)
+        if len(urls) == 3:
+            break
     return urls
 
 

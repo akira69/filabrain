@@ -458,12 +458,14 @@ async def test_datasheet_extracts_only_recommended_temperatures(section, expecte
     assert {item["field"]: item["value"] for item in values} == expected
 
 
-@pytest.mark.parametrize("pdf_state", ["ok", "oversized", "sitemap", "same_page", "manual", "conflict"])
+@pytest.mark.parametrize("pdf_state", ["ok", "oversized", "sitemap", "sitemap_both_oversized", "same_page", "manual", "conflict"])
 async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed, db_session, monkeypatch, pdf_state):
     from filabrain import proposals
 
     site = "https://manufacturer.example/"
     product = site + "products/pla-basic"
+    storefront = site + "store/pla-basic"
+    downloads = site + "downloads/pla-basic"
     sheet = "https://cdn.example/technical.pdf"
     replacement = site + "pla-basic.pdf"
     unrelated = "https://other.example/products/pla-basic"
@@ -473,8 +475,12 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
     )
 
     async def fetch(url, **_):
+        if url == storefront:
+            raise ValueError(proposals.SUPPLIER_TOO_LARGE)
+        if url == downloads:
+            return proposals.Evidence(url, "PLA Basic downloads", "", datasheets=(replacement,))
         if url == sheet:
-            if pdf_state in ("oversized", "sitemap", "same_page"):
+            if pdf_state in ("oversized", "sitemap", "sitemap_both_oversized", "same_page"):
                 raise ValueError(proposals.SUPPLIER_TOO_LARGE)
             if pdf_state == "manual":
                 return proposals.replace(pdf, manual=True, text="")
@@ -485,11 +491,15 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
         return proposals.Evidence(url, "PLA Basic | Fixture Brand", "PLA Basic Density 1.31 g/cm³", datasheets=linked if url == product else ())
 
     async def search(_url, query):
-        return [replacement] if pdf_state == "oversized" and "filetype:pdf" in query else []
+        if "filetype:pdf" in query:
+            return [replacement] if pdf_state == "oversized" else []
+        if pdf_state == "sitemap_both_oversized" and query.startswith("site:manufacturer.example ") and "technical data sheet" not in query:
+            return [product]
+        return []
 
     async def sitemap(url):
         assert url.startswith(site)
-        return {"sitemap": [replacement], "same_page": [product]}.get(pdf_state, [])
+        return {"sitemap": [replacement], "sitemap_both_oversized": [downloads], "same_page": [product]}.get(pdf_state, [])
 
     async def extract(*args, **kwargs):
         return [{"field": "density_g_cm3", "value": 1.31, "sources": [{"url": product, "title": "Store", "evidence": "1.31 g/cm³"}]}], []
@@ -515,7 +525,8 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
         "search_url": "http://searxng:8080", "model_url": "http://ollama:11434/v1", "model_id": "fixture",
     })).is_success
 
-    for url in (product, unrelated):
+    original = storefront if pdf_state == "sitemap_both_oversized" else product
+    for url in ((original,) if pdf_state == "sitemap_both_oversized" else (original, unrelated)):
         response = await installed.post(f"{BASE}/proposals", json={
             "mode": "create", "product_url": url,
             "identity": {"manufacturer": "Fixture Brand", "designation": "PLA Basic"},
@@ -523,7 +534,7 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
         assert response.is_success, response.text
         result = response.json()
         density = next((s for s in result["suggestions"] if s["field"] == "density_g_cm3"), None)
-        if url == product:
+        if url == original:
             if pdf_state == "same_page":
                 assert {"code": "supplier_download_limit", "url": sheet} in result["issues"]
                 assert not any(issue["code"] == "supplier_alternative_found" for issue in result["issues"])
@@ -534,7 +545,7 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
                 assert any(issue["code"] == "conflict" and issue.get("field") == "density_g_cm3" for issue in result["issues"])
             else:
                 assert density and density["value"] == 1.24
-                assert density["sources"][0]["url"] == (replacement if pdf_state in ("oversized", "sitemap") else sheet)
+                assert density["sources"][0]["url"] == (replacement if pdf_state in ("oversized", "sitemap", "sitemap_both_oversized") else sheet)
                 assert any(issue["code"] == "source_disagreement" and issue.get("field") == "density_g_cm3" for issue in result["issues"])
         else:
             assert density is None
@@ -575,8 +586,8 @@ async def test_research_settings_reject_non_domain_sources(installed, domain):
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("blocked", [False, True])
-async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs(installed, monkeypatch, blocked):
+@pytest.mark.parametrize("case", ["match", "blocked", "specs_after_listing"])
+async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs(installed, monkeypatch, case):
     from filabrain import proposals
 
     # A client using the earlier preview must not be able to turn off the catalogs.
@@ -594,7 +605,7 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
     catalogs = set()
     archived = []
     supplier_url = "https://shop.supplier.example/fixture-pla"
-    wrong = "https://shop.supplier.example/unrelated"
+    wrong = "https://shop.supplier.example/listing"
 
     async def search(_url, query):
         queries.append(query)
@@ -612,8 +623,11 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
 
     async def fetch(url, **_):
         fetched.append(url)
-        if blocked and url == supplier_url:
+        if case == "blocked" and url == supplier_url:
             raise ValueError("HTTP 403")
+        if case == "specs_after_listing":
+            text = "Fixture Brand Fixture PLA"
+            return proposals.Evidence(url, "Fixture PLA", text if url == wrong else text + " Density 1.24 g/cm³")
         return proposals.Evidence(url, "Unrelated" if url == wrong else "Fixture PLA", "Other product" if url == wrong else "Fixture PLA")
 
     async def archive(url, **_):
@@ -632,7 +646,7 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
     assert "site:supplier.example Fixture Brand Fixture PLA" in queries
     assert all("disabled.example" not in query for query in queries)
     assert fetched == [wrong, supplier_url]
-    assert archived == ([supplier_url] if blocked else [])
+    assert archived == ([supplier_url] if case == "blocked" else [])
     assert catalogs == {"filamandb", "open_filament_database"}
 
 
@@ -809,6 +823,8 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     (Response(200, json={"results": [{"url": "https://maker.example/specs"}]}), 200),
     (Response(200, json={"results": []}), 502),
     (Response(200, json={"results": [{"url": ""}]}), 502),
+    (Response(200, json={"results": [{"url": "https://maker.example:8443/specs"}]}), 502),
+    (Response(200, json={"results": [{"url": "https://maker.example:443/specs"}]}), 200),
     (Response(200, json={"results": [None, {}, {}, {"url": "https://maker.example/specs"}]}), 200),
     (Response(200, json={"status": "ok"}), 502),
     (Response(403), 502),

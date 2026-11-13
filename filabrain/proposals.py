@@ -1757,6 +1757,7 @@ async def research_products(
 
     async def find_supplier_page(domain):
         urls = await search(f"site:{domain} {supplier_query}")
+        matched_pages = {}
         failed_pages = {}
         link = None
         try:
@@ -1767,14 +1768,14 @@ async def research_products(
                     link = supplier_page_url(url)
                     page = await supplier(link)
                     if page and _supplier_scopes(supplier_identity, page, snapshot):
-                        return {link: page}
+                        matched_pages[link] = page
                     if page is None:
                         failed_pages[link] = None
         except TimeoutError:
             if link is not None:
                 fetch_errors[link] = "Request timed out"
                 failed_pages[link] = None
-        return failed_pages
+        return matched_pages or failed_pages
 
     supplier_urls = [*direct_urls, *(supplement if guidance else []), *catalog_urls, *different_sites.values()]
     pages = first_pages | await check_pages(supplier_urls)
@@ -1799,7 +1800,8 @@ async def research_products(
     ]
     recovered_urls: set[str] = set()
     fallback_docs: set[str] = set()
-    official_oversized = {url for url in oversized if url in linked_sheets or _on_manufacturer_site(url, document_domain)}
+    oversized_sheets = set(oversized) & linked_sheets.keys()
+    official_oversized = oversized_sheets | {url for url in oversized if _on_manufacturer_site(url, document_domain)}
     line = set(re.findall(r"[^\W_]+", " ".join(_line(identity.designation, identity.color))))
     color = set(_tokens(identity.color))
     sku = "-".join(_product_key(lookup_sku or variant_sku))
@@ -1811,12 +1813,16 @@ async def research_products(
             values and known_variant[key] in (None, ()) for key, values in _sheet_variant_values(sheet).items()
         )
 
-    async def check_alternatives(host, urls, *, recover_sheet=False):
+    def has_usable_fallback():
+        return any(not needs_variant(authoritative_docs[url]) for url in fallback_docs)
+
+    async def check_alternatives(host, urls, *, recover_sheet=False, recover_product=True):
         links = list(dict.fromkeys(
             supplier_page_url(link) for url in urls if (link := public_link(url))
             and _site_host(link) == host and urlsplit(link).path not in ("", "/")
         ))[:3]
         alternatives = await check_pages(links)
+        alternative = None
         for link in links:
             page = checked_pages.get(link)
             if not page or _site_host(page.url) != host:
@@ -1832,13 +1838,15 @@ async def research_products(
                     sheet.url for url in page.datasheets
                     if (sheet := linked_sheets.get(url)) and sheet.url in authoritative_docs
                 )
+            if not recover_product or alternative:
                 continue
             if resolve_pasted_url and not pasted_page and page.product and page.product.get("designation"):
                 issues.append({
                     "code": "possible_match", "name": page.title[:255], "source": "Web search",
                     "url": page.url, "product_url": page.url,
                 })
-                return page.url
+                alternative = page.url
+                continue
             official = _on_manufacturer_site(page.url, manufacturer_domain)
             if (
                 _supplier_scopes(supplier_identity, replace(page, manufacturer_page=official), snapshot)
@@ -1846,8 +1854,8 @@ async def research_products(
             ):
                 pages.update({url: result for url, result in alternatives.items() if result})
                 pages.setdefault(link, page)
-                return page.url
-        return None
+                alternative = page.url
+        return alternative
 
     product_line = " ".join(_line(identity.designation, identity.color)) or lookup_sku
     try:
@@ -1865,7 +1873,7 @@ async def research_products(
                         authoritative_docs[sheet.url] = replace(sheet, manufacturer_page=True)
                         fallback_docs.add(sheet.url)
             # A sheet that requires an unknown variant can still be rejected after supplier checks.
-            usable_fallback = any(not needs_variant(authoritative_docs[url]) for url in fallback_docs)
+            usable_fallback = has_usable_fallback()
             # shortcut: check two sites per lookup, raise the budget if common searches need more.
             fallback_by_host = {}
             if document_domain and not usable_fallback:
@@ -1881,6 +1889,8 @@ async def research_products(
             for host, (sitemap_origin, original) in list(fallback_by_host.items())[:2]:
                 if original in recovered_urls:
                     continue
+                recover_sheet = host == document_domain and bool(oversized_sheets)
+                recover_product = original not in oversized_sheets
                 matches = []
                 path_terms = url_words(original) - {"store", "shop", "products", "product"}
                 for url in await supplier_sitemap_urls(sitemap_origin):
@@ -1895,14 +1905,16 @@ async def research_products(
                         matches.append((link, sku_match, len(words & color)))
                 matches.sort(key=lambda match: (-match[1], -match[2]))
                 alternative = await check_alternatives(
-                    host, [url for url, _, _ in matches[:2]], recover_sheet=original in linked_sheets,
+                    host, [url for url, _, _ in matches[:2]],
+                    recover_sheet=recover_sheet, recover_product=recover_product,
                 )
                 query = supplier_query if identity.designation or lookup_sku else " ".join(sorted(url_words(original)))
-                if not alternative and query:
-                    alternative = await check_alternatives(
+                if query and (not alternative or (recover_sheet and not has_usable_fallback())):
+                    found = await check_alternatives(
                         host, await search(f"site:{host} {query} technical data sheet"),
-                        recover_sheet=original in linked_sheets,
+                        recover_sheet=recover_sheet, recover_product=recover_product and not alternative,
                     )
+                    alternative = alternative or found
                 if alternative:
                     recovered_urls.add(original)
                     issues.append({"code": "supplier_alternative_found", "url": alternative})
