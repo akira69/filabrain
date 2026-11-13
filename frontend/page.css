@@ -1,8 +1,8 @@
 :root {
   color-scheme: dark;
-  --bg: #0c1612;
-  --bg-elevated: #13261d;
-  --bg-soft: #183225;
+  --bg: #15231d;
+  --bg-elevated: #1b2c24;
+  --bg-soft: #24382f;
   --input-bg: var(--bg-soft);
   --text: #e9f3ec;
   --text-muted: #b5c7bd;
@@ -28,9 +28,9 @@
 :root[data-theme="light"] .filabrain-mark [stroke="#c7adff"] { stroke: #6941a5; }
 :root[data-theme="light"] .filabrain-mark [fill="#c7adff"] { fill: #6941a5; }
 :root[data-theme="dark"] {
-  --bg: #0b0d12;
-  --bg-elevated: #141825;
-  --bg-soft: #1a2032;
+  --bg: #191e28;
+  --bg-elevated: #212734;
+  --bg-soft: #2a3343;
   --text: #eef1f7;
   --text-muted: #9aa4b7;
   --border: #374052;
@@ -42,15 +42,12 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 1rem/1.5 var(
 main { max-width: 76rem; margin: auto; padding: clamp(.65rem, 2vw, 1.25rem); }
 #plugin-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: .5rem 1.5rem;
   margin-bottom: 1rem;
 }
-@media (max-width: 800px) {
-  #plugin-header { grid-template-columns: minmax(0, 1fr) auto; }
-  #plugin-header nav { grid-column: 1 / -1; grid-row: 2; }
-}
+#plugin-header nav { grid-column: 1 / -1; grid-row: 2; }
 h1, h2, h3 { line-height: 1.2; }
 #plugin-header h1 { margin: 0; font: 700 clamp(1.5rem, 5vw, 2rem) var(--font-serif); }
 .filabrain-heading { display: flex; align-items: center; gap: .7rem; }
@@ -59,7 +56,8 @@ h1, h2, h3 { line-height: 1.2; }
 #research-heading { font-size: 1.25rem; }
 
 #plugin-header nav, .actions { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
-#plugin-header nav button { background: var(--bg-elevated); }
+#plugin-header nav button { display: inline-flex; align-items: center; background: var(--bg-elevated); }
+.action-icon { flex: none; margin-inline-end: .35rem; }
 #plugin-header nav button[aria-current] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
 a { color: var(--accent); }
 button, input, textarea, select { font: inherit; color: inherit; }

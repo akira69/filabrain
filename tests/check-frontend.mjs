@@ -172,6 +172,7 @@ try {
   await page.getByRole('textbox', { name: 'Your question' }).waitFor()
   assert.equal(await setupModel.isVisible(), false)
   assert.equal(await page.getByRole('button', { name: 'Guide', exact: true }).count(), 1)
+  assert.equal(await page.locator('#plugin-header [data-tab] svg[aria-hidden="true"]').count(), 5)
 
   chatModelId = ''
   canConfigure = false
@@ -270,7 +271,9 @@ try {
   await page.getByText('Search options', { exact: true }).click()
   await page.getByLabel('Material', { exact: true }).fill('PLA')
   await page.getByLabel('Diameter (mm)').fill('1.75')
-  await page.getByRole('button', { name: 'Find specifications' }).click()
+  const findSpecs = page.getByRole('button', { name: 'Find specifications' })
+  assert.equal(await findSpecs.locator('svg[aria-hidden="true"]').count(), 1)
+  await findSpecs.click()
   await page.getByRole('link', { name: 'Fixture catalog' }).first().waitFor()
   await page.locator('#research-follow-up [data-model-trigger]').waitFor()
   await page.getByRole('checkbox', { name: /Density/ }).check()
@@ -285,11 +288,15 @@ try {
   await page.getByRole('checkbox', { name: /Fixture PLA/ }).check()
   await page.getByRole('button', { name: 'Start research' }).click()
   await page.getByText('Confirmed density').waitFor()
+  assert.equal(await page.getByRole('link', { name: /Back to Filaments/i }).count(), 0)
+  await page.locator('.fm-card.batch-toolbar').waitFor()
   await page.getByRole('checkbox', { name: /Density/ }).check()
   await page.getByRole('button', { name: /Approve/ }).click()
   await page.getByRole('button', { name: 'Apply approved changes' }).click()
   await page.getByRole('dialog').getByRole('button', { name: /Apply/ }).click()
   await page.getByRole('heading', { name: 'Apply report' }).waitFor()
+  await page.getByRole('link', { name: 'All batches' }).click()
+  await page.getByRole('region', { name: 'Research batches' }).getByText('No research batches yet.').waitFor()
 
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   const settingsTitle = page.getByRole('heading', { name: 'Model settings', exact: true })

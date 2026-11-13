@@ -153,6 +153,7 @@
   },
   "researchBatches": {
     "title": "Research batches",
+    "allBatches": "All batches",
     "selected": "Research selected",
     "limit": "Select at most 50 filaments for research.",
     "chooseMode": "Choose a research mode",

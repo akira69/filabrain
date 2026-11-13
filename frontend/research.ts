@@ -352,7 +352,8 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     saved.hidden = true
     notice.textContent = ''
     conversation.hidden = false
-    message(prompt || label || (action === 'standardize' ? buttons[1].textContent! : buttons[0].textContent!), 'user')
+    const actionLabel = buttons[action === 'standardize' ? 1 : 0].textContent?.trim() || ''
+    message(prompt || label || actionLabel, 'user')
     const answer = message(t('filaBrain.searching'), 'note')
     if (!prompt) {
       optionsSummary.hidden = false

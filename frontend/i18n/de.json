@@ -153,6 +153,7 @@
   },
   "researchBatches": {
     "title": "Recherche-Stapel",
+    "allBatches": "Alle Rechercheläufe",
     "selected": "Auswahl recherchieren",
     "limit": "Wähle höchstens 50 Filamente für die Recherche aus.",
     "chooseMode": "Recherchemodus wählen",

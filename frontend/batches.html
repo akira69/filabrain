@@ -1,14 +1,15 @@
 <div id="filament-batches" class="fm-admin-page">
-    <a href="/filaments" class="fm-admin-back">&larr; <span data-i18n="filaments.backToFilaments">Back to Filaments</span></a>
-    <div class="fm-list-toolbar">
-      <h1 data-i18n="researchBatches.title">Research batches</h1>
-      <a href="?tab=batches" class="fm-btn fm-btn-outline" data-batch-history-link hidden data-i18n="researchBatches.title">Research batches</a>
-    </div>
-    <p class="batch-muted" data-i18n="researchBatches.retention">Reports are kept for 30 days after a batch finishes or is canceled.</p>
-    <p data-batch-message role="status" class="batch-message" data-i18n="common.loading">Loading…</p>
-    <div data-batch-history hidden></div>
+    <section class="fm-card batch-overview" aria-labelledby="batch-title">
+      <header class="batch-row">
+        <h2 id="batch-title" data-i18n="researchBatches.title">Research batches</h2>
+        <a href="?tab=batches" class="fm-btn fm-btn-outline" data-batch-history-link hidden data-i18n="researchBatches.allBatches">All batches</a>
+      </header>
+      <p class="batch-muted" data-i18n="researchBatches.retention">Reports are kept for 30 days after a batch finishes or is canceled.</p>
+      <p data-batch-message role="status" class="batch-message" data-i18n="common.loading">Loading…</p>
+      <div data-batch-history hidden></div>
+    </section>
     <div data-batch-workspace hidden>
-      <div class="batch-row batch-toolbar">
+      <div class="fm-card batch-row batch-toolbar">
         <p data-batch-progress role="status"></p>
         <div class="batch-actions">
           <button type="button" class="fm-btn fm-btn-outline" data-action="cancel" data-i18n="researchBatches.cancel">Cancel batch</button>

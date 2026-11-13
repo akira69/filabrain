@@ -504,7 +504,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       const summaries = await api.get<Summary[]>(route, { cache: 'no-store' })
       history.hidden = false
       history.innerHTML = summaries.length ? `<ul class="batch-history">${summaries.map(summary => `
-        <li class="fm-card batch-row">
+        <li class="batch-row">
           <a href="${escapeHtml(batchHref(summary.id))}">${escapeHtml(tr('mode.' + summary.mode))}</a>
           <span>${escapeHtml(new Date(summary.created_at).toLocaleString(document.documentElement.lang))}</span>
           <small>${escapeHtml(tr('historyState', { status: tr('status.' + summary.status), total: summary.total }))}</small>

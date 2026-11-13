@@ -153,6 +153,7 @@
   },
   "researchBatches": {
     "title": "Lots de recherche",
+    "allBatches": "Tous les lots",
     "selected": "Rechercher la sélection",
     "limit": "Sélectionnez au maximum 50 filaments pour la recherche.",
     "chooseMode": "Choisir un mode de recherche",
