@@ -753,12 +753,43 @@ try {
   await page.getByLabel('Diameter (mm)').fill('1.75')
   await page.getByRole('button', { name: 'Find specifications' }).click()
   await page.getByRole('checkbox', { name: /Density/ }).check()
+  const otherDraft = await context.newPage()
+  otherDraft.setDefaultTimeout(5_000)
+  await otherDraft.goto(url)
+  await otherDraft.locator('[data-chat-history] summary').click()
+  const researchTitle = /Find specifications · Fixture Brand Fixture PLA/
+  await otherDraft.getByRole('button', { name: researchTitle }).click()
+  await otherDraft.locator('#research-options > summary').click()
+  await otherDraft.getByLabel('Product name', { exact: true }).fill('Fixture ASA')
+  await otherDraft.getByRole('button', { name: 'Find specifications' }).click()
+  await otherDraft.getByRole('checkbox', { name: /Density/ }).check()
+  await otherDraft.getByRole('button', { name: 'Save new filament' }).click()
+  const otherConfirm = otherDraft.getByRole('dialog').getByRole('button', { name: 'Create filament' })
+  await otherConfirm.waitFor()
+
   await page.getByRole('button', { name: 'Save new filament' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Create filament' }).click()
   await page.getByRole('link', { name: 'Open saved filament' }).nth(1).waitFor()
   assert.equal(writes.length, 2)
   assert.equal(writes[1].designation, 'Fixture PETG')
   assert.notEqual(savePaths[1], savePaths[0])
+  await otherConfirm.click()
+  await otherDraft.getByRole('link', { name: 'Open saved filament' }).nth(1).waitFor()
+  assert.deepEqual(writes.map(write => write.designation), ['Fixture PLA', 'Fixture PETG', 'Fixture ASA'])
+  assert.equal(new Set(savePaths).size, 3)
+  await otherDraft.reload()
+  for (const tab of [otherDraft, page]) {
+    await tab.locator('[data-chat-history] summary').click()
+    await tab.getByRole('button', { name: researchTitle }).click()
+    const savedLinks = tab.getByRole('link', { name: 'Open saved filament' })
+    await savedLinks.first().waitFor()
+    assert.deepEqual(
+      await savedLinks.evaluateAll(links => links.map(link => link.getAttribute('href')).sort()),
+      [...savePaths].sort(),
+      'History keeps the original save and both saves made from separate tabs',
+    )
+    assert.equal(await tab.getByRole('button', { name: 'Save new filament' }).count(), 0)
+  }
   console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
 } finally {
   await browser.close()

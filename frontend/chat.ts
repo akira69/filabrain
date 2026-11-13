@@ -134,7 +134,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
         let selected = conversation
         try {
           const latest = readHistory().find(item => item.id === conversation.id)
-          if (latest && hasReceipt(latest, conversation.research?.saveId ?? conversation.id)) selected = latest
+          if (latest) selected = mergeConversation(conversation, latest)
         } catch { /* Keep the in-memory transcript available. */ }
         const researchChat = !!(selected.researching || selected.research)
         reset(researchChat)
@@ -199,6 +199,16 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     return conversation.messages.some(message => message.savedDraftId === draftId)
   }
 
+  function mergeConversation(local: Conversation, stored: Conversation): Conversation {
+    const localDraftSaved = local.research && hasReceipt(stored, local.research.saveId ?? local.id)
+    const storedDraftSaved = stored.research && hasReceipt(local, stored.research.saveId ?? stored.id)
+    const useStored = localDraftSaved || (!storedDraftSaved && lastUpdated(stored) >= lastUpdated(local))
+    const [latest, other] = useStored ? [stored, local] : [local, stored]
+    const receipts = other.messages.filter(message => message.savedDraftId && !hasReceipt(latest, message.savedDraftId))
+    const research = useStored ? (storedDraftSaved ? undefined : stored.research) : local.research
+    return { ...latest, research, messages: [...latest.messages, ...receipts] }
+  }
+
   function draftId() {
     return current.research?.saveId ?? current.id
   }
@@ -213,8 +223,8 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       current.title = current.messages[0].content.slice(0, 100)
     }
     const messages = current.messages.slice(-60)
-    const receipt = [...current.messages].reverse().find(message => message.savedDraftId)
-    if (receipt && !messages.includes(receipt)) messages.unshift(receipt)
+    const earlierReceipts = current.messages.slice(0, -60).filter(message => message.savedDraftId)
+    messages.unshift(...earlierReceipts)
     const snapshot = { ...current, model: modelPicker.selected, updatedAt: Date.now(), messages }
     saved = [snapshot, ...saved.filter(item => item.id !== snapshot.id)].slice(0, 20)
     if (storageKey) {
@@ -222,14 +232,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
         const byId = new Map<string, Conversation>()
         for (const item of [...saved, ...readHistory()]) {
           const previous = byId.get(item.id)
-          if (previous?.research && hasReceipt(item, previous.research.saveId ?? previous.id)) {
-            byId.set(item.id, item)
-          } else if (!previous || (
-            !(item.research && hasReceipt(previous, item.research.saveId ?? item.id)) &&
-            lastUpdated(item) >= lastUpdated(previous)
-          )) {
-            byId.set(item.id, item)
-          }
+          byId.set(item.id, previous ? mergeConversation(previous, item) : item)
         }
         saved = [...byId.values()].sort((a, b) => lastUpdated(b) - lastUpdated(a)).slice(0, 20)
         historyStorage().setItem(storageKey, JSON.stringify(saved))
