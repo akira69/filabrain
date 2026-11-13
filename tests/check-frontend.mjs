@@ -49,6 +49,14 @@ try {
   let hostEditorToken
   let editorMode = 'edit'
   let recordUnavailable = false
+  const variantWarning = 'Choose the product page before selecting a value.'
+  const variantIssue = {
+    code: 'conflict', field: 'drying_temp_c', requires_product_choice: true,
+    options: [
+      { value: 50, sources: [{ title: 'Variant A datasheet', url: 'https://manufacturer.test/a.pdf' }] },
+      { value: 60, sources: [{ title: 'Variant B datasheet', url: 'https://manufacturer.test/b.pdf' }] },
+    ],
+  }
   let supportsRecordToken = true
   let hostSendsIdentity = false
   await context.route('https://fila.test/**', async route => {
@@ -146,6 +154,11 @@ try {
         { code: 'manufacturer_color_reference', name: 'RAL 9005 Signal Black', url: evidence[0].url },
         { code: 'manufacturer_website_found', name: manufacturer.name, source: 'FilaManDB', url: 'https://manufacturer.test/' },
         { code: 'possible_match', name: 'Fixture PLA', source: 'FilaManDB', url: evidence[0].url, product_url: evidence[0].url },
+        ...(target.product_url ? [
+          variantIssue,
+          { code: 'ambiguous_match', source: 'Fixture catalog' },
+          { code: 'unavailable_source', source: 'Fixture catalog', url: evidence[0].url, reason: 'Timed out' },
+        ] : []),
       ] : [] } })
     }
     if (path.endsWith('/settings/mcp')) {
@@ -636,6 +649,12 @@ try {
   const researchPage = frame.getByRole('button', { name: 'Research this page' })
   await researchPage.waitFor()
   assert.equal(await researchPage.locator('svg[aria-hidden=true]').count(), 1)
+  recordUnavailable = true
+  const requestsBeforeFailedClick = proposalRequests
+  await researchPage.click()
+  await frame.locator('#research-status').getByText(/HTTP 503/).waitFor()
+  assert.equal(proposalRequests, requestsBeforeFailedClick)
+  recordUnavailable = false
   await researchPage.click()
   await frame.getByRole('log').getByText('Research this page', { exact: true }).waitFor()
   await densityChoice.waitFor()
@@ -667,6 +686,17 @@ try {
   await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
   await frame.getByRole('log').getByText('Focus on the material finish', { exact: true }).waitFor()
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).waitFor()
+  const variantArchive = frame.locator('.research-history').filter({ hasText: 'Variant A datasheet' }).first()
+  await variantArchive.locator('summary').click()
+  await variantArchive.getByText(/Several products or variants could match/).waitFor()
+  const archivedFailure = variantArchive.getByText(/Fixture catalog.*Timed out/)
+  assert.equal(await archivedFailure.getByRole('link', { name: 'Open source' }).getAttribute('href'), evidence[0].url)
+  const variantGroup = variantArchive.getByRole('group', { name: 'Drying temperature (°C)', exact: true })
+  await variantGroup.getByText(variantWarning, { exact: true }).waitFor()
+  for (const option of variantIssue.options) {
+    const row = variantGroup.locator('.research-history-value').filter({ hasText: `: ${option.value}` })
+    assert.equal(await row.getByRole('link', { name: option.sources[0].title }).getAttribute('href'), option.sources[0].url)
+  }
   assert.equal(proposalRequests, requestsBeforeReopen, 'reopening editor research does not run another lookup')
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).check()
   await page.reload()
