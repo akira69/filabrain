@@ -50,11 +50,15 @@ When a manufacturer's website is missing, FilaBrain checks FilaManDB first and c
 
 On FilaMan 2.1.0 or later, use the built-in MCP for general inventory work. Go to **Admin → App Settings → AI Assistants (MCP)** for client setup. The built-in endpoint is `/mcp` and uses `Authorization: ApiKey <FilaMan API key>`.
 
-Use FilaBrain's MCP to research filament specifications or send proposals to an open filament editor for review. Turn on **Enable MCP access** in FilaBrain's settings and configure your client for Streamable HTTP at `/api/v1/filabrain/mcp` on the FilaMan origin. Use a FilaMan API key as the bearer token. The plugin checks the key's permissions for each tool.
+Use FilaBrain's MCP to research filament specifications or send proposals to an open filament editor for review. Turn on **Enable the FilaBrain MCP endpoint** in FilaBrain's settings and configure your client for Streamable HTTP at `/api/v1/filabrain/mcp` on the FilaMan origin. Use a FilaMan API key as the bearer token. The plugin checks the key's permissions for each tool.
 
-FilaMan's **Allow write access** setting applies only to the built-in endpoint. FilaBrain's separate **Enable MCP access** switch controls its endpoint, where permitted keys can still create filaments and spools while the built-in server is read-only.
+FilaMan's **Allow write access** setting applies only to the built-in endpoint. FilaBrain's separate **Enable the FilaBrain MCP endpoint** switch controls its endpoint, where permitted keys can still create filaments and spools while the built-in server is read-only.
 
 Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for FilaMan, configure the proxy to preserve the public `Host` and overwrite `X-Forwarded-Proto` with the scheme it received. Set `FILABRAIN_MCP_TRUSTED_PROXY_IPS` in the FilaMan process or container environment to the exact source IP of that proxy as seen by FilaMan. Separate multiple proxy IPs with commas. Keep direct clients off the proxy addresses.
+
+### Research through FilaMan's built-in MCP
+
+On a FilaMan build with plugin MCP tool support, enable the built-in MCP server and add `filabrain-research_filament` to the host's `MCP_PLUGIN_READ_TOOLS` environment setting. Restart FilaMan. Connect to `/mcp` with `Authorization: ApiKey <FilaMan API key>` and give the key `filaments:read` access. Use HTTPS for remote clients. The tool returns suggestions and sources for review without saving them. It works with FilaBrain's separate endpoint switched off. Use the separate endpoint for pairing a client to an open editor.
 
 ## Verify a package
 

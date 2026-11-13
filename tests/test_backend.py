@@ -28,7 +28,7 @@ async def installed(auth_client, db_session, monkeypatch):
     plugin = InstalledPlugin(
         plugin_key="filabrain",
         name="FilaBrain",
-        version="1.0",
+        version=json.loads((ROOT / "filabrain/plugin.json").read_text())["version"],
         plugin_type="integration",
         is_active=True,
     )
@@ -38,6 +38,7 @@ async def installed(auth_client, db_session, monkeypatch):
     monkeypatch.setattr(plugin_service, "PLUGINS_DIR", ROOT)
     monkeypatch.setattr(app.router, "routes", list(app.router.routes))
     monkeypatch.setattr(app.router, "lifespan_context", app.router.lifespan_context)
+    monkeypatch.setattr(app.state, "plugin_mcp_tools", {}, raising=False)
     assert mount_plugin_router_on_app(app, plugin.plugin_key)
     from filabrain.db import Base as PluginBase
 
@@ -777,6 +778,100 @@ async def test_stock_host_session_pairing_and_built_in_proposals(
         await installed.put(f"{BASE}/settings/mcp", json={"mcp_enabled": False})
         assert (await external.post(f"{BASE}/mcp", json=payload)).status_code == 404
     assert (await installed.post(f"{BASE}/proposals", json=target)).status_code == 200
+
+
+@pytest.mark.parametrize("oversized", [False, True])
+async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_session, monkeypatch, oversized):
+    from app.core.config import settings
+    from app.models import AppSettings
+
+    if not hasattr(settings, "mcp_plugin_read_tools"):
+        pytest.skip("Host does not support MCP plugin tools")
+
+    from filabrain import research
+
+    async def proposal(_db, identity, **hints):
+        assert identity.sku == "ABC-123"
+        assert hints["product_url"] == "https://manufacturer.test/pla"
+        assert hints["deadline"] is not None and hints["release_read"]
+        return {
+            "suggestions": [{
+                "field": "density_g_cm3", "value": 1.24,
+                "sources": [{"url": hints["product_url"], "evidence": "1.24 g/cm³"}]
+                * (1000 if oversized else 1),
+            }],
+            "issues": [],
+        }
+
+    monkeypatch.setattr(research, "research_products", proposal)
+    name = "filabrain-research_filament"
+    monkeypatch.setattr(settings, "mcp_plugin_read_tools", name)
+    row = await db_session.get(AppSettings, 1)
+    if row is None:
+        row = AppSettings(id=1)
+        db_session.add(row)
+    row.mcp_enabled = True
+    row.mcp_write_enabled = False
+    await db_session.commit()
+    key = await installed.post("/api/v1/me/api-keys", json={"name": "Host MCP", "scopes": ["filaments:read"]})
+    assert key.status_code == 201
+    assert (await installed.put(f"{BASE}/settings/mcp", json={"mcp_enabled": False})).status_code == 200
+    token = key.json()["token"]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://filaman.test") as client:
+        listing = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        response = await client.post("/mcp", json=listing, headers={"Authorization": f"ApiKey {token}"})
+        names = {tool["name"] for tool in response.json()["result"]["tools"]}
+        assert name in names
+        assert "filabrain-propose_filament" not in names
+        assert "create_filament" not in names
+        request = {
+            **listing, "method": "tools/call",
+            "params": {"name": name, "arguments": {
+                "identity": {"sku": "ABC-123"}, "product_url": "https://manufacturer.test/pla",
+            }},
+        }
+        response = await client.post("/mcp", json=request, headers={"Authorization": f"ApiKey {token}"})
+        result = response.json()["result"]
+        parsed = json.loads(result["content"][0]["text"])
+        assert result["isError"] is oversized, result
+        if oversized:
+            assert parsed["http_status"] == 422
+        else:
+            assert parsed["proposal"]["suggestions"][0]["sources"][0]["evidence"] == "1.24 g/cm³"
+        response = await client.post(f"{BASE}/mcp", json=listing, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 404
+
+    assert not (await db_session.scalars(select(Filament))).all()
+
+
+async def test_research_deadline_preserves_verified_datasheet(installed, db_session, monkeypatch):
+    import asyncio
+    from filabrain import proposals
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def fetch(url, **_):
+        return proposals.Evidence(url, "Technical Data Sheet", "Technical Data Sheet\nFixture PLA\nDensity 1.24 g/cm³", datasheet=True)
+
+    async def search(*_args):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "search_web", search)
+    assert (await installed.put(f"{BASE}/settings", json={"search_url": "http://searxng.test"})).is_success
+    snapshot = {"designation": "Fixture PLA", "manufacturer_name": "Fixture", "material_type": "PLA",
+                "manufacturer_url": "https://fixture.example", "datasheet_url": "https://fixture.example/specs.pdf"}
+    async with asyncio.timeout(1):
+        result = await proposals.research_products(
+            db_session, proposals.Identity(designation="Fixture PLA", manufacturer="Fixture", material="PLA"),
+            snapshot=snapshot, release_read=True,
+            deadline=asyncio.get_running_loop().time() + 0.1,
+        )
+    assert any(item["field"] == "density_g_cm3" and item["value"] == 1.24 for item in result["suggestions"])
+    assert any(issue["code"] == "unavailable_source" and issue["source"] == "Web search" for issue in result["issues"])
 
 
 async def test_stock_host_batch_claim_and_apply(
