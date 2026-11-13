@@ -33,7 +33,8 @@ export function mountDocs(editor: boolean) {
   panel.addEventListener('close', () => {
     if (panel.open) return
     for (const button of buttons) button.setAttribute('aria-expanded', 'false')
-    if (opener?.getClientRects().length) opener.focus()
+    const trigger = opener?.getClientRects().length ? opener : [...buttons].find(button => button.getClientRects().length)
+    trigger?.focus()
   })
   panel.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !panel.matches(':modal')) panel.close()

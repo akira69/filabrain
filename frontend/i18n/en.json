@@ -48,6 +48,7 @@
     "researchReview": "Here’s what I found. Review the results below.",
     "sourcesChecked": "Sources checked ({count})",
     "researchHistoryReadOnly": "Saved findings are read-only because this record could not be verified. Run a new search to stage changes.",
+    "draftAlreadySaved": "This draft was already saved. Open the saved filament to review its values.",
     "filamentSaved": "Filament saved.",
     "openSavedFilament": "Open saved filament",
     "earlierFindings": "Earlier findings",

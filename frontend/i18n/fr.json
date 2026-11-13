@@ -48,6 +48,7 @@
     "researchReview": "Voici ce que j’ai trouvé. Consultez les résultats ci-dessous.",
     "sourcesChecked": "Sources consultées ({count})",
     "researchHistoryReadOnly": "Les résultats enregistrés sont en lecture seule, car cette fiche n’a pas pu être vérifiée. Lancez une nouvelle recherche pour préparer des modifications.",
+    "draftAlreadySaved": "Ce brouillon a déjà été enregistré. Ouvrez le filament enregistré pour vérifier ses valeurs.",
     "filamentSaved": "Filament enregistré.",
     "openSavedFilament": "Ouvrir le filament enregistré",
     "earlierFindings": "Résultats précédents",

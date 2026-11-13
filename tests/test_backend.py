@@ -10,8 +10,8 @@ from app.models import Filament, InstalledPlugin, Manufacturer, Spool
 from app.services import plugin_service
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient, MockTransport, Response
-from sqlalchemy import inspect, select
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy import event, inspect, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 pytest_plugins = ("tests.conftest",)
@@ -73,6 +73,69 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
     assert saved["model_url"] == config["model_url"]
     assert saved["model_id"] == config["model_id"]
     assert saved["mcp_enabled"] is False
+
+
+async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
+    import asyncio
+
+    from app.api.v1.schemas_filament import FilamentCreate
+    from app.core.security import Principal
+    from app.models import User
+    from app.models.base import Base as HostBase
+    from filabrain.db import Base as PluginBase
+    from filabrain.research import open_saved_filament, save_research_filament
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'drafts.db'}")
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def enable_foreign_keys(connection, _record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(HostBase.metadata.create_all)
+            await connection.run_sync(PluginBase.metadata.create_all)
+        async with sessions() as db:
+            owner = User(email="review@example.test")
+            manufacturer = Manufacturer(name="Fixture Brand", empty_spool_weight_g=180)
+            db.add_all([owner, manufacturer, InstalledPlugin(
+                plugin_key="filabrain", name="FilaBrain", version="1.0", plugin_type="integration", is_active=True,
+            )])
+            await db.commit()
+        principal = Principal(auth_type="session", user_id=owner.id, is_superadmin=True)
+        draft_id = "a" * 32
+        data = FilamentCreate(
+            manufacturer_id=manufacturer.id, designation="Fixture PLA", material_type="PLA",
+            diameter_mm=1.75, density_g_cm3=1.24,
+        )
+
+        async def save():
+            async with sessions() as db:
+                return await save_research_filament(draft_id, data, db, principal)
+
+        first, retry = await asyncio.gather(save(), save())
+        assert first["id"] == retry["id"]
+        assert {first["already_saved"], retry["already_saved"]} == {True, False}
+        saved_id = first["id"]
+        async with sessions() as db:
+            records = list(await db.scalars(select(Filament)))
+            assert [record.id for record in records] == [saved_id]
+            assert records[0].density_g_cm3 == 1.24
+            assert records[0].default_spool_weight_g == 180
+            assert (await open_saved_filament(draft_id, db, principal)).headers["location"] == f"/filaments/{saved_id}"
+            await db.delete(records[0])
+            await db.commit()
+            db.add(Filament(id=saved_id, manufacturer_id=manufacturer.id, designation="Replacement", material_type="PLA", diameter_mm=1.75))
+            await db.commit()
+            with pytest.raises(HTTPException) as missing:
+                await open_saved_filament(draft_id, db, principal)
+            assert missing.value.status_code == 404
+        with pytest.raises(HTTPException) as deleted:
+            await save()
+        assert deleted.value.status_code == 409
+    finally:
+        await engine.dispose()
 
 
 async def test_search_connection_checks_unsaved_url_and_reports_no_results(installed, monkeypatch):
@@ -149,11 +212,12 @@ async def test_supplier_download_limit_persists_and_applies_to_research(installe
 
 
 @pytest.mark.parametrize("has_sitemap", [True, False])
-async def test_oversized_supplier_page_finds_specific_replacement(installed, db_session, monkeypatch, has_sitemap):
+@pytest.mark.parametrize("regional", [False, True])
+async def test_oversized_supplier_page_finds_specific_replacement(installed, db_session, monkeypatch, has_sitemap, regional):
     from filabrain import proposals
 
     site = "https://supplier.example"
-    original = f"{site}/store"
+    original = "https://shop.supplier.example/store" if regional else f"{site}/store"
     replacement = f"{site}/products/abs-black"
     heading = "ABS (Black) 1.75mm 1kg Filament [AB-42]"
     searches = []
@@ -167,7 +231,7 @@ async def test_oversized_supplier_page_finds_specific_replacement(installed, db_
         ))
 
     async def sitemap(url):
-        assert url == original
+        assert url == (site if regional else original)
         return (site, f"{site}/products/pla-black", replacement) if has_sitemap else ()
 
     async def search(_url, query):
@@ -205,6 +269,8 @@ async def test_oversized_supplier_page_finds_specific_replacement(installed, db_
     assert {"code": "supplier_alternative_found", "url": replacement} in result["issues"]
     assert not any(issue.get("url") == original for issue in result["issues"])
     assert any("technical data sheet" in query and "filetype:pdf" not in query for query in searches) is not has_sitemap
+    if regional:
+        return
     response = await installed.post(f"{BASE}/proposals", json={"mode": "create", "product_url": original})
     assert response.is_success, response.text
     assert any(issue.get("product_url") == replacement for issue in response.json()["issues"])
@@ -392,7 +458,7 @@ async def test_datasheet_extracts_only_recommended_temperatures(section, expecte
     assert {item["field"]: item["value"] for item in values} == expected
 
 
-@pytest.mark.parametrize("pdf_state", ["ok", "oversized", "manual", "conflict"])
+@pytest.mark.parametrize("pdf_state", ["ok", "oversized", "sitemap", "same_page", "manual", "conflict"])
 async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed, db_session, monkeypatch, pdf_state):
     from filabrain import proposals
 
@@ -408,7 +474,7 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
 
     async def fetch(url, **_):
         if url == sheet:
-            if pdf_state == "oversized":
+            if pdf_state in ("oversized", "sitemap", "same_page"):
                 raise ValueError(proposals.SUPPLIER_TOO_LARGE)
             if pdf_state == "manual":
                 return proposals.replace(pdf, manual=True, text="")
@@ -421,6 +487,10 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
     async def search(_url, query):
         return [replacement] if pdf_state == "oversized" and "filetype:pdf" in query else []
 
+    async def sitemap(url):
+        assert url.startswith(site)
+        return {"sitemap": [replacement], "same_page": [product]}.get(pdf_state, [])
+
     async def extract(*args, **kwargs):
         return [{"field": "density_g_cm3", "value": 1.31, "sources": [{"url": product, "title": "Store", "evidence": "1.31 g/cm³"}]}], []
 
@@ -430,6 +500,7 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
     async def ofd(_manufacturer):
         return [], ""
 
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap)
     monkeypatch.setattr(proposals, "fetch_supplier", fetch)
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
@@ -453,14 +524,17 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
         result = response.json()
         density = next((s for s in result["suggestions"] if s["field"] == "density_g_cm3"), None)
         if url == product:
-            if pdf_state == "manual":
+            if pdf_state == "same_page":
+                assert {"code": "supplier_download_limit", "url": sheet} in result["issues"]
+                assert not any(issue["code"] == "supplier_alternative_found" for issue in result["issues"])
+            elif pdf_state == "manual":
                 assert {"code": "manual_datasheet", "url": sheet} in result["issues"]
             elif pdf_state == "conflict":
                 assert density is None
                 assert any(issue["code"] == "conflict" and issue.get("field") == "density_g_cm3" for issue in result["issues"])
             else:
                 assert density and density["value"] == 1.24
-                assert density["sources"][0]["url"] == (replacement if pdf_state == "oversized" else sheet)
+                assert density["sources"][0]["url"] == (replacement if pdf_state in ("oversized", "sitemap") else sheet)
                 assert any(issue["code"] == "source_disagreement" and issue.get("field") == "density_g_cm3" for issue in result["issues"])
         else:
             assert density is None
@@ -501,7 +575,8 @@ async def test_research_settings_reject_non_domain_sources(installed, domain):
     assert response.status_code == 422
 
 
-async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs(installed, monkeypatch):
+@pytest.mark.parametrize("blocked", [False, True])
+async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs(installed, monkeypatch, blocked):
     from filabrain import proposals
 
     # A client using the earlier preview must not be able to turn off the catalogs.
@@ -517,6 +592,7 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
     queries = []
     fetched = []
     catalogs = set()
+    archived = []
     supplier_url = "https://shop.supplier.example/fixture-pla"
     wrong = "https://shop.supplier.example/unrelated"
 
@@ -536,8 +612,15 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
 
     async def fetch(url, **_):
         fetched.append(url)
+        if blocked and url == supplier_url:
+            raise ValueError("HTTP 403")
         return proposals.Evidence(url, "Unrelated" if url == wrong else "Fixture PLA", "Other product" if url == wrong else "Fixture PLA")
 
+    async def archive(url, **_):
+        archived.append(url)
+        return None
+
+    monkeypatch.setattr(proposals, "fetch_archived_supplier", archive)
     monkeypatch.setattr(proposals, "search_web", search)
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
@@ -549,6 +632,7 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
     assert "site:supplier.example Fixture Brand Fixture PLA" in queries
     assert all("disabled.example" not in query for query in queries)
     assert fetched == [wrong, supplier_url]
+    assert archived == ([supplier_url] if blocked else [])
     assert catalogs == {"filamandb", "open_filament_database"}
 
 
@@ -628,6 +712,10 @@ async def test_missing_manufacturer_site_is_discovered_and_can_be_saved(
             assert (await viewer.get(record)).status_code == 403
     assert (await installed.put(endpoint, json=payload | {"manufacturer_id": manufacturer.id + 1})).status_code == 409
     assert (await installed.put(endpoint, json=payload | {"url": "http://127.0.0.1/"})).status_code == 422
+    if getattr(filament, "record_token", None):
+        stale = "0" * 32
+        assert (await installed.put(endpoint, json=payload | {"record_token": stale})).status_code == 409
+        payload["record_token"] = filament.record_token
     assert (await installed.put(endpoint, json=payload)).status_code == 204
     assert (await installed.get(f"/api/v1/manufacturers/{manufacturer.id}")).json()["url"] == website
     assert (await installed.put(endpoint, json=payload | {"url": "https://other.example/"})).status_code == 409

@@ -1748,7 +1748,8 @@ async def research_products(
 
     async def find_supplier_page(domain):
         urls = await search(f"site:{domain} {supplier_query}")
-        oversized_pages = {}
+        failed_pages = {}
+        link = None
         try:
             async with network_time(8):
                 for url in urls:
@@ -1758,11 +1759,13 @@ async def research_products(
                     page = await supplier(link)
                     if page and _supplier_scopes(identity, page, snapshot):
                         return {link: page}
-                    if fetch_errors.get(link) == SUPPLIER_TOO_LARGE:
-                        oversized_pages[link] = None
+                    if page is None:
+                        failed_pages[link] = None
         except TimeoutError:
-            pass
-        return oversized_pages
+            if link is not None:
+                fetch_errors[link] = "Request timed out"
+                failed_pages[link] = None
+        return failed_pages
 
     supplier_urls = [*direct_urls, *(supplement if guidance else []), *catalog_urls, *different_sites.values()]
     pages = first_pages | await check_pages(supplier_urls)
@@ -1808,7 +1811,7 @@ async def research_products(
             values and known_variant[key] in (None, ()) for key, values in _sheet_variant_values(sheet).items()
         )
 
-    async def check_alternatives(host, urls):
+    async def check_alternatives(host, urls, *, recover_sheet=False):
         links = list(dict.fromkeys(
             supplier_page_url(link) for url in urls if (link := public_link(url))
             and _site_host(link) == host and urlsplit(link).path not in ("", "/")
@@ -1818,17 +1821,24 @@ async def research_products(
             page = checked_pages.get(link)
             if not page or _site_host(page.url) != host:
                 continue
+            if page.datasheet:
+                if _on_manufacturer_site(page.url, document_domain) and _sheet_matches(page, titles, supplier_identity, snapshot):
+                    authoritative_docs[page.url] = replace(page, manufacturer_page=True)
+                    fallback_docs.add(page.url)
+                continue
+            if recover_sheet:
+                await check_datasheets({link: page})
+                fallback_docs.update(
+                    sheet.url for url in page.datasheets
+                    if (sheet := linked_sheets.get(url)) and sheet.url in authoritative_docs
+                )
+                continue
             if resolve_pasted_url and not pasted_page and page.product and page.product.get("designation"):
                 issues.append({
                     "code": "possible_match", "name": page.title[:255], "source": "Web search",
                     "url": page.url, "product_url": page.url,
                 })
                 return page.url
-            if page.datasheet:
-                if _on_manufacturer_site(page.url, document_domain) and _sheet_matches(page, titles, supplier_identity, snapshot):
-                    authoritative_docs[page.url] = replace(page, manufacturer_page=True)
-                    fallback_docs.add(page.url)
-                continue
             official = _on_manufacturer_site(page.url, manufacturer_domain)
             if (
                 _supplier_scopes(supplier_identity, replace(page, manufacturer_page=official), snapshot)
@@ -1858,15 +1868,22 @@ async def research_products(
             usable_fallback = any(not needs_variant(authoritative_docs[url]) for url in fallback_docs)
             # shortcut: check two sites per lookup, raise the budget if common searches need more.
             fallback_by_host = {}
+            if document_domain and not usable_fallback:
+                official = next((url for url in oversized if url in official_oversized), None)
+                if official and (official in linked_sheets or _site_host(official) != document_domain):
+                    origin = manufacturer_site_url(manufacturer_site)
+                    if _site_host(origin) != document_domain:
+                        origin = f"https://{document_domain}/"
+                    fallback_by_host[document_domain] = (origin, official)
             for url in oversized:
                 if url not in linked_sheets and not (usable_fallback and url in official_oversized) and (host := _site_host(url)):
-                    if url in official_oversized and document_domain and document_domain != host:
-                        fallback_by_host.setdefault(document_domain, f"https://{document_domain}/")
-                    fallback_by_host.setdefault(host, url)
-            for host, original in list(fallback_by_host.items())[:2]:
+                    fallback_by_host.setdefault(host, (url, url))
+            for host, (sitemap_origin, original) in list(fallback_by_host.items())[:2]:
+                if original in recovered_urls:
+                    continue
                 matches = []
                 path_terms = url_words(original) - {"store", "shop", "products", "product"}
-                for url in await supplier_sitemap_urls(original):
+                for url in await supplier_sitemap_urls(sitemap_origin):
                     if not (link := public_link(url)) or _site_host(link) != host:
                         continue
                     if supplier_page_url(link) in checked_pages and not checked_pages[supplier_page_url(link)]:
@@ -1877,11 +1894,14 @@ async def research_products(
                     if sku_match or (line and line <= words) or (resolve_pasted_url and path_terms and path_terms <= words):
                         matches.append((link, sku_match, len(words & color)))
                 matches.sort(key=lambda match: (-match[1], -match[2]))
-                alternative = await check_alternatives(host, [url for url, _, _ in matches[:2]])
+                alternative = await check_alternatives(
+                    host, [url for url, _, _ in matches[:2]], recover_sheet=original in linked_sheets,
+                )
                 query = supplier_query if identity.designation or lookup_sku else " ".join(sorted(url_words(original)))
                 if not alternative and query:
                     alternative = await check_alternatives(
                         host, await search(f"site:{host} {query} technical data sheet"),
+                        recover_sheet=original in linked_sheets,
                     )
                 if alternative:
                     recovered_urls.add(original)
