@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from os import getenv
@@ -9,7 +10,14 @@ from app.core.config import settings
 from app.core.oidc_crypto import decrypt_secret, encrypt_secret
 from app.models import InstalledPlugin
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, SecretStr, StrictBool, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    StrictBool,
+    field_validator,
+)
 from sqlalchemy import select, text
 
 from .db import FilamentResearchSettings
@@ -45,6 +53,27 @@ def _model_base_url(value: str) -> str:
     return value
 
 
+def _validate_base_url(value: str) -> str:
+    value = value.strip().rstrip("/")
+    if value:
+        url = urlsplit(value)
+        if (
+            url.scheme not in ("https", "http")
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.query
+            or url.fragment
+            or "\\" in value
+            or any(ch.isspace() or ord(ch) < 32 for ch in value)
+            or url.port == 0
+        ):
+            raise ValueError(
+                "Use an HTTP(S) base URL without credentials, query or fragment"
+            )
+    return value
+
+
 class SupplierSite(BaseModel):
     domain: str = Field(max_length=254)
     enabled: StrictBool = True
@@ -75,27 +104,7 @@ class SettingsInput(BaseModel):
             raise ValueError("Each supplier domain can only be added once")
         return sites
 
-    @field_validator("model_url", "search_url")
-    @classmethod
-    def validate_url(cls, value: str) -> str:
-        value = value.strip().rstrip("/")
-        if value:
-            url = urlsplit(value)
-            if (
-                url.scheme not in ("https", "http")
-                or not url.hostname
-                or url.username is not None
-                or url.password is not None
-                or url.query
-                or url.fragment
-                or "\\" in value
-                or any(ch.isspace() or ord(ch) < 32 for ch in value)
-                or url.port == 0
-            ):
-                raise ValueError(
-                    "Use an HTTP(S) base URL without credentials, query or fragment"
-                )
-        return value
+    validate_url = field_validator("model_url", "search_url")(_validate_base_url)
 
     @field_validator("model_url")
     @classmethod
@@ -110,6 +119,13 @@ class SettingsInput(BaseModel):
 
 class McpSettingsInput(BaseModel):
     mcp_enabled: StrictBool
+
+
+class SearchTestInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    search_url: str = Field(max_length=500)
+
+    validate_url = field_validator("search_url")(_validate_base_url)
 
 
 def _deployment_model_url() -> str:
@@ -313,7 +329,7 @@ async def test_model(data: SettingsInput, db: DBSession, _principal=admin):
 
 
 @router.post("/settings/test-search")
-async def test_search(data: SettingsInput, _principal=admin):
+async def test_search(data: SearchTestInput, _principal=admin):
     if not data.search_url:
         raise HTTPException(422, "Enter the SearXNG URL")
     try:

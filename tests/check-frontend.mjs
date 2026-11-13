@@ -144,6 +144,12 @@ try {
       assert.deepEqual(req.postDataJSON(), { search_url: 'http://searxng:8080' })
       return route.fulfill({ json: { ok: true } })
     }
+    if (path.endsWith('/settings/test')) {
+      assert.deepEqual(req.postDataJSON(), {
+        model_url: 'http://ollama:11434', model_id: 'fixture:default', api_key: 'fixture-key', clear_key: false,
+      })
+      return route.fulfill({ json: { ok: true } })
+    }
     if (path.endsWith('/pairings') && req.method() === 'POST') {
       assert.equal(req.postDataJSON().filament_id, 10)
       return route.fulfill({ json: { id: 'fixture-pair', url: 'https://fila.test/api/v1/filabrain/mcp', token: 'fixture-token' } })
@@ -450,6 +456,23 @@ try {
   await enableSearch.click()
   assert.equal(await searchField.evaluate(el => el === document.activeElement), true)
   await page.getByRole('link', { name: 'SearXNG Docker setup' }).waitFor()
+  const searchTest = internet.getByRole('button', { name: 'Test SearXNG' })
+  assert.equal(await searchTest.isDisabled(), true)
+  await modelUrl.fill('invalid-model-url')
+  await searchField.fill('http://searxng:8080')
+  await searchTest.click()
+  const searchPassed = internet.getByText('SearXNG returned search results.')
+  await searchPassed.waitFor()
+  await searchField.fill('invalid-search-url')
+  await searchPassed.waitFor({ state: 'hidden' })
+  await modelUrl.fill('http://ollama:11434')
+  if (!await modelId.isVisible()) await page.locator('#filabrain-settings summary').click()
+  await modelId.fill('fixture:default')
+  const modelKey = page.locator('#filabrain-settings input[name=api_key]')
+  await modelKey.fill('fixture-key')
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click()
+  await page.getByText('The model returned a verified sample.').waitFor()
+  await modelKey.fill('')
   await searchField.fill('http://searxng:8080')
   await modelUrl.fill('http://ollama:11434')
   let releaseModelList
