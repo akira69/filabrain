@@ -616,7 +616,7 @@ async def test_datasheet_links_inherit_tds_heading_until_the_next_heading_or_sec
     parser = sources._ProductPage()
     parser.feed("""
         <section>
-          <h3>Technical <span>Data Sheet</span> (TDS)</h3>
+          <h3>Technical <span>Data Sheets</span> (TDS)</h3>
           <ul><li><a href="/docs/123.pdf">EN</a></li></ul>
           <a href="/download/456" type="application/pdf"><svg><use href="#download"></use></svg></a>
           <a href="/docs/789.pdf"><img src="download.svg" alt=""></a>
@@ -659,14 +659,15 @@ async def test_explicit_datasheet_links_take_priority_over_heading_only_candidat
     )
 
 
-@pytest.mark.parametrize("recovery_path", ["sitemap", "direct", "search"])
+@pytest.mark.parametrize("recovery_path", ["sitemap", "direct", "direct_then_sitemap", "search"])
 async def test_datasheet_discovery_from_official_product_page(installed, monkeypatch, recovery_path):
     from filabrain import proposals, sources
 
     site = "https://fixture-maker.example"
     product = site + "/product/polyterra-pla"
-    original = product + "/" if recovery_path == "direct" else "https://shop.fixture-maker.example/products/polyterra-pla"
+    original = product + "/" if recovery_path.startswith("direct") else "https://shop.fixture-maker.example/products/polyterra-pla"
     sheet = site + "/docs/123.pdf"
+    sheet_page = site + "/product/polyterra-pla-specifications"
 
     async def fetch(url, *, max_bytes):
         assert max_bytes == 2 * 1024 * 1024
@@ -678,7 +679,9 @@ async def test_datasheet_discovery_from_official_product_page(installed, monkeyp
             return proposals.Evidence(
                 url, "Technical data sheet", "Technical Data Sheet\nPolyTerra PLA\nDensity 1.31 g/cm³", datasheet=True,
             )
-        if url == product:
+        if url == product and recovery_path == "direct_then_sitemap":
+            return proposals.Evidence(url, "PolyTerra PLA", "PolyTerra PLA")
+        if url in (product, sheet_page):
             parser = sources._ProductPage()
             parser.feed(f'<h3>TDS</h3><a href="{sheet}" download>US - EN</a>')
             parser.close()
@@ -687,8 +690,10 @@ async def test_datasheet_discovery_from_official_product_page(installed, monkeyp
         return proposals.Evidence(url, "Downloads", "")
 
     async def sitemap(_url):
-        if recovery_path == "search":
+        if recovery_path in {"search", "direct"}:
             return ()
+        if recovery_path == "direct_then_sitemap":
+            return (sheet_page,)
         return (site + "/faq/does-polyterra-pla-print-fast/", site + "/library/polyterra-pla-sds/", product + "/")
 
     async def search(_url, query):
@@ -777,6 +782,48 @@ async def test_slow_sitemap_retry_preserves_already_fetched_product(installed, d
     assert retried
     assert {"code": "supplier_alternative_found", "url": replacement} in result["issues"]
     assert any(row["field"] == "shop_url" and row["value"] == replacement for row in result["suggestions"])
+
+
+async def test_variant_conflict_cites_exact_filamandb_records(installed, db_session, monkeypatch):
+    from filabrain import proposals
+
+    async def catalog(_identity):
+        rows = [
+            {
+                "id": ident, "manufacturer": {"name": "Fixture Brand"}, "designation": "Fixture PLA",
+                "material_key": "PLA", "diameter_mm": 1.75, "color_name": color, "density": density,
+            }
+            for ident, color, density in ((451, "Red", 1.21), (452, "Blue", 1.24))
+        ]
+        return rows, "https://catalog.example/list", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    async def no_website(_manufacturer):
+        return None
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "manufacturer_website", no_website)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    maker = Manufacturer(name="Fixture Brand")
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(manufacturer_id=maker.id, designation="Fixture PLA", material_type="PLA", diameter_mm=1.75)
+    db_session.add(filament)
+    await db_session.commit()
+
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.is_success, response.text
+    conflict = next(issue for issue in response.json()["issues"] if issue.get("field") == "density_g_cm3")
+    assert conflict["requires_product_choice"]
+    root = proposals.settings.filamentdb_url.rstrip("/")
+    assert {option["value"]: option["sources"][0]["url"] for option in conflict["options"]} == {
+        1.21: f"{root}/api/v1/filaments/451",
+        1.24: f"{root}/api/v1/filaments/452",
+    }
 
 
 @pytest.mark.parametrize("domain", ["https://example.org", "localhost", "192.168.0.1", "example.org path"])

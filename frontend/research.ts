@@ -17,6 +17,7 @@ export type ResearchDraft = {
   proposal: ResearchProposal
   action: string
   selection?: Unit[]
+  staged?: true
   saveId?: string
 }
 export type SelectionContext = { mode: 'selection'; filament_ids: number[]; expected_filaments?: ExpectedFilament[] }
@@ -115,6 +116,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   })
   let choices = new Map<HTMLInputElement, Unit>()
   let bound: EditorContext | undefined
+  let boundProposal: ResearchProposal | undefined
   let draft: Fields | undefined
   let pairId: string | undefined
   let pairGeneration = 0
@@ -198,6 +200,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     choices.clear()
     results.replaceChildren()
     bound = undefined
+    boundProposal = undefined
     updateSave()
     reply.hidden = true
   }
@@ -272,6 +275,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   function render(proposal: ResearchProposal, context: EditorContext) {
     clearResults()
     bound = context
+    boundProposal = proposal
     const fields = context.fields
     const unitFor = (field: string, value: Value): Unit => ({ [field]: { old: fields[field] ?? null, value } })
     duplicate = proposal.issues.some(issue => issue.code === 'duplicate')
@@ -358,12 +362,17 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       } else results.append(p)
       const field = issue.field
       if (field && nativeFields.has(field) && issue.options?.length && blank(fields[field]) &&
-          !alternatives.has(field) && !issue.requires_product_choice) {
+          !alternatives.has(field)) {
         alternatives.add(field)
         const group = document.createElement('fieldset')
         const legend = document.createElement('legend')
         legend.textContent = researchFieldLabel(field)
         group.append(legend)
+        if (issue.requires_product_choice) {
+          appendVariantChoices(group, field, issue.options)
+          results.append(group)
+          continue
+        }
         const none = document.createElement('label')
         const noChoice = document.createElement('input')
         noChoice.type = 'radio'
@@ -474,6 +483,21 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     void disconnect()
   }
 
+  function archivedValue(field: string, value: Value, sources: ResearchOption['sources']) {
+    const item = document.createElement('div')
+    item.className = 'research-history-value'
+    item.textContent = `${researchFieldLabel(field)}: ${valueText(value)}`
+    appendSources(item, sources)
+    return item
+  }
+
+  function appendVariantChoices(group: HTMLElement, field: string, options: ResearchOption[]) {
+    const warning = document.createElement('p')
+    warning.textContent = t('filaBrain.chooseProductFirst')
+    group.append(warning)
+    for (const option of options) group.append(archivedValue(field, option.value, option.sources))
+  }
+
   form.addEventListener('input', () => {
     formRevision++
     clearResults()
@@ -490,17 +514,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       const heading = document.createElement('summary')
       heading.textContent = t('filaBrain.earlierFindings')
       details.append(heading)
-      const row = (field: string, value: Value, sources: ResearchOption['sources']) => {
-        const item = document.createElement('div')
-        item.className = 'research-history-value'
-        item.textContent = `${researchFieldLabel(field)}: ${valueText(value)}`
-        appendSources(item, sources)
-        return item
-      }
-      for (const result of proposal.suggestions) details.append(row(result.field, result.value, result.sources))
+      for (const result of proposal.suggestions) details.append(archivedValue(result.field, result.value, result.sources))
       for (const unit of proposal.proposals || []) {
         for (const [field, change] of Object.entries(unit.fields)) {
-          details.append(row(field, change.value, unit.sources.map(source => ({ ...source, evidence: source.quote }))))
+          details.append(archivedValue(field, change.value, unit.sources.map(source => ({ ...source, evidence: source.quote }))))
         }
       }
       const seenIssues = new Set<string>()
@@ -516,11 +533,8 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
           legend.textContent = researchFieldLabel(issue.field)
           group.append(legend, line)
           if (issue.requires_product_choice) {
-            const variant = document.createElement('p')
-            variant.textContent = t('filaBrain.chooseProductFirst')
-            group.append(variant)
-          }
-          for (const option of issue.options) group.append(row(issue.field, option.value, option.sources))
+            appendVariantChoices(group, issue.field, issue.options)
+          } else for (const option of issue.options) group.append(archivedValue(issue.field, option.value, option.sources))
           details.append(group)
         } else {
           const key = JSON.stringify([explanation, url])
@@ -583,8 +597,18 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       }
       if (editor) {
         const { staged, skipped } = await hostRequest<{ staged: string[]; skipped: string[] }>('filaman:filament-stage', { units })
-        chat.saveSelection([])
-        clearResults()
+        if (!staged.length) {
+          notice.textContent = t('filaBrain.identityChanged')
+          return
+        }
+        const fields = { ...context.fields }
+        for (const unit of units) {
+          for (const [field, change] of Object.entries(unit)) {
+            if (staged.includes(field)) fields[field] = change.value
+          }
+        }
+        chat.archiveResearch()
+        if (boundProposal) render(boundProposal, { ...context, fields })
         notice.textContent = `${staged.length} field${staged.length === 1 ? '' : 's'} staged. Save in the FilaMan editor to keep the changes.`
           + (skipped.length ? ` ${skipped.length} skipped because the form changed or the field is unavailable.` : '')
         return

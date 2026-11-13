@@ -26,7 +26,7 @@ SHARED_SPEC = re.compile(r"\b(?:applies to all variants|same for all variants|al
 DATASHEET_LABEL = re.compile(
     r"technical[ _-]*data[ _-]*sheet|(?<![^\W_])tds(?![^\W_])", re.IGNORECASE
 )
-DATASHEET_HEADING = re.compile(r"(?:technical\s+data\s*sheet(?:\s*\(tds\))?|tds)\s*:?", re.IGNORECASE)
+DATASHEET_HEADING = re.compile(r"(?:technical\s+data\s*sheets?(?:\s*\(tds\))?|tds)\s*:?", re.IGNORECASE)
 SAFETY_SHEET_LABEL = re.compile(
     r"(?<![^\W_])(?:safety[ _-]*data[ _-]*sheet|m?sds)(?![^\W_])", re.IGNORECASE
 )

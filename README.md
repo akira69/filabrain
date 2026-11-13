@@ -8,6 +8,12 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 **Development preview.** This package targets FilaMan 2.0.5+. Review researched values before applying them to your inventory.
 
+### What's new in 0.1.17
+
+- Find manufacturer datasheets from product links and sitemaps, including when web search is unavailable. Each proposed value shows its own source.
+- Reopen research chats from History with variant warnings and citations intact. The editor shows lookup failures and keeps remaining suggestions visible after staging fields.
+- Test model and SearXNG connections separately, review selected filaments in batches, and use read-only research through FilaMan's built-in MCP on supported hosts.
+
 To build the preview ZIP from source, run the packaging script with Python 3. Published preview ZIPs appear under GitHub Releases.
 
 ```sh
@@ -65,7 +71,7 @@ On a FilaMan build with plugin MCP tool support, enable the built-in MCP server 
 Run the smoke test with the Python environment from a stock FilaMan checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.16.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.17.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database.

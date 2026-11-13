@@ -161,7 +161,13 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
           current.messages.forEach((message, index) => {
             const bubble = append(message)
             if (draft && index === lastResult) {
-              if (resumed) placeResearchResults(bubble)
+              if (resumed) {
+                placeResearchResults(bubble)
+                if (draft.staged && research) {
+                  bubble.after(research.archive(draft.proposal))
+                  activeAnswer = undefined
+                }
+              }
               else {
                 bubble.after(researchResults)
                 if (research) bubble.after(research.archive(draft.proposal))
@@ -389,6 +395,13 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     get savedDraft() {
       const id = draftId()
       return hasReceipt(current, id) || hasStoredReceipt(id)
+    },
+    archiveResearch() {
+      if (!current.research || !research) return
+      activeAnswer?.after(research.archive(current.research.proposal))
+      current.research = { ...current.research, staged: true, selection: [] }
+      activeAnswer = undefined
+      remember()
     },
     completeResearch(id: string, alreadySaved = false) {
       if (draftId() !== id || hasReceipt(current, id)) return
