@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import replace
 from typing import Annotated
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 
 import httpx
 from app.api.deps import DBSession
@@ -28,6 +28,7 @@ from .model import (
 from .settings import config_record, model_key, resolve_model
 from .sources import (
     SHARED_SPEC,
+    SUPPLIER_TOO_LARGE,
     Evidence,
     fetch_archived_supplier,
     fetch_supplier,
@@ -35,6 +36,7 @@ from .sources import (
     paramount_product_urls,
     search_web,
     supplier_page_url,
+    supplier_sitemap_urls,
 )
 
 Text = Annotated[str, Field(max_length=255)]
@@ -1071,7 +1073,7 @@ def _possible_catalog_matches(identity: Identity, items: list[dict], url: str, s
 
 def _product_titles(identity: Identity) -> set[str]:
     return {
-        _norm(value) for value in (identity.designation, identity.material)
+        _norm(value) for value in (identity.designation, identity.material, " ".join(_line(identity.designation, identity.color)))
         if len(_tokens(value)) > 1
     }
 
@@ -1263,11 +1265,12 @@ async def research_products(
 
     checked_pages: dict[str, Evidence | None] = {}
     fetch_errors: dict[str, str] = {}
+    supplier_max_bytes = config["supplier_download_mib"] * 1024 * 1024
 
     async def supplier(url):
         if url not in checked_pages:
             try:
-                checked_pages[url] = await fetch_supplier(url)
+                checked_pages[url] = await fetch_supplier(url, max_bytes=supplier_max_bytes)
             except (OSError, ValueError, http.client.HTTPException) as exc:
                 checked_pages[url] = None
                 fetch_errors[url] = (
@@ -1678,6 +1681,68 @@ async def research_products(
     if sum(bool(page and not _on_manufacturer_site(page.url, manufacturer_domain)) for page in pages.values()) < 2:
         pages.update(await check_pages(supplier_urls))
     pages.update(await check_pages(preferred_urls))
+    if product_url and fetch_errors.get(product_url) == SUPPLIER_TOO_LARGE:
+        pages.setdefault(product_url, None)
+
+    def url_words(url):
+        return set(re.findall(r"[^\W_]+", unquote(urlsplit(url).path).casefold()))
+
+    oversized = {}
+    for url in pages:
+        if fetch_errors.get(url) == SUPPLIER_TOO_LARGE and (host := _site_host(url)):
+            oversized.setdefault(host, url)
+    recovered = set()
+    line = set(re.findall(r"[^\W_]+", " ".join(_line(identity.designation, identity.color))))
+    color = set(_tokens(identity.color))
+    sku = "-".join(_product_key(lookup_sku or variant_sku))
+
+    async def check_alternatives(host, urls):
+        links = list(dict.fromkeys(
+            supplier_page_url(link) for url in urls if (link := public_link(url))
+            and _site_host(link) == host and urlsplit(link).path not in ("", "/")
+        ))[:3]
+        alternatives = await check_pages(links)
+        for link in links:
+            page = checked_pages.get(link)
+            if not page or _site_host(page.url) != host:
+                continue
+            official = _on_manufacturer_site(page.url, manufacturer_domain)
+            if (
+                (official and _sheet_matches(page, titles, identity, snapshot))
+                or _supplier_scopes(identity, replace(page, manufacturer_page=official), snapshot)
+                or (official and _bundle_temperatures(identity, page, snapshot))
+            ):
+                pages.update({url: result for url, result in alternatives.items() if result})
+                pages.setdefault(link, page)
+                return page.url
+        return None
+
+    try:
+        async with asyncio.timeout(15):
+            # shortcut: check two sites per lookup, raise the budget if common searches need more.
+            for host, original in list(oversized.items())[:2]:
+                matches = []
+                for url in await supplier_sitemap_urls(original):
+                    if not (link := public_link(url)) or _site_host(link) != host or supplier_page_url(link) in checked_pages:
+                        continue
+                    words = url_words(link)
+                    path = "-".join(_product_key(unquote(urlsplit(link).path)))
+                    sku_match = bool(sku and f"-{sku}-" in f"-{path}-")
+                    if sku_match or (line and line <= words):
+                        matches.append((link, sku_match, len(words & color)))
+                matches.sort(key=lambda match: (-match[1], -match[2]))
+                alternative = await check_alternatives(host, [url for url, _, _ in matches[:2]])
+                query = supplier_query if identity.designation or lookup_sku else " ".join(sorted(url_words(original)))
+                if not alternative and query:
+                    alternative = await check_alternatives(
+                        host, await search(f"site:{host} {query} technical data sheet"),
+                    )
+                if alternative:
+                    recovered.add(host)
+                    issues.append({"code": "supplier_alternative_found", "url": alternative})
+    except TimeoutError:
+        pass
+
     await check_datasheets(pages)
     if not any(
         page and _on_manufacturer_site(page.url, manufacturer_domain)
@@ -1697,7 +1762,7 @@ async def research_products(
             async with asyncio.timeout(15):
                 for original in originals[:3]:
                     try:
-                        archived = await fetch_archived_supplier(original)
+                        archived = await fetch_archived_supplier(original, max_bytes=supplier_max_bytes)
                     except (httpx.HTTPError, OSError, ValueError, AttributeError, TypeError):
                         continue
                     if not archived:
@@ -1724,9 +1789,14 @@ async def research_products(
     official_scopes = []
     for url, page in pages.items():
         if page is None:
+            reason = fetch_errors.get(url)
+            if reason == SUPPLIER_TOO_LARGE:
+                if _site_host(url) not in recovered:
+                    issues.append({"code": "supplier_download_limit", "url": public_link(url)})
+                continue
             source_name = "Manufacturer page" if _on_manufacturer_site(url, manufacturer_domain) else "Supplier page"
             issues.append({"code": "unavailable_source", "source": source_name,
-                           "url": public_link(url), "reason": fetch_errors.get(url)})
+                           "url": public_link(url), "reason": reason})
             continue
         if page.url in authoritative_docs:
             continue

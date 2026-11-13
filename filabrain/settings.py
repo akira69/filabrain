@@ -14,7 +14,7 @@ from sqlalchemy import select, text
 
 from .db import FilamentResearchSettings
 from .model import request_extraction
-from .sources import Evidence
+from .sources import DEFAULT_SUPPLIER_DOWNLOAD_MIB, Evidence
 
 router = APIRouter(tags=["FilaBrain"])
 admin = RequirePermission("admin:plugins_manage")
@@ -65,6 +65,7 @@ class SettingsInput(BaseModel):
     api_key: SecretStr | None = Field(None, max_length=1000)
     clear_key: bool = False
     mcp_enabled: StrictBool | None = None
+    supplier_download_mib: int = Field(DEFAULT_SUPPLIER_DOWNLOAD_MIB, ge=1, le=32, strict=True)
     supplier_sites: list[SupplierSite] = Field(default_factory=list, max_length=4)
 
     @field_validator("supplier_sites")
@@ -126,6 +127,7 @@ async def config_record(db: DBSession) -> tuple[FilamentResearchSettings | None,
         "model_id": getenv("FILABRAIN_MODEL_ID", "").strip(),
         "search_url": _deployment_search_url(),
         "supplier_sites": [],
+        "supplier_download_mib": DEFAULT_SUPPLIER_DOWNLOAD_MIB,
     }
     config = fallback | (row.config or {} if row else {})
     config["model_url"] = _model_base_url(config["model_url"])
@@ -147,6 +149,7 @@ def public_config(config: dict, mcp_enabled: bool) -> dict:
         "model_id": config["model_id"],
         "search_url": config["search_url"],
         "supplier_sites": config["supplier_sites"],
+        "supplier_download_mib": config["supplier_download_mib"],
         "mcp_enabled": mcp_enabled,
         "has_key": bool(config.get("encrypted_key"))
         or bool(
@@ -170,8 +173,9 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
     await lock_research_plugin(db)
     row, old = await config_record(db)
     config = data.model_dump(exclude={"api_key", "clear_key", "mcp_enabled"})
-    if "supplier_sites" not in data.model_fields_set:
-        config["supplier_sites"] = old["supplier_sites"]
+    for key in ("supplier_sites", "supplier_download_mib"):
+        if key not in data.model_fields_set:
+            config[key] = old[key]
     if bool(data.model_id) != bool(data.model_url):
         raise HTTPException(422, "Enter both a model URL and a model ID")
     if data.api_key and data.api_key.get_secret_value() and not data.clear_key:

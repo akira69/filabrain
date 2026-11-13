@@ -11,7 +11,10 @@ export type EditorContext = { mode: 'create' | 'edit'; filament_id: number | nul
 export type SelectionContext = { mode: 'selection'; filament_ids: number[] }
 
 const route = '/filabrain'
-const sourceNotes = new Set(['manufacturer_page', 'archived_page', 'unavailable_source', 'manual_datasheet'])
+const sourceNotes = new Set([
+  'manufacturer_page', 'archived_page', 'unavailable_source', 'manual_datasheet',
+  'supplier_alternative_found', 'supplier_download_limit',
+])
 const nativeFields = new Set([
   'manufacturer_id', 'color_id', 'designation', 'material_type', 'diameter_mm',
   'manufacturer_color_name', 'manufacturer_sku', 'density_g_cm3', 'raw_material_weight_g',
@@ -64,6 +67,7 @@ function appendSources(row: HTMLElement, sources: ResearchOption['sources']) {
 
 export function mountResearch(status: Status, editor?: EditorContext) {
   const form = element<HTMLFormElement>('product-research')
+  const researchMark = document.querySelector<SVGElement>('.research-scroll .filabrain-mark')!
   const results = element('research-results')
   const notice = element('research-status')
   const save = element<HTMLButtonElement>('save-filament')
@@ -226,6 +230,8 @@ export function mountResearch(status: Status, editor?: EditorContext) {
       const explanation = t(key, { name: issue.name || '', source: issue.source || '' })
       p.textContent = explanation === key ? issue.code.replaceAll('_', ' ') : explanation
       if (issue.reason) p.append(` (${issue.reason})`)
+      const productUrl = issue.product_url && /^https?:\/\//i.test(issue.product_url) ? issue.product_url : undefined
+      const actions = productUrl ? document.createElement('span') : null
       if (issue.filament_id && issue.code === 'duplicate') {
         p.append(' ', externalLink(`/filaments/${issue.filament_id}`, t('filaBrain.openExisting')))
       }
@@ -238,10 +244,12 @@ export function mountResearch(status: Status, editor?: EditorContext) {
           note.textContent = p.textContent
           p.className = 'research-website-result'
           p.replaceChildren(note, document.createElement('br'))
-        } else {
+        } else if (!productUrl) {
           p.append(' ')
         }
-        p.append(externalLink(url, websiteFound ? url : t('filaBrain.openSource')))
+        const sourceLink = externalLink(url, websiteFound ? url : t('filaBrain.openSource'))
+        const linkRow = actions ?? p
+        linkRow.append(sourceLink)
         if (websiteFound && editor?.mode === 'edit' && status.can_update_manufacturer &&
             context.filament_id && typeof fields.manufacturer_id === 'number') {
           const saveWebsite = document.createElement('button')
@@ -271,15 +279,20 @@ export function mountResearch(status: Status, editor?: EditorContext) {
           p.append(action)
         }
       }
-      if (issue.product_url && /^https?:\/\//i.test(issue.product_url)) {
+      if (productUrl && actions) {
+        actions.className = 'research-match-actions'
         const choose = document.createElement('button')
         choose.type = 'button'
-        choose.textContent = t('filaBrain.useProductPage')
+        choose.className = 'fm-btn fm-btn-outline research-page-action'
+        const label = t('filaBrain.useProductPage')
+        choose.append(researchMark.cloneNode(true), label)
         choose.addEventListener('click', () => {
-          ;(form.elements.namedItem('product_url') as HTMLInputElement).value = issue.product_url!
-          form.requestSubmit(buttons[0])
+          const input = form.elements.namedItem('product_url') as HTMLInputElement
+          input.value = productUrl
+          if (form.reportValidity()) void search('fill', '', label)
         })
-        p.append(' ', choose)
+        actions.append(choose)
+        p.append(actions)
       }
       results.append(p)
       const field = issue.field
@@ -327,7 +340,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     return item
   }
 
-  async function search(action: string, prompt = '') {
+  async function search(action: string, prompt = '', label?: string) {
     if (busy || saving) return
     const revision = formRevision
     const selectedModel = modelPicker.selected
@@ -339,7 +352,7 @@ export function mountResearch(status: Status, editor?: EditorContext) {
     saved.hidden = true
     notice.textContent = ''
     conversation.hidden = false
-    message(prompt || (action === 'standardize' ? buttons[1].textContent! : buttons[0].textContent!), 'user')
+    message(prompt || label || (action === 'standardize' ? buttons[1].textContent! : buttons[0].textContent!), 'user')
     const answer = message(t('filaBrain.searching'), 'note')
     if (!prompt) {
       optionsSummary.hidden = false

@@ -93,6 +93,118 @@ async def test_research_sources_keep_defaults_and_survive_older_settings_clients
     assert saved["supplier_sites"] == supplier_sites
 
 
+async def test_supplier_download_limit_persists_and_applies_to_research(installed, monkeypatch):
+    from filabrain import proposals
+
+    url = f"{BASE}/settings"
+    assert (await installed.get(url)).json()["supplier_download_mib"] == 8
+    assert (await installed.put(url, json={"supplier_download_mib": 0})).status_code == 422
+    assert (await installed.put(url, json={"supplier_download_mib": 33})).status_code == 422
+    assert (await installed.put(url, json={"supplier_download_mib": 12})).status_code == 200
+    assert (await installed.put(url, json={})).json()["supplier_download_mib"] == 12
+
+    async def fetch(link, *, max_bytes):
+        assert max_bytes == 12 * 1024 * 1024
+        return proposals.Evidence(link, "Fixture PLA", "Fixture PLA")
+
+    async def catalog(_identity):
+        return [], "", True
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "product_url": "https://supplier.example/products/fixture-pla",
+        "identity": {"designation": "Fixture PLA"},
+    })
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("has_sitemap", [True, False])
+async def test_oversized_supplier_page_finds_specific_replacement(installed, db_session, monkeypatch, has_sitemap):
+    from filabrain import proposals
+
+    site = "https://supplier.example"
+    original = f"{site}/store"
+    replacement = f"{site}/products/abs-black"
+    heading = "ABS (Black) 1.75mm 1kg Filament [AB-42]"
+    searches = []
+
+    async def fetch(url, **_):
+        if url == original:
+            raise ValueError("Supplier page is too large")
+        assert url == replacement
+        return proposals.Evidence(url, heading, heading, {"designation": heading}, scopes=(
+            heading, 'Spool Size: 2.25" ID / 7.75" OD / 2.25" Depth',
+        ))
+
+    async def sitemap(url):
+        assert url == original
+        return (site, f"{site}/products/pla-black", replacement) if has_sitemap else ()
+
+    async def search(_url, query):
+        searches.append(query)
+        return [site, "https://unrelated.example/products/abs-black", replacement] if query.startswith("site:supplier.example ") and "technical data sheet" in query else []
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap, raising=False)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    assert (await installed.put(f"{BASE}/settings", json={"search_url": "http://searxng:8080"})).status_code == 200
+    maker = Manufacturer(name="Fixture Manufacturer", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation="ABS (Black)", material_type="ABS",
+        diameter_mm=1.75, shop_url=original,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.status_code == 200
+    result = response.json()
+    width = next((s for s in result["suggestions"] if s["field"] == "spool_width_mm"), None)
+    assert width and width["sources"][0]["url"] == replacement
+    assert {"code": "supplier_alternative_found", "url": replacement} in result["issues"]
+    assert not any(issue.get("url") == original for issue in result["issues"])
+    assert any("technical data sheet" in query for query in searches) is not has_sitemap
+
+
+async def test_supplier_sitemap_follows_product_index_without_fetching_pages(monkeypatch):
+    from filabrain import sources
+
+    site = "https://sitemap-fixture.example"
+    product = f"{site}/products/abs-black"
+    requests = []
+    bodies = {
+        "/robots.txt": f"Sitemap: {site}/index.xml",
+        "/index.xml": (
+            f"<sitemapindex><sitemap><loc>{site}/products.xml</loc></sitemap>"
+            "<sitemap><loc>https://other.example/index.xml</loc></sitemap></sitemapindex>"
+        ),
+        "/products.xml": f"<urlset><url><loc>{product}</loc></url></urlset>",
+    }
+
+    def fetch(url, _address, _deadline, *, max_bytes, index):
+        assert index and max_bytes == 512 * 1024
+        assert url.hostname == "sitemap-fixture.example"
+        requests.append(url.path)
+        return 200, "", "text/xml", bodies[url.path].encode()
+
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "203.0.113.10")
+    monkeypatch.setattr(sources, "_get_pinned", fetch)
+    assert await sources.supplier_sitemap_urls(f"{site}/oversized") == (product,)
+    assert requests == ["/robots.txt", "/index.xml", "/products.xml"]
+
+
 @pytest.mark.parametrize("domain", ["https://example.org", "localhost", "192.168.0.1", "example.org path"])
 async def test_research_settings_reject_non_domain_sources(installed, domain):
     response = await installed.put(f"{BASE}/settings", json={
@@ -133,7 +245,7 @@ async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs
         catalogs.add("open_filament_database")
         return [], ""
 
-    async def fetch(url):
+    async def fetch(url, **_):
         fetched.append(url)
         return proposals.Evidence(url, "Fixture PLA", "Fixture PLA")
 
@@ -191,7 +303,7 @@ async def test_missing_manufacturer_site_is_discovered_and_can_be_saved(
             return ["https://shop.fixturebrand.example/", website, "https://presets.fixturebrand.example/"]
         return []
 
-    async def fetch(url):
+    async def fetch(url, **_):
         assert url in (website, "https://shop.fixturebrand.example/", "https://presets.fixturebrand.example/")
         return proposals.Evidence(url, "Fixture Brand | 3D printing filament", "Fixture Brand makes filament.")
 
@@ -507,7 +619,7 @@ async def test_manufacturer_product_from_its_own_catalog(
 
     ))
 
-    async def pages(url):
+    async def pages(url, **_):
         if url == product_url:
             return product
         return Evidence(url, "ABS (Master Spool) 1.75mm 1kg Filament", "Multi-color kit")
@@ -598,7 +710,7 @@ async def test_paramount_pasted_url_proposes_identity_and_published_specs(
         "Compatible with Bambu AMS",
     ))
 
-    async def fetch(requested):
+    async def fetch(requested, **_):
         assert requested == url
         return page
 
@@ -705,11 +817,11 @@ async def test_blocked_manufacturer_page_can_use_a_dated_capture(
     heading = "ABS (Black) 1.75mm 1kg Filament [AB-42]"
     calls = []
 
-    async def fetch(requested):
+    async def fetch(requested, **_):
         assert requested == url
         raise ValueError(error)
 
-    async def archived(requested):
+    async def archived(requested, **_):
         calls.append(requested)
         return Evidence(archive, heading, heading, {"designation": heading}, scopes=(
             heading, 'Spool Size: 2.25" ID / 7.75" OD / 2.25" Depth',
@@ -764,7 +876,7 @@ async def test_bundle_product_specs_survive_storefront_navigation(monkeypatch):
         Bed Temperature 25-60°C, Net Weight 1kg per spool</div>
     </div>"""
     monkeypatch.setattr(sources, "_public_address", lambda *_: "203.0.113.10")
-    monkeypatch.setattr(sources, "_get_pinned", lambda *_: (200, "", "text/html", html.encode()))
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **_kwargs: (200, "", "text/html", html.encode()))
     page = sources._fetch_supplier("https://manufacturer.example/bundle")
     identity = proposals.Identity(
         designation="PLA CMYK Yellow", material="PLA", color="CMYK Yellow",

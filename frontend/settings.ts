@@ -40,6 +40,7 @@ export async function mountSettings() {
     search_url: field('search_url').value.trim(), api_key: field('api_key').value || null,
     clear_key: field('clear_key').checked,
     supplier_sites: sites,
+    supplier_download_mib: field('supplier_download_mib').valueAsNumber,
   })
   const connection = () => JSON.stringify([values().model_url, values().api_key, values().clear_key])
 
@@ -166,9 +167,10 @@ export async function mountSettings() {
 
   function fill(config: {
     model_url: string; model_id: string; search_url: string; has_key: boolean
-    supplier_sites?: SupplierSite[]
+    supplier_sites?: SupplierSite[]; supplier_download_mib: number
   }) {
     for (const key of ['model_url', 'model_id', 'search_url'] as const) field(key).value = config[key]
+    field('supplier_download_mib').valueAsNumber = config.supplier_download_mib
     enableSearch.hidden = !!config.search_url
     searchSetup.hidden = !config.search_url
     field('api_key').value = ''
@@ -185,7 +187,7 @@ export async function mountSettings() {
     if (busy || (action === 'models' ? !field('model_url').reportValidity() : !form.reportValidity())) return
     if (action === 'save' && save.disabled) return
     const requestedConnection = connection()
-    const payload = action === 'models' ? { ...values(), search_url: '' } : values()
+    const payload = action === 'models' ? { ...values(), search_url: '', supplier_download_mib: undefined } : values()
     const inputs = action === 'save' ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)'))
       .filter(input => !sourceControls.contains(input)) : []
     inputs.forEach(input => { input.disabled = true })

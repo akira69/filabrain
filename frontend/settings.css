@@ -12,6 +12,8 @@
 .research-sources { border-block-start: 1px solid var(--border); padding-block-start: .75rem; }
 .research-sources h3, .research-web-search h3 { margin: 0; font-size: 1rem; }
 .research-built-in { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .2rem .85rem; margin: .4rem 0 0; padding: 0; list-style: none; color: var(--text-muted); font-size: .875rem; }
+.research-download-limit { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-block-start: .65rem; }
+.research-download-limit input { width: 5rem; }
 .research-web-search { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .65rem .75rem; }
 .research-search-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
 #research-search-setup { margin-block-start: .55rem; }

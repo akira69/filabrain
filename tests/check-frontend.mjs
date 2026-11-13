@@ -28,6 +28,7 @@ try {
   const writes = []
   let mcpEnabled = false
   let searchUrl = ''
+  let supplierDownloadMiB = 8
   let supplierSites = []
   let savedManufacturerWebsite
   let chatModelId = 'fixture:default'
@@ -81,6 +82,7 @@ try {
     if (path.endsWith('/proposals')) {
       const target = req.postDataJSON()
       if (target.filament_id === 10 && target.action === 'fill') assert.equal(target.model_id, 'fixture:alternate')
+      if (target.product_url) assert.equal(target.product_url, evidence[0].url)
       if (target.guidance) {
         assert.equal(target.action, 'standardize')
         assert.equal(target.filament_id, 10)
@@ -102,6 +104,7 @@ try {
       ], issues: target.mode === 'edit' ? [
         { code: 'manufacturer_color_reference', name: 'RAL 9005 Signal Black', url: evidence[0].url },
         { code: 'manufacturer_website_found', name: manufacturer.name, source: 'FilaManDB', url: 'https://manufacturer.test/' },
+        { code: 'possible_match', name: 'Fixture PLA', source: 'FilaManDB', url: evidence[0].url, product_url: evidence[0].url },
       ] : [] } })
     }
     if (path.endsWith('/settings/mcp')) {
@@ -112,13 +115,14 @@ try {
       const settings = req.method() === 'PUT' ? req.postDataJSON() : null
       if (settings) {
         searchUrl = settings.search_url
+        supplierDownloadMiB = settings.supplier_download_mib
         supplierSites = settings.supplier_sites ?? supplierSites
         if (settings.model_id) chatModelId = settings.model_id
       }
       return route.fulfill({ json: {
         model_url: settings?.model_url || '', model_id: settings?.model_id || '',
         search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
-        supplier_sites: supplierSites,
+        supplier_sites: supplierSites, supplier_download_mib: supplierDownloadMiB,
       } })
     }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
@@ -293,6 +297,9 @@ try {
   await builtIn.getByText('FilaManDB', { exact: true }).waitFor()
   await builtIn.getByText('Open Filament Database', { exact: true }).waitFor()
   assert.equal(await builtIn.getByRole('checkbox').count(), 0)
+  const downloadLimit = sources.getByRole('spinbutton', { name: 'Page and PDF limit (MiB)' })
+  assert.equal(await downloadLimit.inputValue(), '8')
+  await downloadLimit.fill('12')
   const internet = page.getByRole('region', { name: 'Internet search' })
   const supplierDomain = internet.getByRole('textbox', { name: 'Supplier domain' })
   assert.equal(await supplierDomain.isVisible(), false)
@@ -312,6 +319,7 @@ try {
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   await searchField.waitFor()
   assert.equal(await searchField.inputValue(), searchUrl)
+  assert.equal(await downloadLimit.inputValue(), '12')
   assert.equal(await supplier.isChecked(), true)
   await supplier.uncheck()
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
@@ -363,6 +371,14 @@ try {
   await frame.getByRole('button', { name: 'Stage 1 field' }).click()
   await frame.getByText('1 field staged.', { exact: false }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.staged), [{ density_g_cm3: { old: null, value: 1.24 } }])
+  await frame.locator('#research-options > summary').click()
+  await frame.getByRole('button', { name: 'Find specifications' }).click()
+  const researchPage = frame.getByRole('button', { name: 'Research this page' })
+  await researchPage.waitFor()
+  assert.equal(await researchPage.locator('svg[aria-hidden=true]').count(), 1)
+  await researchPage.click()
+  await frame.getByRole('log').getByText('Research this page', { exact: true }).waitFor()
+  await densityChoice.waitFor()
   await frame.locator('#research-options > summary').click()
   await frame.getByRole('button', { name: 'Standardize this filament' }).click()
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Matte/ }).check()
