@@ -1149,11 +1149,15 @@ def _sheet_matches(page: Evidence, titles: set[str], identity: Identity, snapsho
                 labeled.append(label[1] or (cells[index + 1] if index + 1 < len(cells) else ""))
         if len(cells) == 1 or any(re.search(marker, cell, re.IGNORECASE) for cell in cells):
             candidates.extend(cells)
-    if not {_sheet_title(cell) for cell in (labeled or candidates)}.intersection(map(_sheet_title, titles)):
-        return False
     known = _known_variant_fields(identity, snapshot)
+    variants = _sheet_variant_values(page)
+    if titles:
+        if not {_sheet_title(cell) for cell in (labeled or candidates)}.intersection(map(_sheet_title, titles)):
+            return False
+    elif not known["sku"] or variants["sku"] != {known["sku"]}:
+        return False
     return all(known[key] in (None, ()) or not values or values == {known[key]}
-               for key, values in _sheet_variant_values(page).items())
+               for key, values in variants.items())
 
 
 def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
@@ -1164,10 +1168,10 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
     page = replace(page, text=" ".join(rows).strip())
     heading = re.compile(r"(?:建议打印参数\s+)?recommended printing (?:settings|conditions|parameters)(?: data)?", re.IGNORECASE)
     other_section = re.compile(
-        r"(?:sample preparation|test (?:methods?|conditions)|specimen (?:test|printing)|"
-        r"printing test conditions|(?:material |physical |mechanical |thermal )?properties|specifications)\s*:?",
+        r"(?:sample preparation|test (?:methods?|conditions)|(?:material |physical |mechanical |thermal )?properties|specifications)",
         re.IGNORECASE,
     )
+    specimen = re.compile(r"\b(?:specimen (?:test|printing)|printing test conditions)\b", re.IGNORECASE)
     degrees = r"(?:[°˚]\s*C|℃)"
     density_unit = r"g\s*/\s*cm\s*[³3]"
     entries = []
@@ -1177,10 +1181,10 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
         entries.append({"field": field, "value": value, "source": 1, "quote": quote})
 
     for index, (line, row) in enumerate(zip(lines, rows)):
-        section = row.removeprefix("•").strip().rstrip(":：")
+        section = re.sub(r"^(?:[•●]\s*|\d+(?:\.\d+)*[.)]\s+)", "", row).strip().rstrip(":：")
         if heading.fullmatch(section):
             printing = True
-        elif row.startswith("•") or other_section.fullmatch(section):
+        elif row.startswith(("•", "●")) or other_section.fullmatch(section) or specimen.search(section):
             printing = False
         density_row = row.removeprefix("密度 ")
         density = re.fullmatch(
@@ -1761,6 +1765,8 @@ async def research_products(
         if fetch_errors.get(url) == SUPPLIER_TOO_LARGE
     ]
     recovered_urls: set[str] = set()
+    fallback_docs: set[str] = set()
+    official_oversized = {url for url in oversized if url in linked_sheets or _on_manufacturer_site(url, document_domain)}
     line = set(re.findall(r"[^\W_]+", " ".join(_line(identity.designation, identity.color))))
     color = set(_tokens(identity.color))
     sku = "-".join(_product_key(lookup_sku or variant_sku))
@@ -1795,7 +1801,6 @@ async def research_products(
     product_line = " ".join(_line(identity.designation, identity.color)) or lookup_sku
     try:
         async with asyncio.timeout(15):
-            official_oversized = {url for url in oversized if url in linked_sheets or _on_manufacturer_site(url, document_domain)}
             if product_line and document_domain and official_oversized:
                 found = await search(f"site:{document_domain} {product_line} technical data sheet filetype:pdf")
                 links = [
@@ -1807,13 +1812,11 @@ async def research_products(
                     sheet = checked_pages.get(link)
                     if sheet and _on_manufacturer_site(sheet.url, document_domain) and _sheet_matches(sheet, titles, identity, snapshot):
                         authoritative_docs[sheet.url] = replace(sheet, manufacturer_page=True)
-                        if not recovered_urls:
-                            issues.append({"code": "supplier_alternative_found", "url": sheet.url})
-                        recovered_urls.update(official_oversized)
+                        fallback_docs.add(sheet.url)
             # shortcut: check two sites per lookup, raise the budget if common searches need more.
             fallback_by_host = {}
             for url in oversized:
-                if url not in recovered_urls and url not in linked_sheets and (host := _site_host(url)):
+                if url not in linked_sheets and not (fallback_docs and url in official_oversized) and (host := _site_host(url)):
                     fallback_by_host.setdefault(host, url)
             for host, original in list(fallback_by_host.items())[:2]:
                 matches = []
@@ -1890,8 +1893,6 @@ async def research_products(
         if page is None:
             reason = fetch_errors.get(url)
             if reason == SUPPLIER_TOO_LARGE:
-                if url not in recovered_urls:
-                    issues.append({"code": "supplier_download_limit", "url": public_link(url)})
                 continue
             source_name = "Manufacturer page" if url in linked_sheets or _on_manufacturer_site(url, manufacturer_domain) else "Supplier page"
             issues.append({"code": "unavailable_source", "source": source_name,
@@ -1926,12 +1927,15 @@ async def research_products(
             issues.append({"code": "ambiguous_match", "source": "Supplier pages"})
         unresolved_variants = True
     known_variant = _known_variant_fields(supplier_identity, snapshot)
+    recovered_sheet = None
     for sheet in authoritative_docs.values():
         if sheet not in matching_docs or unresolved_variants and any(
             values and known_variant[key] in (None, ()) for key, values in _sheet_variant_values(sheet).items()
         ):
             issues.append({"code": "manual_datasheet", "url": sheet.url})
             continue
+        if sheet.url in fallback_docs and recovered_sheet is None:
+            recovered_sheet = sheet.url
         issues.insert(0, {"code": "manufacturer_page", "name": sheet.title, "url": sheet.url})
         add("datasheet_url", sheet.url, [{"url": sheet.url, "title": sheet.title, "evidence": "Technical Data Sheet"}], primary=True, datasheet=True)
         sheet_values, sheet_conflicts = _sheet_specs(sheet)
@@ -1939,6 +1943,14 @@ async def research_products(
             add(result["field"], result["value"], result["sources"], primary=True, datasheet=True)
         for issue in sheet_conflicts:
             remember_conflict(issue, primary=True, datasheet=True)
+    if recovered_sheet:
+        recovered_urls.update(official_oversized)
+        issues.append({"code": "supplier_alternative_found", "url": recovered_sheet})
+    issues.extend(
+        {"code": "supplier_download_limit", "url": public_link(url)}
+        for url in dict.fromkeys([*direct_urls, *pages])
+        if fetch_errors.get(url) == SUPPLIER_TOO_LARGE and url not in recovered_urls
+    )
 
     has_published_color = False
     if not unresolved_variants:

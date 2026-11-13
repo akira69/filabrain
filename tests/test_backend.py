@@ -198,7 +198,8 @@ async def test_oversized_supplier_page_finds_specific_replacement(installed, db_
 
 
 @pytest.mark.parametrize("store_host", ["us.fixturebrand.example", "fixturebrand.example"])
-async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(installed, monkeypatch, store_host):
+@pytest.mark.parametrize("ambiguous", [False, True])
+async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(installed, monkeypatch, store_host, ambiguous):
     from filabrain import proposals
 
     site = "https://fixturebrand.example/"
@@ -222,7 +223,10 @@ async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(install
         if url == site:
             return proposals.Evidence(url, "Fixture Brand | 3D printing filament", "Fixture Brand makes filament.")
         assert url in (sheet, wrong)
-        content = sheet_text if url == sheet else sheet_text.replace("PolyTerra TM PLA", "PolyTerra™ PLA+")
+        if ambiguous:
+            content = sheet_text + f"\nSKU: {'PT-001' if url == sheet else 'PT-002'}"
+        else:
+            content = sheet_text if url == sheet else sheet_text.replace("PolyTerra TM PLA", "PolyTerra™ PLA+")
         return proposals.Evidence(url, "Technical data sheet", content, datasheet=True)
 
     async def search(_url, query):
@@ -257,6 +261,11 @@ async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(install
     })
     assert response.is_success, response.text
     result = response.json()
+    if ambiguous:
+        assert {"code": "supplier_download_limit", "url": store} in result["issues"]
+        assert not any(issue["code"] == "supplier_alternative_found" for issue in result["issues"])
+        assert not result["suggestions"]
+        return
     assert {"code": "supplier_alternative_found", "url": sheet} in result["issues"]
     assert not any(issue.get("url") in (store, wrong, fake) for issue in result["issues"])
     specs = {suggestion["field"]: suggestion for suggestion in result["suggestions"]}
@@ -329,10 +338,26 @@ async def test_datasheet_product_label_overrides_generic_header_cell():
     assert not proposals._sheet_matches(page, {"PLA"}, identity)
 
 
+async def test_datasheet_matches_sku_only_with_explicit_exact_label():
+    from filabrain import proposals
+
+    identity = proposals.Identity(sku="FP-1234")
+    sheet = proposals.Evidence(
+        "https://manufacturer.example/technical.pdf", "Technical data sheet",
+        "Technical Data Sheet\nFast PLA\nSKU: FP-1234", datasheet=True,
+    )
+    assert proposals._sheet_matches(sheet, proposals._product_titles(identity), identity)
+    assert not proposals._sheet_matches(proposals.replace(sheet, text=sheet.text + "\nSKU: FP-1235"), set(), identity)
+
+
 @pytest.mark.parametrize("section, expected", [
     ("• Sample Preparation\nNozzle Temperature 240 °C", {}),
     ("• Recommended Printing Settings\nNozzle Temperature 210 °C\n"
      "• Sample Preparation\nBed Temperature 70 °C", {"extruder_temp_range_c": {"min": 210, "max": 210}}),
+    ("Recommended Printing Settings\nNozzle Temperature 210 °C\n"
+     "Specimen Printing Parameters\nBed Temperature 70 °C", {"extruder_temp_range_c": {"min": 210, "max": 210}}),
+    ("Recommended Printing Settings\nNozzle Temperature 210 °C\n"
+     "1. Sample Preparation\nBed Temperature 70 °C", {"extruder_temp_range_c": {"min": 210, "max": 210}}),
 ])
 async def test_datasheet_extracts_only_recommended_temperatures(section, expected):
     from filabrain import proposals
