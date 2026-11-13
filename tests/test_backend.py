@@ -551,15 +551,16 @@ async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed,
             assert density is None
 
 
-async def test_supplier_sitemap_follows_product_index_without_fetching_pages(monkeypatch):
+@pytest.mark.parametrize("has_robots_declaration", [True, False])
+async def test_supplier_sitemap_follows_product_index_without_fetching_pages(monkeypatch, has_robots_declaration):
     from filabrain import sources
 
-    site = "https://sitemap-fixture.example"
+    site = f"https://sitemap-fixture-{has_robots_declaration}.example".lower()
     product = f"{site}/products/abs-black"
     requests = []
     bodies = {
-        "/robots.txt": f"Sitemap: {site}/index.xml",
-        "/index.xml": (
+        "/robots.txt": f"Sitemap: {site}/index.xml" if has_robots_declaration else "User-agent: *",
+        "/index.xml" if has_robots_declaration else "/sitemap_index.xml": (
             f"<sitemapindex><sitemap><loc>{site}/products.xml</loc></sitemap>"
             "<sitemap><loc>https://other.example/index.xml</loc></sitemap></sitemapindex>"
         ),
@@ -568,14 +569,102 @@ async def test_supplier_sitemap_follows_product_index_without_fetching_pages(mon
 
     def fetch(url, _address, _deadline, *, max_bytes, index):
         assert index and max_bytes == 512 * 1024
-        assert url.hostname == "sitemap-fixture.example"
+        assert url.hostname == site.removeprefix("https://")
         requests.append(url.path)
+        if url.path == "/sitemap.xml":
+            raise ValueError(sources.SUPPLIER_TOO_LARGE)
         return 200, "", "text/xml", bodies[url.path].encode()
 
     monkeypatch.setattr(sources, "_public_address", lambda *_: "203.0.113.10")
     monkeypatch.setattr(sources, "_get_pinned", fetch)
     assert await sources.supplier_sitemap_urls(f"{site}/oversized") == (product,)
-    assert requests == ["/robots.txt", "/index.xml", "/products.xml"]
+    indexes = ["/index.xml"] if has_robots_declaration else ["/sitemap.xml", "/sitemap_index.xml"]
+    assert requests == ["/robots.txt", *indexes, "/products.xml"]
+
+
+async def test_datasheet_link_parser_recognizes_filename_and_accessible_labels():
+    from filabrain import sources
+
+    parser = sources._ProductPage()
+    parser.feed("""
+        <a href="/docs/PolyTerra_SDS_EN.pdf">US - EN</a>
+        <a href="/docs/TDS_PolyTerra_PLA_V6.0.pdf" download>US - EN</a>
+        <a href="/docs/alternate.pdf?filename=TDS%28English%29">English</a>
+        <a href="/docs/french.pdf" aria-label="Technical Data Sheet">FR</a>
+        <a href="/docs/PolyTerra_TDS%2EPDF">English</a>
+        <a href="/download/123" download="PolyTerra_TDS.pdf">US - EN</a>
+        <a href="/docs/plaTDSunrelated.pdf">Product guide</a>
+    """)
+    parser.close()
+    assert parser.datasheets == [
+        "/docs/TDS_PolyTerra_PLA_V6.0.pdf",
+        "/docs/alternate.pdf?filename=TDS%28English%29",
+        "/docs/french.pdf",
+        "/docs/PolyTerra_TDS%2EPDF",
+        "/download/123",
+    ]
+
+
+async def test_datasheet_discovery_from_official_sitemap_without_search(installed, monkeypatch):
+    from filabrain import proposals, sources
+
+    site = "https://fixture-maker.example"
+    original = "https://shop.fixture-maker.example/products/polyterra-pla"
+    product = site + "/product/polyterra-pla/"
+    sheet = site + "/docs/TDS_PolyTerra_PLA_V6.0.pdf"
+
+    async def fetch(url, *, max_bytes):
+        assert max_bytes == 2 * 1024 * 1024
+        if url == site + "/":
+            return proposals.Evidence(url, "Fixture Maker", "3D printing filament")
+        if url == original:
+            raise ValueError(sources.SUPPLIER_TOO_LARGE)
+        if url == sheet:
+            return proposals.Evidence(
+                url, "Technical data sheet", "Technical Data Sheet\nPolyTerra PLA\nDensity 1.31 g/cm³", datasheet=True,
+            )
+        if url == product:
+            parser = sources._ProductPage()
+            parser.feed(f'<a href="{sheet}" download>US - EN</a>')
+            parser.close()
+            # Discovery must work even when the HTML has no usable specs for this color.
+            return proposals.Evidence(url, "PolyTerra PLA", "", datasheets=tuple(parser.datasheets))
+        return proposals.Evidence(url, "Downloads", "")
+
+    async def sitemap(_url):
+        return (site + "/faq/does-polyterra-pla-print-fast/", site + "/library/polyterra-pla-sds/", product)
+
+    async def no_search(*_):
+        pytest.fail("Search must stay disabled")
+
+    async def no_manufacturer_website(_):
+        return None
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.setattr(proposals, "search_web", no_search)
+    monkeypatch.setattr(proposals, "manufacturer_website", no_manufacturer_website)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    assert (await installed.put(f"{BASE}/settings", json={"supplier_download_mib": 2})).is_success
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "product_url": original,
+        "identity": {"manufacturer": "Fixture Maker", "designation": "PolyTerra PLA", "color": "Forest Green"},
+    })
+    assert response.is_success, response.text
+    result = response.json()
+    density = next((row for row in result["suggestions"] if row["field"] == "density_g_cm3"), None)
+    assert density and density["value"] == 1.31 and density["sources"][0]["url"] == sheet
+    assert {"code": "supplier_alternative_found", "url": sheet} in result["issues"]
+    assert not any(row["code"] == "supplier_download_limit" for row in result["issues"])
 
 
 @pytest.mark.parametrize("domain", ["https://example.org", "localhost", "192.168.0.1", "example.org path"])

@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, replace
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import quote, urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -23,6 +23,9 @@ SUPPLIER_TOO_LARGE = "Supplier page is too large"
 MAX_TEXT = 12_000
 MAX_SEARCH_RESPONSE_BYTES = 512 * 1024
 SHARED_SPEC = re.compile(r"\b(?:applies to all variants|same for all variants|all variants share)\b", re.IGNORECASE)
+DATASHEET_LABEL = re.compile(
+    r"(?<![^\W_])(?:technical[ _-]*data[ _-]*sheet|tds)(?![^\W_])", re.IGNORECASE
+)
 _supplier_cooldowns = TTLCache()
 _product_sitemaps = TTLCache()
 
@@ -133,11 +136,14 @@ class _ProductPage(HTMLParser):
                 self._main_tag = tag
                 self._main_depth = 1
         if tag == "a" and self._skip is None:
-            href = dict(attrs).get("href") or ""
+            attributes = dict(attrs)
+            href = (attributes.get("href") or "").strip()
+            filename = attributes.get("download") or ""
+            decoded_href = unquote(href)
             # Keep only PDF links. The supplier fetcher validates every URL and redirect.
-            if re.search(r"\.pdf(?:[?#]|$)", href, re.IGNORECASE):
+            if href and (re.search(r"\.pdf(?:[?#]|$)", decoded_href, re.IGNORECASE) or filename.lower().endswith(".pdf")):
                 self._pdf_link = href
-                self._link_text.clear()
+                self._link_text = [attributes.get("aria-label") or "", attributes.get("title") or "", filename, decoded_href]
         if tag in ("script", "style", "noscript", "template"):
             self._skip = tag
             if tag == "script" and dict(attrs).get("type") == "application/ld+json":
@@ -154,8 +160,7 @@ class _ProductPage(HTMLParser):
 
     def handle_endtag(self, tag):
         if tag == "a" and self._pdf_link:
-            label = " ".join(self._link_text) + " " + self._pdf_link
-            if re.search(r"technical[ _-]*data[ _-]*sheet|\btds\b", label, re.IGNORECASE):
+            if DATASHEET_LABEL.search(" ".join(self._link_text)):
                 self.datasheets.append(self._pdf_link)
             self._pdf_link = None
         if tag == self._skip:
@@ -492,7 +497,7 @@ async def supplier_sitemap_urls(url: str) -> tuple[str, ...]:
         declared = re.findall(r"(?im)^[ \t]*sitemap:[ \t]*(https?://[^\s#]+)", robots)
         children = []
         products = []
-        for sitemap in dict.fromkeys([*declared[:1], f"{origin}/sitemap.xml"]):
+        for sitemap in dict.fromkeys([*declared[:1], f"{origin}/sitemap.xml", f"{origin}/sitemap_index.xml"]):
             links, indexes = entries(sitemap)
             products.extend(links)
             children.extend(indexes)

@@ -1456,17 +1456,20 @@ async def research_products(
             # Require a brand-owned-looking host and a branded filament homepage.
             brand = re.sub(r"[^a-z0-9]", "", _norm(identity.manufacturer))
             homepages = []
+            product_home = None
             if len(brand) >= 3:
                 product_publisher = _publisher(product_url or (snapshot or {}).get("shop_url"))
                 if re.sub(r"[^a-z0-9]", "", product_publisher.split(".")[0]) == brand:
-                    homepages.append(f"https://{product_publisher}/")
+                    product_home = f"https://{product_publisher}/"
+                    homepages.append(product_home)
                 for url in await search(f"{identity.manufacturer} filament official website"):
                     if re.sub(r"[^a-z0-9]", "", _publisher(url).split(".")[0]) == brand:
                         link = manufacturer_site_url(url)
                         if link:
                             homepages.append(urlunsplit(urlsplit(link)._replace(path="/")))
+            homepage_pages = await check_pages(homepages)
             matches = {
-                site for page in (await check_pages(homepages)).values()
+                site for page in homepage_pages.values()
                 if page and _literal_in(identity.manufacturer, page.title)
                 and re.search(r"filament|3d print", page.title + " " + page.text, re.IGNORECASE)
                 and re.sub(r"[^a-z0-9]", "", _publisher(page.url).split(".")[0]) == brand
@@ -1476,11 +1479,15 @@ async def research_products(
             candidates = home_sites or matches
             if len(candidates) == 1:
                 discovered = next(iter(candidates))
-                source = "SearXNG"
+                direct_homepage = homepage_pages.get(product_home)
+                source = (
+                    "Product URL" if direct_homepage and manufacturer_site_url(direct_homepage.url) == discovered
+                    else "SearXNG"
+                )
         if discovered:
             manufacturer_site = discovered
             search_domain = _site_host(discovered)
-            if source != "SearXNG":
+            if source in ("FilaManDB", "Manufacturer product page"):
                 manufacturer_domain = search_domain
             if snapshot is not None and is_missing("manufacturer_url", snapshot.get("manufacturer_url")):
                 issues.append({
@@ -1802,7 +1809,9 @@ async def research_products(
     fallback_docs: set[str] = set()
     oversized_sheets = set(oversized) & linked_sheets.keys()
     official_oversized = oversized_sheets | {url for url in oversized if _on_manufacturer_site(url, document_domain)}
-    line = set(re.findall(r"[^\W_]+", " ".join(_line(identity.designation, identity.color))))
+    product_line = " ".join(_line(identity.designation, identity.color))
+    line = set(re.findall(r"[^\W_]+", product_line))
+    product_slug = _product_key(product_line)
     color = set(_tokens(identity.color))
     sku = "-".join(_product_key(lookup_sku or variant_sku))
 
@@ -1857,7 +1866,7 @@ async def research_products(
                 alternative = page.url
         return alternative
 
-    product_line = " ".join(_line(identity.designation, identity.color)) or lookup_sku
+    product_line = product_line or lookup_sku
     try:
         async with network_time(15):
             if product_line and document_domain and official_oversized:
@@ -1889,7 +1898,7 @@ async def research_products(
             for host, (sitemap_origin, original) in list(fallback_by_host.items())[:2]:
                 if original in recovered_urls:
                     continue
-                recover_sheet = host == document_domain and bool(oversized_sheets)
+                recover_sheet = host == document_domain and bool(official_oversized)
                 recover_product = original not in oversized_sheets
                 matches = []
                 path_terms = url_words(original) - {"store", "shop", "products", "product"}
@@ -1902,14 +1911,16 @@ async def research_products(
                     path = "-".join(_product_key(unquote(urlsplit(link).path)))
                     sku_match = bool(sku and f"-{sku}-" in f"-{path}-")
                     if sku_match or (line and line <= words) or (resolve_pasted_url and path_terms and path_terms <= words):
-                        matches.append((link, sku_match, len(words & color)))
-                matches.sort(key=lambda match: (-match[1], -match[2]))
+                        slug = unquote(urlsplit(link).path.rstrip("/").rsplit("/", 1)[-1])
+                        exact_slug = bool(product_slug and _product_key(slug) == product_slug)
+                        matches.append((link, sku_match, len(words & color), exact_slug))
+                matches.sort(key=lambda match: (-match[1], -match[2], -match[3]))
                 alternative = await check_alternatives(
-                    host, [url for url, _, _ in matches[:2]],
+                    host, [url for url, *_ in matches[:2]],
                     recover_sheet=recover_sheet, recover_product=recover_product,
                 )
                 query = supplier_query if identity.designation or lookup_sku else " ".join(sorted(url_words(original)))
-                if query and (not alternative or (recover_sheet and not has_usable_fallback())):
+                if query and (not alternative or (recover_sheet and oversized_sheets and not has_usable_fallback())):
                     found = await check_alternatives(
                         host, await search(f"site:{host} {query} technical data sheet"),
                         recover_sheet=recover_sheet, recover_product=recover_product and not alternative,
