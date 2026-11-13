@@ -77,6 +77,16 @@ function appendSources(row: HTMLElement, sources: ResearchOption['sources']) {
   }
 }
 
+function issueText(issue: ResearchProposal['issues'][number]) {
+  const key = `filaBrain.${issue.code}`
+  const message = t(key, {
+    name: issue.name || (issue.field ? researchFieldLabel(issue.field) : ''),
+    source: issue.source || '',
+  })
+  const explanation = message === key ? issue.code.replaceAll('_', ' ') : message
+  return explanation + (issue.reason ? ` (${issue.reason})` : '')
+}
+
 export function mountResearch(status: Status, chat: Chat, openChat: () => void, editor?: EditorContext) {
   const form = element<HTMLFormElement>('product-research')
   const researchMark = document.querySelector<SVGElement>('#plugin-header .filabrain-mark')!
@@ -192,6 +202,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     reply.hidden = true
   }
 
+  function showResearchError(error: unknown) {
+    conversation.hidden = false
+    notice.textContent = errorText(error)
+  }
+
   function selected() {
     const units: Unit[] = []
     const seen = new Set<string>()
@@ -269,13 +284,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     for (const issue of proposal.issues) {
       const p = document.createElement('p')
       if (sourceNotes.has(issue.code)) p.className = 'research-note'
-      const key = `filaBrain.${issue.code}`
-      const explanation = t(key, {
-        name: issue.name || (issue.field ? researchFieldLabel(issue.field) : ''),
-        source: issue.source || '',
-      })
-      p.textContent = explanation === key ? issue.code.replaceAll('_', ' ') : explanation
-      if (issue.reason) p.append(` (${issue.reason})`)
+      p.textContent = issueText(issue)
       const productUrl = issue.product_url && /^https?:\/\//i.test(issue.product_url) ? issue.product_url : undefined
       const actions = productUrl ? document.createElement('span') : null
       if (issue.filament_id && issue.code === 'duplicate') {
@@ -335,7 +344,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         choose.addEventListener('click', () => {
           const input = form.elements.namedItem('product_url') as HTMLInputElement
           input.value = productUrl
-          if (form.reportValidity()) void search('fill', '', label)
+          if (form.reportValidity()) void search('fill', '', label).catch(showResearchError)
         })
         actions.append(choose)
         p.append(actions)
@@ -449,10 +458,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
 
   form.addEventListener('submit', event => {
     event.preventDefault()
-    void search((event.submitter as HTMLButtonElement | null)?.value || 'fill').catch(error => {
-      conversation.hidden = false
-      notice.textContent = errorText(error)
-    })
+    void search((event.submitter as HTMLButtonElement | null)?.value || 'fill').catch(showResearchError)
   })
 
   function reset() {
@@ -489,24 +495,39 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         item.className = 'research-history-value'
         item.textContent = `${researchFieldLabel(field)}: ${valueText(value)}`
         appendSources(item, sources)
-        details.append(item)
+        return item
       }
-      for (const result of proposal.suggestions) row(result.field, result.value, result.sources)
+      for (const result of proposal.suggestions) details.append(row(result.field, result.value, result.sources))
       for (const unit of proposal.proposals || []) {
         for (const [field, change] of Object.entries(unit.fields)) {
-          row(field, change.value, unit.sources.map(source => ({ ...source, evidence: source.quote })))
+          details.append(row(field, change.value, unit.sources.map(source => ({ ...source, evidence: source.quote }))))
         }
       }
-      const links = new Set<string>()
+      const seenIssues = new Set<string>()
       for (const issue of proposal.issues) {
-        for (const option of issue.options || []) {
-          if (issue.field) row(issue.field, option.value, option.sources)
-        }
-        if (issue.url && /^https?:\/\//i.test(issue.url) && !links.has(issue.url)) {
-          links.add(issue.url)
-          const line = document.createElement('p')
-          line.append(externalLink(issue.url, issue.name || t('filaBrain.openSource')))
-          details.append(line)
+        const explanation = issueText(issue)
+        const url = issue.url && /^https?:\/\//i.test(issue.url) ? issue.url : undefined
+        const line = document.createElement('p')
+        line.textContent = explanation
+        if (url) line.append(' ', externalLink(url, t('filaBrain.openSource')))
+        if (issue.field && issue.options?.length) {
+          const group = document.createElement('fieldset')
+          const legend = document.createElement('legend')
+          legend.textContent = researchFieldLabel(issue.field)
+          group.append(legend, line)
+          if (issue.requires_product_choice) {
+            const variant = document.createElement('p')
+            variant.textContent = t('filaBrain.chooseProductFirst')
+            group.append(variant)
+          }
+          for (const option of issue.options) group.append(row(issue.field, option.value, option.sources))
+          details.append(group)
+        } else {
+          const key = JSON.stringify([explanation, url])
+          if (!seenIssues.has(key)) {
+            seenIssues.add(key)
+            details.append(line)
+          }
         }
       }
       return details
