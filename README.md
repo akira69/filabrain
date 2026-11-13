@@ -18,6 +18,8 @@ Upload the ZIP from `dist/` under **Admin → System → Plugins**. Enable **Fil
 
 The package includes the FilaBrain sidebar icon and uses FilaMan’s filament editor and selected-filament integration hooks.
 
+For PDF datasheet extraction, install Poppler (`poppler-utils` on Debian and Ubuntu) in the environment running FilaMan. For a Docker deployment, include it in the FilaMan image so it survives container recreation. Without `pdftotext`, FilaBrain can link to PDFs for manual review.
+
 Rebuild the bundled page after editing the icon or files in `frontend/`.
 
 ```sh
@@ -34,7 +36,7 @@ Attach the search container to the Docker network used by FilaMan and enter `htt
 FILAMAN_NETWORK=your-filaman-network docker compose -f compose.searxng.yml up -d
 ```
 
-The search service stays on that Docker network and serves JSON results. When a public product page blocks access, FilaBrain can check a dated Wayback Machine capture if one is available. PDF extraction uses `pdftotext` when it is available on the FilaMan host.
+The search service stays on that Docker network and serves JSON results. When a public product page blocks access, FilaBrain can check a dated Wayback Machine capture if one is available.
 
 **Research sources** lists the built-in sources. Add supplier domains under **Internet search** to include them in targeted SearXNG searches. General search can still find unchecked sites. The page and PDF download limit defaults to 8 MiB per file and can be changed under **Research sources**. When a page exceeds the limit, FilaBrain looks for a more specific product page or datasheet in the supplier’s sitemap or through a targeted search.
 

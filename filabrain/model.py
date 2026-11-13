@@ -86,14 +86,15 @@ def _valid_value(field: str, value, evidence: str) -> bool:
         or values != sorted(values)
     ):
         return False
+    degrees = r"(?:[°˚]\s*c|℃)"
     unit_patterns = {
         "density_g_cm3": r"g\s*/\s*cm(?:³|3|\^3)",
         "raw_material_weight_g": r"(?:kg|g)\b",
-        "drying_temp_c": r"(?:°\s*c|℃)",
+        "drying_temp_c": degrees,
         "drying_time_hours": r"(?:hours?|hrs?|h)\b",
         "diameter_mm": r"mm\b",
-        "extruder_temp_range_c": r"(?:°\s*c|℃)",
-        "bed_temp_range_c": r"(?:°\s*c|℃)",
+        "extruder_temp_range_c": rf"(?:{degrees}|\({degrees}\))",
+        "bed_temp_range_c": rf"(?:{degrees}|\({degrees}\))",
         "default_spool_weight_g": r"(?:kg|g)\b",
         "spool_outer_diameter_mm": r"mm\b",
         "spool_width_mm": r"mm\b",

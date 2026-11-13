@@ -1120,9 +1120,12 @@ def _known_variant_fields(identity: Identity, snapshot) -> dict:
 
 
 def _sheet_matches(page: Evidence, titles: set[str], identity: Identity, snapshot=None) -> bool:
-    header = {_norm(row) for row in [line for line in page.text.splitlines() if line.strip()][:8]}
+    header = [
+        _norm(re.sub(r"[™®]|\btm\b", " ", row, flags=re.IGNORECASE))
+        for row in [line for line in page.text.splitlines() if line.strip()][:8]
+    ]
     if not (
-        page.datasheet and any("technical data sheet" in line for line in header)
+        page.datasheet and re.search(r"\btechnical data\s*sheet\b", " ".join(header))
         and titles.intersection(header)
     ):
         return False
@@ -1134,33 +1137,49 @@ def _sheet_matches(page: Evidence, titles: set[str], identity: Identity, snapsho
 def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
     # Specimen test settings and heatbed drying are separate from the general
     # printing settings and the oven drying fields in the filament record.
-    rows = [" ".join(line.split()) for line in page.text.splitlines()]
+    lines = page.text.splitlines()
+    rows = [" ".join(line.split()) for line in lines]
     page = replace(page, text="\n".join(rows))
+    heading = re.compile(r"recommended printing (?:settings|conditions)", re.IGNORECASE)
+    has_heading = any(heading.fullmatch(row) for row in rows)
+    degrees = r"(?:[°˚]\s*C|℃)"
     entries = []
     printing = False
+
     def add(field, value, quote):
         entries.append({"field": field, "value": value, "source": 1, "quote": quote})
 
-    for row in rows:
+    for line, row in zip(lines, rows):
         if re.search(r"\bspecimen (?:test|printing)\b", row, re.IGNORECASE):
             break
-        if row.startswith("•") or row.casefold() == "recommended printing settings":
-            printing = "recommended printing settings" in row.casefold()
-        density = re.fullmatch(r"Density\b.*?\s(\d+(?:\.\d+)?)\s*g\s*/\s*cm[³3]", row, re.IGNORECASE)
+        if heading.fullmatch(row) or (not has_heading and row.startswith("•")):
+            printing = True
+        density = re.fullmatch(
+            rf"Density\b.*?\s(\d+(?:\.\d+)?)\s*g\s*/\s*cm[³3](?:\s+at\s+\d+(?:\.\d+)?\s*{degrees})?",
+            row, re.IGNORECASE,
+        )
         if density:
             add("density_g_cm3", float(density[1]), row)
         if not printing:
             continue
-        temperature = re.fullmatch(
-            r"(Nozzle|Bed) Temperature\s*:?\s*(\d+)(?:\s*[-–]\s*(\d+))?\s*°\s*C", row, re.IGNORECASE
-        )
-        if temperature:
-            field = "extruder_temp_range_c" if temperature[1].casefold() == "nozzle" else "bed_temp_range_c"
-            add(field, {"min": int(temperature[2]), "max": int(temperature[3] or temperature[2])}, row)
-        drying = re.fullmatch(r"(?:Blast )?Drying Oven:\s*(\d+)\s*°\s*C\s*[,，]\s*(\d+)\s*h(?:ours?)?", row, re.IGNORECASE)
-        if drying:
-            add("drying_temp_c", int(drying[1]), row)
-            add("drying_time_hours", int(drying[2]), row)
+        for column in re.split(r"[ \t]{3,}(?=[a-zA-Z])", line.strip()):
+            column = " ".join(column.split())
+            temperature = re.fullmatch(
+                rf"(Nozzle|Bed|Build plate) Temperature\s*:?\s*(\d+)"
+                rf"(?:\s*[-–]\s*(\d+))?\s*(?:{degrees}|\({degrees}\))",
+                column, re.IGNORECASE,
+            )
+            if temperature:
+                field = "extruder_temp_range_c" if temperature[1].casefold() == "nozzle" else "bed_temp_range_c"
+                add(field, {"min": int(temperature[2]), "max": int(temperature[3] or temperature[2])}, column)
+            drying = re.fullmatch(
+                rf"(?:Blast Drying Oven|Drying (?:Oven|temp\.? and time))\s*:?\s*(\d+)\s*{degrees}"
+                r"(?:\s*[,，]\s*|\s+for\s+)(\d+)\s*h(?:ours?)?",
+                column, re.IGNORECASE,
+            )
+            if drying:
+                add("drying_temp_c", int(drying[1]), column)
+                add("drying_time_hours", int(drying[2]), column)
     return extract_proposal({"suggestions": entries}, [page])
 
 
@@ -1688,7 +1707,7 @@ async def research_products(
         return set(re.findall(r"[^\W_]+", unquote(urlsplit(url).path).casefold()))
 
     oversized = {}
-    for url in pages:
+    for url in dict.fromkeys([*direct_urls, *pages]):
         if fetch_errors.get(url) == SUPPLIER_TOO_LARGE and (host := _site_host(url)):
             oversized.setdefault(host, url)
     recovered = set()
@@ -1717,10 +1736,29 @@ async def research_products(
                 return page.url
         return None
 
+    document_domain = manufacturer_domain or search_domain
+    product_line = " ".join(_line(identity.designation, identity.color))
     try:
         async with asyncio.timeout(15):
             # shortcut: check two sites per lookup, raise the budget if common searches need more.
             for host, original in list(oversized.items())[:2]:
+                if product_line and host != document_domain and _on_manufacturer_site(original, document_domain):
+                    results = await search(f"site:{document_domain} {product_line} technical data sheet filetype:pdf")
+                    links = [
+                        link for url in results if (link := public_link(url))
+                        and _on_manufacturer_site(link, document_domain) and urlsplit(link).path not in ("", "/")
+                    ]
+                    await check_pages(links)
+                    sheet = next((
+                        page for link in links if (page := checked_pages.get(link))
+                        and _on_manufacturer_site(page.url, document_domain)
+                        and _sheet_matches(page, titles, identity, snapshot)
+                    ), None)
+                    if sheet:
+                        authoritative_docs[sheet.url] = replace(sheet, manufacturer_page=True)
+                        recovered.add(host)
+                        issues.append({"code": "supplier_alternative_found", "url": sheet.url})
+                        continue
                 matches = []
                 for url in await supplier_sitemap_urls(original):
                     if not (link := public_link(url)) or _site_host(link) != host or supplier_page_url(link) in checked_pages:

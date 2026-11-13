@@ -178,6 +178,83 @@ async def test_oversized_supplier_page_finds_specific_replacement(installed, db_
     assert any("technical data sheet" in query for query in searches) is not has_sitemap
 
 
+async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(installed, monkeypatch):
+    from filabrain import proposals
+
+    site = "https://fixturebrand.example/"
+    store = "https://us.fixturebrand.example/products/matte-pla"
+    sheet = f"{site}documents/polyterra.pdf"
+    wrong = f"{site}documents/polyterra-plus.pdf"
+    fake = "https://fixturebrand.example.unrelated.example/documents/polyterra.pdf"
+    sheet_text = (
+        "TECHNICAL\nDATA SHEET\nV6.0\n\nPolyTerra TM PLA\n"
+        "Density             ISO1183             1.31g/cm3 at 23°C\n"
+        "Nozzle temperature                    250 (°C)\n"
+        "RECOMMENDED PRINTING CONDITIONS\n"
+        "Nozzle temperature                 190 – 230 (°C)                 Printing speed          50 - 300 (mm/s)\n"
+        "Build plate temperature            25 - 50 (˚C)                   Drying temp. and time   55˚C for 6h\n"
+    )
+
+    async def fetch(url, *, max_bytes):
+        assert max_bytes == 2 * 1024 * 1024
+        if url == store:
+            raise ValueError(proposals.SUPPLIER_TOO_LARGE)
+        if url == site:
+            return proposals.Evidence(url, "Fixture Brand | 3D printing filament", "Fixture Brand makes filament.")
+        assert url in (sheet, wrong)
+        content = sheet_text if url == sheet else sheet_text.replace("PolyTerra TM PLA", "PolyTerra™ PLA+")
+        return proposals.Evidence(url, "Technical data sheet", content, datasheet=True)
+
+    async def search(_url, query):
+        if query == "Fixture Brand filament official website":
+            return [site]
+        if query == "site:fixturebrand.example polyterra pla technical data sheet filetype:pdf":
+            return [fake, wrong, sheet]
+        return []
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def no_results(_manufacturer):
+        return []
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", no_results)
+    monkeypatch.setattr(proposals, "manufacturer_website", no_results)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    assert (await installed.put(f"{BASE}/settings", json={
+        "search_url": "http://searxng:8080", "supplier_download_mib": 2,
+    })).is_success
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "product_url": store,
+        "identity": {"manufacturer": "Fixture Brand", "designation": "PolyTerra PLA - Forest Green", "color": "Forest Green"},
+    })
+    assert response.is_success, response.text
+    result = response.json()
+    assert {"code": "supplier_alternative_found", "url": sheet} in result["issues"]
+    assert not any(issue.get("url") in (store, wrong, fake) for issue in result["issues"])
+    specs = {suggestion["field"]: suggestion for suggestion in result["suggestions"]}
+    expected = {
+        "density_g_cm3": 1.31,
+        "extruder_temp_range_c": {"min": 190, "max": 230},
+        "bed_temp_range_c": {"min": 25, "max": 50},
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "datasheet_url": sheet,
+    }
+    assert {field: spec["value"] for field, spec in specs.items()} == expected
+    for field, spec in specs.items():
+        assert {source["url"] for source in spec["sources"]} == {sheet}
+        if field != "datasheet_url":
+            assert spec["sources"][0]["evidence"] in " ".join(sheet_text.split())
+
+
 async def test_supplier_sitemap_follows_product_index_without_fetching_pages(monkeypatch):
     from filabrain import sources
 
