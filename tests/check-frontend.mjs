@@ -24,9 +24,11 @@ const fixtureBatch = {
 }
 
 try {
-  const page = await browser.newPage()
+  const context = await browser.newContext()
+  const page = await context.newPage()
   page.setDefaultTimeout(5_000)
   const writes = []
+  const savePaths = []
   let mcpEnabled = false
   let searchUrl = ''
   let supplierDownloadMiB = 8
@@ -43,9 +45,13 @@ try {
   let heldModelList
   let staleBatchOnce = false
   let libraryReads = 0
+  let editorRecordToken = 'c'.repeat(32)
+  let hostEditorToken
+  let editorMode = 'edit'
+  let recordUnavailable = false
   let supportsRecordToken = true
   let hostSendsIdentity = false
-  await page.route('https://fila.test/**', async route => {
+  await context.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
     if (path.startsWith('/plugin-page/')) return route.fulfill({ contentType: 'text/html', body: html })
@@ -79,8 +85,8 @@ try {
         window.addEventListener('message', event => {
           if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
           const { type, request_id, units } = event.data;
-          if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'edit',
-            filament_id:10, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75 }}, location.origin)
+          if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'${editorMode}',
+            filament_id:${editorMode === 'edit' ? 10 : 'null'}, record_token:${JSON.stringify(hostEditorToken)}, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75 }}, location.origin)
           if (type === 'filaman:filament-stage') {
             window.staged = units;
             event.source.postMessage({type, request_id, staged:units.flatMap(unit => Object.keys(unit)), skipped:[]}, location.origin)
@@ -90,6 +96,9 @@ try {
     if (path.endsWith('/me')) return route.fulfill({ json: { id: account } })
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: chatModelId,
       can_create: true, can_update: true, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
+    if (path.endsWith('/filaments/10/research-record')) return recordUnavailable
+      ? route.fulfill({ status: 503, json: {} })
+      : route.fulfill({ json: { record_token: editorRecordToken } })
     if (path.endsWith('/filaments/10/manufacturer-website') && req.method() === 'PUT') {
       savedManufacturerWebsite = req.postDataJSON()
       return route.fulfill({ status: 204 })
@@ -173,15 +182,16 @@ try {
       } })
     }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
-    if (path.endsWith('/colors')) return route.fulfill({ json: { items: [], total: 0 } })
+    if (path.endsWith('/colors')) return route.fulfill({ json: { items: [{ id: 1, name: 'Fixture Red' }], total: 1 } })
     if (path.endsWith('/filaments') && req.method() === 'GET') {
       libraryReads++
       const requestedToken = new URL(req.url()).searchParams.get('include_record_token') === 'true'
       const record_token = requestedToken && supportsRecordToken ? pickerRecordToken : undefined
       return route.fulfill({ json: { items: [{ ...filament, record_token }], total: 1 } })
     }
-    if (path.endsWith('/filaments') && req.method() === 'POST') {
+    if (path.includes('/saved-filaments/') && req.method() === 'POST') {
       writes.push(req.postDataJSON())
+      savePaths.push(path)
       return route.fulfill({ json: { id: 11 } })
     }
     if (path.endsWith('/batches') && req.method() === 'POST') {
@@ -352,11 +362,24 @@ try {
   await earlierResult.click()
   await page.getByRole('checkbox', { name: /Density/ }).check()
   assert.equal(writes.length, 0)
+  const second = await context.newPage()
+  second.setDefaultTimeout(5_000)
+  await second.goto(url)
+  await second.locator('[data-chat-history] summary').click()
+  await second.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
+  await second.getByRole('button', { name: 'Save new filament' }).click()
+  const secondConfirm = second.getByRole('dialog').getByRole('button', { name: 'Create filament' })
+  await secondConfirm.waitFor()
   await page.getByRole('button', { name: 'Save new filament' }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Create filament' }).click()
   await page.getByRole('link', { name: 'Open saved filament' }).waitFor()
   assert.deepEqual(writes, [{ manufacturer_id: 7, designation: 'Fixture PLA', material_type: 'PLA',
     diameter_mm: 1.75, density_g_cm3: 1.24 }])
+
+  await secondConfirm.click()
+  await second.getByRole('link', { name: 'Open saved filament' }).waitFor()
+  assert.equal(writes.length, 1, 'a stale confirmation does not submit a second create')
+  await second.close()
 
   await page.reload()
   const history = page.locator('.chat-header').getByText('History', { exact: true })
@@ -370,9 +393,13 @@ try {
   await history.click()
   await page.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
   await page.getByRole('log').getByText('Look for a datasheet', { exact: true }).waitFor()
-  await earlierResult.click()
+  await earlierResult.first().click()
   await earlierSource.waitFor()
   await page.getByRole('link', { name: 'Fixture catalog' }).first().waitFor()
+  const savedLink = page.getByRole('link', { name: 'Open saved filament' })
+  await savedLink.waitFor()
+  assert.match(await savedLink.getAttribute('href'), /^\/api\/v1\/filabrain\/saved-filaments\/[a-z0-9-]+$/)
+  assert.equal(await page.getByRole('button', { name: 'Save new filament' }).count(), 0)
   account = 8
   await page.reload()
   await history.click()
@@ -433,6 +460,14 @@ try {
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.waitForFunction(() => document.querySelector('#filabrain-docs').matches('[open]:not(:modal)'))
   assert.equal(await headerGuide.evaluate(button => button.closest('nav') === null), true)
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: 780 })
+    const guideButtonBounds = await headerGuide.boundingBox()
+    const firstTabBounds = await page.getByRole('button', { name: 'Chat', exact: true }).boundingBox()
+    assert.equal(guideButtonBounds.height, firstTabBounds.height)
+    assert.ok(Math.abs(guideButtonBounds.y - firstTabBounds.y) <= 1, `Guide aligns with the tabs at ${width}px`)
+  }
+  await page.setViewportSize({ width: 1440, height: 780 })
   const guideClose = guide.getByRole('button', { name: 'Close' })
   assert.equal(await guideClose.locator('svg[aria-hidden="true"]').count(), 1)
   await guideClose.click()
@@ -516,6 +551,23 @@ try {
   await page.goto('https://fila.test/editor-fixture')
   const frame = page.frameLocator('iframe')
   const followUp = frame.getByRole('textbox', { name: 'Follow up on this search' })
+  const drawerGuide = frame.getByRole('dialog', { name: 'Guide' })
+  await frame.getByRole('button', { name: 'Guide', exact: true }).click()
+  await drawerGuide.getByRole('heading', { name: 'Research this filament', exact: true }).waitFor()
+  assert.equal(await drawerGuide.evaluate(el => el.matches(':modal')), true)
+  await page.locator('iframe').evaluate(el => { el.style.width = '960px' })
+  await frame.locator('#filabrain-docs[open]:not(:modal)').waitFor()
+  const drawerBounds = await frame.locator('.research-chat').boundingBox()
+  assert.ok((await drawerGuide.boundingBox()).x >= drawerBounds.x + drawerBounds.width)
+  await frame.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await frame.locator('#filabrain-docs:modal').waitFor()
+  await drawerGuide.getByText('External MCP', { exact: true }).waitFor()
+  await drawerGuide.getByRole('button', { name: 'Close' }).click()
+  const settingsGuide = frame.getByRole('button', { name: 'Guide', exact: true })
+  await settingsGuide.locator('xpath=self::*[@aria-expanded="false"]').waitFor()
+  assert.equal(await settingsGuide.evaluate(el => el === el.ownerDocument.activeElement), true)
+  await page.locator('iframe').evaluate(el => { el.style.width = '640px' })
+  await frame.getByRole('button', { name: 'Back to chat' }).click()
   const researchModel = frame.getByRole('button', { name: /^Model for this conversation/ })
   const researchMenu = frame.getByRole('menu', { name: 'Model for this conversation' })
   await researchModel.click()
@@ -562,7 +614,7 @@ try {
   await frame.getByRole('button', { name: 'Save manufacturer website' }).click()
   await frame.getByText('Manufacturer website saved.', { exact: false }).waitFor()
   assert.deepEqual(savedManufacturerWebsite, {
-    manufacturer_id: 7, name: manufacturer.name, url: 'https://manufacturer.test/',
+    manufacturer_id: 7, name: manufacturer.name, url: 'https://manufacturer.test/', record_token: editorRecordToken,
   })
   await frame.getByRole('button', { name: 'Stage 1 field' }).click()
   await frame.getByText('1 field staged.', { exact: false }).waitFor()
@@ -625,6 +677,36 @@ try {
   await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
   await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).waitFor()
   pairedProposal = null
+  for (const token of ['d'.repeat(32), null, 'unavailable']) {
+    recordUnavailable = token === 'unavailable'
+    editorRecordToken = token
+    await page.reload()
+    await frame.locator('[data-chat-history] summary').click()
+    await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
+    await frame.getByText(/Saved findings are read-only/).waitFor()
+    await frame.getByText('Earlier findings', { exact: true }).first().waitFor()
+    assert.equal(await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).count(), 0)
+    assert.equal(proposalRequests, requestsBeforeReopen)
+  }
+
+  recordUnavailable = false
+  editorRecordToken = 'd'.repeat(32)
+  hostEditorToken = 'c'.repeat(32)
+  await page.reload()
+  await frame.getByRole('button', { name: 'Find specifications' }).click()
+  await frame.getByText(/The filament identity changed/).waitFor()
+  assert.equal(proposalRequests, requestsBeforeReopen)
+  hostEditorToken = undefined
+  recordUnavailable = false
+  editorMode = 'create'
+  await page.reload()
+  await frame.getByRole('button', { name: 'Find specifications' }).click()
+  await frame.getByRole('checkbox', { name: /Density/ }).check()
+  const createLookups = proposalRequests
+  await frame.locator('[data-chat-history] summary').click()
+  await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
+  await frame.getByRole('button', { name: 'Stage 1 field' }).waitFor()
+  assert.equal(proposalRequests, createLookups)
 
   hostPicker = 'legacy'
   supportsRecordToken = false
@@ -659,6 +741,59 @@ try {
   await startHostBatch.click()
   await frame.getByText('The filament library changed. Select your filaments again.').waitFor()
   assert.equal(await startHostBatch.isDisabled(), true)
+  await page.goto(url)
+  await page.locator('[data-chat-history] summary').click()
+  await page.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
+  await page.getByRole('link', { name: 'Open saved filament' }).waitFor()
+  await page.getByLabel('Product name', { exact: true }).fill('Fixture PETG')
+  await page.getByLabel('Manufacturer', { exact: true }).selectOption('7')
+  await page.getByText('Search options', { exact: true }).click()
+
+  await page.getByLabel('Material', { exact: true }).fill('PETG')
+  await page.getByLabel('Diameter (mm)').fill('1.75')
+  await page.getByRole('button', { name: 'Find specifications' }).click()
+  await page.getByRole('checkbox', { name: /Density/ }).check()
+  const otherDraft = await context.newPage()
+  otherDraft.setDefaultTimeout(5_000)
+  await otherDraft.goto(url)
+  await otherDraft.locator('[data-chat-history] summary').click()
+  const researchTitle = /Find specifications · Fixture Brand Fixture PLA/
+  await otherDraft.getByRole('button', { name: researchTitle }).click()
+  await otherDraft.locator('#research-options > summary').click()
+  if (!await otherDraft.getByLabel('FilaMan palette color').isVisible()) {
+    await otherDraft.getByText('Search options', { exact: true }).click()
+  }
+  await otherDraft.getByLabel('FilaMan palette color').selectOption('1')
+  await otherDraft.getByRole('button', { name: 'Find specifications' }).click()
+  await otherDraft.getByRole('checkbox', { name: /Density/ }).check()
+  await otherDraft.getByRole('button', { name: 'Save new filament' }).click()
+  const otherConfirm = otherDraft.getByRole('dialog').getByRole('button', { name: 'Create filament' })
+  await otherConfirm.waitFor()
+
+  await page.getByRole('button', { name: 'Save new filament' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Create filament' }).click()
+  await page.getByRole('link', { name: 'Open saved filament' }).nth(1).waitFor()
+  assert.equal(writes.length, 2)
+  assert.equal(writes[1].designation, 'Fixture PETG')
+  assert.notEqual(savePaths[1], savePaths[0])
+  await otherConfirm.click()
+  await otherDraft.getByRole('link', { name: 'Open saved filament' }).nth(1).waitFor()
+  assert.deepEqual(writes.map(write => write.designation), ['Fixture PLA', 'Fixture PETG', 'Fixture PETG'])
+  assert.deepEqual(writes[2].colors, [{ color_id: 1 }])
+  assert.equal(new Set(savePaths).size, 3)
+  await otherDraft.reload()
+  for (const tab of [otherDraft, page]) {
+    await tab.locator('[data-chat-history] summary').click()
+    await tab.getByRole('button', { name: researchTitle }).click()
+    const savedLinks = tab.getByRole('link', { name: 'Open saved filament' })
+    await savedLinks.first().waitFor()
+    assert.deepEqual(
+      await savedLinks.evaluateAll(links => links.map(link => link.getAttribute('href')).sort()),
+      [...savePaths].sort(),
+      'History keeps the original save and both saves made from separate tabs',
+    )
+    assert.equal(await tab.getByRole('button', { name: 'Save new filament' }).count(), 0)
+  }
   console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
 } finally {
   await browser.close()

@@ -234,7 +234,8 @@ async def _research_claim(sessions, claim: Claim) -> dict | None:
     async def propose():
         async with sessions() as db, asyncio.timeout(RESEARCH_TIMEOUT):
             return await batch_proposal(
-                db, claim.snapshot, claim.mode, sku_hint=claim.sku_hint, product_url=claim.product_url
+                db, claim.snapshot, claim.mode, sku_hint=claim.sku_hint, product_url=claim.product_url,
+                skip_complete=True,
             )
 
     task = asyncio.create_task(propose())

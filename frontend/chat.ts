@@ -1,7 +1,7 @@
 import { api } from './shared/api'
 import { t } from './shared/i18n'
 import { mountModelPicker } from './shared/model-picker'
-import type { ResearchDraft } from './research'
+import { identity, type ResearchDraft } from './research'
 
 const pageLabels = {
   new_filament: 'filaments.newFilament',
@@ -11,7 +11,9 @@ const pageLabels = {
   model_settings: 'filaBrain.settings',
 }
 type Action = { page: keyof typeof pageLabels; url: string }
-type Message = { role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal'] }
+type Message = {
+  role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal']; savedDraftId?: string
+}
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
   researching?: true; model?: string; updatedAt?: number
@@ -94,6 +96,16 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
         log.append(link)
       }
     }
+    const savedDraftId = message.savedDraftId
+    if (typeof savedDraftId === 'string' && /^[a-zA-Z0-9-]{1,64}$/.test(savedDraftId)) {
+      const link = document.createElement('a')
+      link.className = 'chat-action'
+      link.href = `/api/v1/filabrain/saved-filaments/${savedDraftId}`
+      link.target = '_blank'
+      link.rel = 'noopener noreferrer'
+      link.textContent = t('filaBrain.openSavedFilament')
+      log.append(link)
+    }
     scrollToEnd()
     return paragraph
   }
@@ -119,31 +131,40 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       if (conversation.id === current.id) button.setAttribute('aria-current', 'true')
       button.addEventListener('click', async () => {
         if (busyResearch) return
-        const researchChat = !!(conversation.researching || conversation.research)
+        let selected = conversation
+        try {
+          const latest = readHistory().find(item => item.id === conversation.id)
+          if (latest) selected = mergeConversation(conversation, latest)
+        } catch { /* Keep the in-memory transcript available. */ }
+        const researchChat = !!(selected.researching || selected.research)
         reset(researchChat)
-        current = { ...conversation, messages: [...conversation.messages] }
+        current = { ...selected, messages: [...selected.messages] }
         let lastResult = -1
         current.messages.forEach((message, index) => { if (message.proposal) lastResult = index })
-        if (conversation.research && lastResult === -1) {
+        if (selected.research && lastResult === -1) {
           lastResult = current.messages.length - 1
-          current.messages[lastResult] = { ...current.messages[lastResult], proposal: conversation.research.proposal }
+          current.messages[lastResult] = { ...current.messages[lastResult], proposal: selected.research.proposal }
         }
-        modelPicker.reset(conversation.model)
+        modelPicker.reset(selected.model)
         busyResearch = true
         updateControls()
         try {
+          if (researchChat) research?.start()
+          const draft = current.research
           let resumed = false
-          if (researchChat) {
-            research?.start()
+          if (draft && research) {
+            try { resumed = await research.resume(draft) }
+            catch { status.textContent = t('filaBrain.researchHistoryReadOnly') }
           }
-          if (conversation.research) {
-            resumed = await research?.resume(conversation.research) ?? false
-          }
+          if (!resumed) current.research = undefined
           current.messages.forEach((message, index) => {
             const bubble = append(message)
-            if (conversation.research && index === lastResult) {
-              placeResearchResults(bubble)
-              if (!resumed && research) bubble.after(research.archive(conversation.research.proposal))
+            if (draft && index === lastResult) {
+              if (resumed) placeResearchResults(bubble)
+              else {
+                bubble.after(researchResults)
+                if (research) bubble.after(research.archive(draft.proposal))
+              }
             } else if (message.proposal && research) {
               bubble.after(research.archive(message.proposal))
             }
@@ -174,22 +195,46 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
           typeof message.content === 'string')) : []
   }
 
+  function hasReceipt(conversation: Conversation, draftId: string) {
+    return conversation.messages.some(message => message.savedDraftId === draftId)
+  }
+
+  function mergeConversation(local: Conversation, stored: Conversation): Conversation {
+    const localDraftSaved = local.research && hasReceipt(stored, local.research.saveId ?? local.id)
+    const storedDraftSaved = stored.research && hasReceipt(local, stored.research.saveId ?? stored.id)
+    const useStored = localDraftSaved || (!storedDraftSaved && lastUpdated(stored) >= lastUpdated(local))
+    const [latest, other] = useStored ? [stored, local] : [local, stored]
+    const receipts = other.messages.filter(message => message.savedDraftId && !hasReceipt(latest, message.savedDraftId))
+    const research = useStored ? (storedDraftSaved ? undefined : stored.research) : local.research
+    return { ...latest, research, messages: [...latest.messages, ...receipts] }
+  }
+
+  function draftId() {
+    return current.research?.saveId ?? current.id
+  }
+
+  function newId() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
+  }
+
   function remember() {
     if (!current.id) {
-      current.id = String(Date.now()) + '-' + Math.random().toString(36).slice(2)
+      current.id = newId()
       current.title = current.messages[0].content.slice(0, 100)
     }
-    const snapshot = { ...current, model: modelPicker.selected, updatedAt: Date.now(), messages: current.messages.slice(-60) }
+    const messages = current.messages.slice(-60)
+    const earlierReceipts = current.messages.slice(0, -60).filter(message => message.savedDraftId)
+    messages.unshift(...earlierReceipts)
+    const snapshot = { ...current, model: modelPicker.selected, updatedAt: Date.now(), messages }
     saved = [snapshot, ...saved.filter(item => item.id !== snapshot.id)].slice(0, 20)
     if (storageKey) {
       try {
         const byId = new Map<string, Conversation>()
         for (const item of [...saved, ...readHistory()]) {
           const previous = byId.get(item.id)
-          if (!previous || lastUpdated(item) >= lastUpdated(previous)) byId.set(item.id, item)
+          byId.set(item.id, previous ? mergeConversation(previous, item) : item)
         }
-        saved = [snapshot, ...[...byId.values()].filter(item => item.id !== snapshot.id)
-          .sort((a, b) => lastUpdated(b) - lastUpdated(a))].slice(0, 20)
+        saved = [...byId.values()].sort((a, b) => lastUpdated(b) - lastUpdated(a)).slice(0, 20)
         historyStorage().setItem(storageKey, JSON.stringify(saved))
       } catch { status.textContent = t('filaBrain.chatHistoryFailed') }
     }
@@ -330,6 +375,28 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     get model() { return modelPicker.selected },
     picker,
     startResearch,
+    get draftId() { return draftId() },
+    get savedDraft() {
+      const id = draftId()
+      if (hasReceipt(current, id)) return true
+      try {
+        return readHistory().some(item => item.id === current.id && hasReceipt(item, id))
+      } catch {
+        return false
+      }
+    },
+    completeResearch(id: string, alreadySaved = false) {
+      if (draftId() !== id || hasReceipt(current, id)) return
+      if (current.research && activeAnswer && research) {
+        activeAnswer.after(research.archive(current.research.proposal))
+      }
+      current.research = undefined
+      activeAnswer = undefined
+      const message: Message = { role: 'assistant', content: t(alreadySaved ? 'filaBrain.draftAlreadySaved' : 'filaBrain.filamentSaved'), savedDraftId: id }
+      current.messages.push(message)
+      append(message)
+      remember()
+    },
     saveSelection(selection: ResearchDraft['selection']) {
       if (!current.research) return
       current.research = { ...current.research, selection }
@@ -359,7 +426,13 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
         if (draft && previous && activeAnswer && research) activeAnswer.after(research.archive(previous.proposal))
         current.messages.push(question, { role: 'assistant', content: reply, proposal: draft?.proposal })
         if (draft) {
-          current.research = draft
+          const sameProduct = previous && previous.fields.product_url === draft.fields.product_url &&
+            previous.fields.sku_hint === draft.fields.sku_hint &&
+            previous.context.fields.manufacturer_id === draft.context.fields.manufacturer_id &&
+            previous.context.fields.color_id === draft.context.fields.color_id &&
+            JSON.stringify(identity(previous.context.fields)) === JSON.stringify(identity(draft.context.fields))
+          const saveId = sameProduct ? (previous.saveId ?? current.id) : newId()
+          current.research = { ...draft, saveId }
           placeResearchResults(note)
           if (input.value.trim() === content) input.value = ''
         }

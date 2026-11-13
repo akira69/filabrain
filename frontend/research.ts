@@ -8,13 +8,16 @@ import type { ExpectedFilament } from './shared/filabrain-batches'
 type Value = ResearchOption['value'] | boolean | null
 type Fields = Record<string, Value>
 type Unit = Record<string, { old: Value; value: Value }>
-export type EditorContext = { mode: 'create' | 'edit'; filament_id: number | null; fields: Fields }
+export type EditorContext = {
+  mode: 'create' | 'edit'; filament_id: number | null; fields: Fields; record_token?: string | null
+}
 export type ResearchDraft = {
   fields: Record<string, string>
   context: EditorContext
   proposal: ResearchProposal
   action: string
   selection?: Unit[]
+  saveId?: string
 }
 export type SelectionContext = { mode: 'selection'; filament_ids: number[]; expected_filaments?: ExpectedFilament[] }
 
@@ -40,7 +43,7 @@ const draftFields = [
 const numericDraft = new Set(['manufacturer_id', 'color_id', 'diameter_mm'])
 const blank = (value: Value | undefined) => value == null || value === ''
 const equal = (a: Value | undefined, b: Value | undefined) => blank(a) && blank(b) || a === b
-const identity = (fields: Fields): ResearchIdentity => ({
+export const identity = (fields: Fields): ResearchIdentity => ({
   manufacturer: String(fields.manufacturer_name || ''),
   designation: String(fields.designation || ''),
   material: String(fields.material_type || ''),
@@ -82,7 +85,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   const save = element<HTMLButtonElement>('save-filament')
   const confirm = element<HTMLDialogElement>('create-confirm')
   const createButton = element<HTMLButtonElement>('create-filament')
-  const saved = element<HTMLAnchorElement>('saved-filament')
   const pairing = element('research-pairing')
   const pair = element<HTMLButtonElement>('pair-client')
   const credentials = element('pair-credentials')
@@ -158,9 +160,28 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     return fields
   }
 
-  function target() {
-    return editor ? hostRequest<EditorContext>('filaman:filament-context')
-      : Promise.resolve<EditorContext>({ mode: 'create', filament_id: null, fields: localFields() })
+  let editorRecordToken = editor?.record_token
+  async function recordToken(id: number) {
+    const record = await api.get<{ record_token: string | null }>(
+      `${route}/filaments/${id}/research-record`, { cache: 'no-store' },
+    )
+    return record.record_token
+  }
+  const initialRecord = editor?.filament_id && editorRecordToken === undefined
+    ? recordToken(editor.filament_id).then(token => { editorRecordToken = token }).catch(() => {})
+    : undefined
+
+  async function target(): Promise<EditorContext> {
+    if (!editor) return { mode: 'create', filament_id: null, fields: localFields() }
+    const context = await hostRequest<EditorContext>('filaman:filament-context')
+    if (!context.filament_id) return context
+    await initialRecord
+    const token = await recordToken(context.filament_id)
+    if (editorRecordToken !== undefined && token !== editorRecordToken) {
+      throw new Error(t('filaBrain.identityChanged'))
+    }
+    editorRecordToken = token
+    return { ...context, record_token: token }
   }
 
   function clearResults() {
@@ -285,11 +306,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
             try {
               const current = await target()
               if (current.filament_id !== context.filament_id ||
-                  current.fields.manufacturer_id !== fields.manufacturer_id) {
+                  current.record_token !== context.record_token || current.fields.manufacturer_id !== fields.manufacturer_id) {
                 throw new Error(t('filaBrain.manufacturerChanged'))
               }
               await api.put(`${route}/filaments/${context.filament_id}/manufacturer-website`, {
-                manufacturer_id: fields.manufacturer_id, name: issue.name, url,
+                manufacturer_id: fields.manufacturer_id, name: issue.name, url, record_token: context.record_token,
               })
               saveWebsite.replaceWith(t('filaBrain.manufacturerWebsiteSaved'))
             } catch (error) {
@@ -390,7 +411,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     busy = true
     buttons.forEach(button => { button.disabled = true })
     updateSave()
-    saved.hidden = true
     notice.textContent = ''
     conversation.hidden = false
     if (!prompt) {
@@ -402,6 +422,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         try {
           const proposal = await api.post<ResearchProposal>(route + '/proposals', {
             ...mcpTarget(context),
+            record_token: context.record_token,
             action,
             product_url: productUrl || undefined,
             sku_hint: sku,
@@ -441,7 +462,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     optionsSummary.hidden = true
     conversation.hidden = true
     clearResults()
-    saved.hidden = true
     notice.textContent = ''
     lastAction = 'fill'
     if (editor) buttons[0].before(chat.picker)
@@ -451,7 +471,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   form.addEventListener('input', () => {
     formRevision++
     clearResults()
-    saved.hidden = true
     notice.textContent = ''
     void disconnect()
   })
@@ -505,6 +524,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         notice.textContent = t('filaBrain.identityChanged')
         return false
       }
+      if (context.mode === 'edit' && (!context.record_token || context.record_token !== draft.context.record_token)) {
+        conversation.hidden = false
+        notice.textContent = t('filaBrain.researchHistoryReadOnly')
+        return false
+      }
       conversation.hidden = false
       lastAction = draft.action
       optionsSummary.hidden = false
@@ -520,6 +544,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
 
   save.addEventListener('click', async () => {
     if (!bound || save.disabled) return
+    if (!editor && chat.savedDraft) {
+      clearResults()
+      chat.completeResearch(chat.draftId, true)
+      return
+    }
     const snapshot = bound
     const units = selected()
     saving = true
@@ -527,7 +556,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     try {
       const context = await target()
       if (bound !== snapshot || context.mode !== snapshot.mode || context.filament_id !== snapshot.filament_id ||
-          JSON.stringify(identity(context.fields)) !== JSON.stringify(identity(snapshot.fields))) {
+          context.record_token !== snapshot.record_token || JSON.stringify(identity(context.fields)) !== JSON.stringify(identity(snapshot.fields))) {
         clearResults()
         throw new Error(t('filaBrain.identityChanged'))
       }
@@ -574,20 +603,26 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   element('create-cancel').addEventListener('click', () => confirm.close())
   confirm.addEventListener('cancel', event => { if (createButton.disabled) event.preventDefault() })
   createButton.addEventListener('click', async () => {
-    if (!draft || createButton.disabled) return
+    const draftId = chat.draftId
+    if (!draft || !draftId || createButton.disabled) return
+    if (chat.savedDraft) {
+      confirm.close()
+      clearResults()
+      draft = undefined
+      chat.completeResearch(draftId, true)
+      return
+    }
     const cancel = element<HTMLButtonElement>('create-cancel')
     const { color_id, ...data } = draft
     createButton.disabled = cancel.disabled = true
     try {
-      const created = await api.post<{ id: number }>('/filaments', {
+      const result = await api.post<{ already_saved: boolean }>(`${route}/saved-filaments/${encodeURIComponent(draftId)}`, {
         ...data, ...(color_id ? { colors: [{ color_id }] } : {}),
       })
       confirm.close()
       clearResults()
       draft = undefined
-      saved.href = `/filaments/${created.id}`
-      saved.hidden = false
-      notice.textContent = 'Filament saved.'
+      chat.completeResearch(draftId, result.already_saved)
     } catch (error) {
       element('create-message').textContent = errorText(error)
     } finally {
@@ -665,7 +700,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
             const proposal = incoming.proposal
             const current = await target()
             if (pairId !== session.id) return
-            if (current.filament_id !== context.filament_id ||
+            if (current.filament_id !== context.filament_id || current.record_token !== context.record_token ||
                 JSON.stringify(identity(current.fields)) !== JSON.stringify(identity(context.fields))) {
               void disconnect()
               pairStatus.textContent = t('filaBrain.identityChanged')

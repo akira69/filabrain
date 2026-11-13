@@ -1,4 +1,4 @@
-export function mountDocs() {
+export function mountDocs(editor: boolean) {
   const panel = document.querySelector<HTMLDialogElement>('#filabrain-docs')!
   const buttons = document.querySelectorAll<HTMLButtonElement>('[data-open-docs]')
   const compact = matchMedia('(max-width: 800px)')
@@ -19,7 +19,7 @@ export function mountDocs() {
   }
 
   for (const button of buttons) {
-    button.hidden = false
+    button.hidden = (button.dataset.openDocs === 'editor') !== editor
     button.addEventListener('click', () => {
       if (panel.open) {
         panel.close()
@@ -33,7 +33,8 @@ export function mountDocs() {
   panel.addEventListener('close', () => {
     if (panel.open) return
     for (const button of buttons) button.setAttribute('aria-expanded', 'false')
-    if (opener?.getClientRects().length) opener.focus()
+    const trigger = opener?.getClientRects().length ? opener : [...buttons].find(button => button.getClientRects().length)
+    trigger?.focus()
   })
   panel.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !panel.matches(':modal')) panel.close()

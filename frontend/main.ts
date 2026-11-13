@@ -229,7 +229,7 @@ async function main() {
       message.textContent = 'FilaBrain is disabled.'
       return
     }
-    const setGuide = mountDocs()
+    const setGuide = mountDocs(hostMode === 'editor')
     if (hostMode === 'editor' || hostMode === 'selection') {
       const context = await hostRequest<EditorContext | SelectionContext>('filaman:filament-context')
       if (hostMode === 'editor' && (context.mode === 'create' || context.mode === 'edit')) {
@@ -243,10 +243,12 @@ async function main() {
         function showChat() {
           settingsView.hidden = true
           chatView.hidden = false
+          setGuide('editor')
         }
         function openEditorSettings() {
           chatView.hidden = true
           settingsView.hidden = false
+          setGuide('settings')
           back.focus()
           if (status.can_configure && !settingsMounted) {
             settingsMounted = true
@@ -256,7 +258,8 @@ async function main() {
         element('research-admin-settings').hidden = !status.can_configure
         settingsButton.hidden = !status.can_configure && !status.mcp_enabled
         settingsButton.addEventListener('click', openEditorSettings)
-        back.hidden = false
+        back.parentElement!.hidden = false
+        setGuide('editor')
         back.addEventListener('click', () => {
           showChat()
           settingsButton.focus()
