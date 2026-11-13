@@ -1,14 +1,17 @@
 <div id="filament-batches" class="fm-admin-page">
-    <a href="/filaments" class="fm-admin-back">&larr; <span data-i18n="filaments.backToFilaments">Back to Filaments</span></a>
-    <div class="fm-list-toolbar">
-      <h1 data-i18n="researchBatches.title">Research batches</h1>
-      <a href="?tab=batches" class="fm-btn fm-btn-outline" data-batch-history-link hidden data-i18n="researchBatches.title">Research batches</a>
-    </div>
-    <p class="batch-muted" data-i18n="researchBatches.retention">Reports are kept for 30 days after a batch finishes or is canceled.</p>
-    <p data-batch-message role="status" class="batch-message" data-i18n="common.loading">Loading…</p>
-    <div data-batch-history hidden></div>
+    <section class="fm-card fm-section batch-overview" aria-labelledby="batch-title">
+      <header class="fm-section-header">
+        <h2 id="batch-title" data-i18n="researchBatches.title">Research batches</h2>
+        <a href="?tab=batches" class="fm-btn fm-btn-outline" data-batch-history-link hidden data-i18n="researchBatches.allBatches">All batches</a>
+      </header>
+      <div class="fm-section-body">
+        <p class="batch-muted" data-i18n="researchBatches.retention">Reports are kept for 30 days after a batch finishes or is canceled.</p>
+        <p data-batch-message role="status" class="batch-message" data-i18n="common.loading">Loading…</p>
+        <div data-batch-history hidden></div>
+      </div>
+    </section>
     <div data-batch-workspace hidden>
-      <div class="batch-row batch-toolbar">
+      <div class="fm-card batch-row batch-toolbar">
         <p data-batch-progress role="status"></p>
         <div class="batch-actions">
           <button type="button" class="fm-btn fm-btn-outline" data-action="cancel" data-i18n="researchBatches.cancel">Cancel batch</button>
@@ -16,14 +19,14 @@
         </div>
       </div>
       <div class="batch-layout">
-        <nav class="fm-card" aria-labelledby="batch-queue-title">
-          <h2 id="batch-queue-title" data-i18n="researchBatches.queue">Review queue</h2>
-          <ol data-batch-queue></ol>
+        <nav class="fm-card fm-section" aria-labelledby="batch-queue-title">
+          <header class="fm-section-header"><h2 id="batch-queue-title" data-i18n="researchBatches.queue">Review queue</h2></header>
+          <div class="fm-section-body"><ol data-batch-queue></ol></div>
         </nav>
-        <section class="fm-card" data-batch-review></section>
+        <section class="fm-card fm-section" data-batch-review></section>
       </div>
-      <section class="fm-card batch-section" data-batch-groups hidden></section>
-      <section class="fm-card batch-section" data-batch-report hidden></section>
+      <section class="fm-card fm-section batch-section" data-batch-groups hidden></section>
+      <section class="fm-card fm-section batch-section" data-batch-report hidden></section>
     </div>
     <dialog class="fm-form-dialog fm-form-dialog-wide" aria-labelledby="batch-confirm-heading">
       <div class="fm-section-header fm-form-dialog-header"><h2 id="batch-confirm-heading"></h2></div>

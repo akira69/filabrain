@@ -1,4 +1,8 @@
 [hidden] { display: none !important; }
+:root {
+  --chat-user-bg: light-dark(#eeebe5, #30333b);
+  --chat-reply-bg: color-mix(in srgb, var(--accent) 9%, var(--bg-elevated));
+}
   .research-chat {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
@@ -7,13 +11,10 @@
     padding: 0;
     background: var(--bg-elevated);
   }
-  .chat-header {
-    display: flex; align-items: center; flex-wrap: wrap; gap: .65rem;
-    padding: .85rem 1rem; border-bottom: 1px solid var(--border);
-  }
-  .chat-header h2 { flex: 1; margin: 0; font: 700 1.25rem/1.2 var(--font-serif); }
-  .chat-header .fm-btn { padding: .45rem .75rem; }
-  .chat-transcript { display: flex; flex-direction: column; overflow: auto; overscroll-behavior: contain; padding: 1.15rem; }
+  .chat-header { position: relative; flex-wrap: wrap; border-radius: .65rem .65rem 0 0; }
+  .chat-header h2 { flex: 1; }
+  .chat-header .chat-new { width: 44px; height: 44px; padding: 0; }
+  .chat-transcript { position: relative; display: flex; flex-direction: column; overflow: auto; overscroll-behavior: contain; padding: 1rem; }
   .chat-prompts {
     display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem;
     margin-block: auto; padding: 1rem;
@@ -22,11 +23,15 @@
   .chat-setup { margin: auto; max-width: 28rem; text-align: center; }
   .chat-setup h3 { margin: 0; }
   .chat-setup p { color: var(--text-muted); }
-  .chat-log { display: grid; gap: 1rem; width: min(100%, 48rem); margin-inline: auto; }
+  .chat-log { display: grid; gap: .55rem; width: min(100%, 48rem); margin-inline: auto; }
   .chat-log .chat-message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
   .chat-log .chat-user {
     justify-self: end; max-width: 85%; padding: .55rem .85rem;
-    border-radius: 1rem 1rem .25rem 1rem; background: var(--bg-soft);
+    border-radius: 1rem 1rem .25rem 1rem; background: var(--chat-user-bg);
+  }
+  .chat-log .chat-assistant {
+    justify-self: start; max-width: 100%; padding: .55rem .85rem;
+    border-radius: 1rem 1rem 1rem .25rem; background: var(--chat-reply-bg);
   }
   .chat-log .chat-action { justify-self: start; }
   .chat-composer { width: min(100%, 50rem); margin-inline: auto; padding: .35rem 1rem max(1rem, env(safe-area-inset-bottom)); }
@@ -129,4 +134,56 @@
   }
   [data-view="chat"] { display: flex; flex: 1; min-height: 0; }
   .research-chat { flex: 1; height: auto; }
+}
+
+.chat-history summary {
+  cursor: pointer;
+  padding: .45rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.chat-history-list {
+  position: absolute;
+  z-index: 2;
+  inset-inline-end: 1rem;
+  top: calc(100% + .35rem);
+  display: grid;
+  gap: .15rem;
+  padding: .35rem;
+  width: min(17rem, calc(100vw - 3rem));
+  max-height: min(20rem, 55dvh);
+  overflow: auto;
+}
+.chat-history-list button {
+  min-height: 2rem; padding: .3rem .45rem; border-radius: .35rem;
+  font: .78rem/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+  text-align: start; overflow-wrap: anywhere;
+}
+.chat-history-list p { margin: .3rem .45rem; }
+.chat-history-list button[aria-current="true"] { border-color: var(--accent); }
+[data-chat-research-input], [data-chat-research-results] { width: min(100%, 48rem); margin-inline: auto; }
+[data-chat-research-input] { margin-block-end: .65rem; }
+[data-chat-research-results] #research-conversation { margin-block-end: 0; }
+.research-history { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: .45rem; }
+.research-history summary { cursor: pointer; }
+.research-history p { margin: .15rem 0; }
+.research-history-value { margin-block-start: .35rem; overflow-wrap: anywhere; }
+
+:root[data-research-editor] main:has(> [data-view="chat"]:not([hidden])) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+:root[data-research-editor] [data-view="chat"] { display: flex; flex: 1; min-height: 0; }
+:root[data-research-editor] .research-chat { flex: 1; height: auto; }
+
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  [data-chat-running] {
+    width: fit-content;
+    background: linear-gradient(105deg, currentColor 35%, var(--text) 50%, currentColor 65%) 100% / 250% 100%;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: chat-progress-sweep 2s linear infinite;
+  }
+  @keyframes chat-progress-sweep { to { background-position: 0; } }
 }

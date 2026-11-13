@@ -1,19 +1,27 @@
-<div class="fm-admin-page fm-admin-page-compact">
-    <h2 id="model-settings-title" data-i18n="filaBrain.settings">Model settings</h2>
-    <section class="fm-card fm-section" aria-labelledby="model-settings-title"><div class="fm-section-body">
-      <form id="filabrain-settings" class="fm-compact-form">
-        <label>
-          <span data-i18n="filaBrain.modelUrl">Model server URL</span>
-          <input name="model_url" type="url" class="fm-input" maxlength="500" placeholder="http://ollama:11434" aria-describedby="research-model-url-hint" />
+  <button type="button" class="fm-btn" id="settings-back-to-chat" hidden>Back to chat</button>
+  <div id="research-admin-settings" class="research-settings">
+    <form id="filabrain-settings" class="fm-compact-form">
+    <section class="fm-card fm-section" aria-labelledby="model-settings-title">
+      <header class="fm-section-header"><h2 id="model-settings-title" data-i18n="filaBrain.settings">Model settings</h2></header>
+      <div class="fm-section-body">
+        <div class="research-model-picker">
+          <label for="research-model-url" data-i18n="filaBrain.modelUrl">Model server URL</label>
+          <div>
+            <input id="research-model-url" name="model_url" type="url" class="fm-input" maxlength="500" placeholder="http://ollama:11434" aria-describedby="research-model-url-hint" />
+            <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-i18n="filaBrain.testConnection" disabled>Test connection</button>
+          </div>
           <small id="research-model-url-hint" class="fm-field-hint" data-i18n="filaBrain.modelUrlHint">Use an Ollama server or an OpenAI-compatible base URL.</small>
-        </label>
+        </div>
         <div class="research-model-picker">
           <label for="research-available-model" data-i18n="filaBrain.availableModels">Available models</label>
           <div>
             <select id="research-available-model" name="available_model" class="fm-input" disabled>
               <option value="" data-i18n="filaBrain.chooseModel">Choose a model</option>
             </select>
-            <button type="button" id="research-load-models" class="fm-btn fm-btn-outline" data-i18n="filaBrain.loadModels" disabled>Load models</button>
+            <button type="button" id="research-load-models" class="fm-btn fm-btn-outline" disabled>
+              <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 15v5h14v-5"/></svg>
+              <span data-i18n="filaBrain.loadModels">Load models</span>
+            </button>
           </div>
         </div>
         <details class="research-manual-model">
@@ -28,37 +36,71 @@
           <input name="api_key" type="password" class="fm-input" maxlength="1000" autocomplete="new-password" />
         </label>
         <p id="research-key-state" class="fm-field-hint"></p>
-        <label><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
-        <section class="research-web-search" aria-labelledby="research-search-title">
-          <h3 id="research-search-title" data-i18n="filaBrain.webSearch">Web search (optional)</h3>
-          <p class="fm-field-hint" data-i18n="filaBrain.searchHint">Some suppliers can be researched using known manufacturer links and filament catalogs. Enable web search to find additional product pages and datasheets.</p>
-          <button type="button" id="research-enable-search" class="fm-btn fm-btn-outline" aria-controls="research-search-setup" data-i18n="filaBrain.enableWebSearch" hidden>Enable web search</button>
-          <div id="research-search-setup" class="form-field" hidden>
+        <label class="research-clear-key"><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
+        <p id="research-model-message" class="fm-field-hint" role="status"></p>
+      </div>
+    </section>
+    <section class="fm-card fm-section" aria-labelledby="research-sources-title">
+      <header class="fm-section-header"><h2 id="research-sources-title" data-i18n="filaBrain.researchSources">Research sources</h2></header>
+      <div class="fm-section-body">
+          <ul class="research-built-in" role="list">
+            <li>FilaManDB</li>
+            <li>Open Filament Database</li>
+            <li data-i18n="filaBrain.manufacturerLinks">Manufacturer sites and product links</li>
+            <li data-i18n="filaBrain.waybackFallback">Wayback Machine fallback</li>
+          </ul>
+          <label class="research-download-limit">
+            <span data-i18n="filaBrain.supplierDownloadLimit">Page and PDF limit (MiB)</span>
+            <input name="supplier_download_mib" type="number" class="fm-input" min="1" max="32" step="1" value="8" required />
+          </label>
+      </div>
+    </section>
+        <section class="fm-card fm-section research-web-search" aria-labelledby="research-search-title">
+          <header class="fm-section-header">
+            <h2 id="research-search-title" data-i18n="filaBrain.webSearch">Internet search</h2>
+            <button type="button" id="research-enable-search" class="fm-btn fm-btn-outline" aria-controls="research-search-setup" data-i18n="filaBrain.enableWebSearch" hidden>Set up search</button>
+          </header>
+          <div id="research-search-setup" class="fm-section-body" hidden>
             <label for="research-search-url" data-i18n="filaBrain.searchUrl">SearXNG URL (optional)</label>
-            <input id="research-search-url" name="search_url" type="url" class="fm-input" maxlength="500" placeholder="http://searxng:8080" aria-describedby="research-search-instructions research-search-provider" />
-            <small id="research-search-instructions" class="fm-field-hint" data-i18n="filaBrain.searchInstructions">Use a SearXNG address that FilaMan can reach. Enable JSON results in SearXNG, then enter the address here and click Save.</small>
-            <small id="research-search-provider" class="fm-field-hint" data-i18n="filaBrain.searchProvider">FilaBrain uses SearXNG for broad web search with any model. Claude and OpenAI offer native search APIs that FilaBrain has yet to integrate.</small>
+            <div class="research-model-picker">
+              <div>
+                <input id="research-search-url" name="search_url" type="url" class="fm-input" maxlength="500" placeholder="http://searxng:8080" aria-describedby="research-search-instructions" />
+                <button type="button" id="research-test-search" class="fm-btn fm-btn-outline" data-i18n="filaBrain.testSearch" disabled>Test SearXNG</button>
+              </div>
+            </div>
+            <small id="research-search-instructions" class="fm-field-hint" data-i18n="filaBrain.searchInstructions">Enable JSON results on your SearXNG server.</small>
+            <p id="research-search-message" class="fm-field-hint" role="status"></p>
             <div><a href="https://docs.searxng.org/admin/installation-docker" target="_blank" rel="noopener noreferrer" data-i18n="filaBrain.searchInstall">SearXNG Docker setup</a></div>
+            <fieldset id="research-source-controls" hidden disabled>
+              <legend data-i18n="filaBrain.supplierSites">Supplier sites</legend>
+              <p id="research-supplier-hint" class="fm-field-hint" data-i18n="filaBrain.supplierHint">Checked sites get a targeted search. General search can still find unchecked sites.</p>
+              <ul id="research-supplier-sites" class="research-supplier-list" role="list" hidden></ul>
+              <div class="research-supplier-add">
+                <input id="research-supplier-domain" class="fm-input" type="text" inputmode="url" maxlength="254" data-i18n-aria-label="filaBrain.supplierDomain" aria-label="Supplier domain" placeholder="example.com" aria-describedby="research-supplier-hint research-supplier-message" />
+                <button id="research-add-supplier" type="button" class="fm-btn fm-btn-outline" data-i18n="filaBrain.addSupplier">Add supplier</button>
+              </div>
+              <small id="research-supplier-message" class="fm-field-hint" role="status"></small>
+            </fieldset>
           </div>
         </section>
         <div class="research-settings-actions">
-          <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-i18n="filaBrain.testConnection" disabled>Test connection</button>
           <button type="submit" class="fm-btn fm-btn-outline" data-i18n="common.save" disabled>Save</button>
           <p id="research-settings-message" class="fm-field-hint" role="status"></p>
         </div>
-      </form>
-    </div></section>
+    </form>
     <div class="research-mcp-section">
-      <section class="fm-card fm-section"><h3 id="mcp-settings" data-i18n="filaBrain.standaloneMcp">External MCP connection</h3><div class="fm-section-body">
+      <section class="fm-card fm-section" aria-labelledby="mcp-settings">
+        <header class="fm-section-header"><h2 id="mcp-settings" data-i18n="filaBrain.standaloneMcp">External MCP connection</h2></header>
+        <div class="fm-section-body">
         <div class="research-mcp-toggle">
-          <label id="research-mcp-label" for="research-mcp-enabled" data-i18n="filaBrain.mcpEnabled">Enable MCP access</label>
+          <label id="research-mcp-label" for="research-mcp-enabled" data-i18n="filaBrain.mcpEnabled">Enable the FilaBrain MCP endpoint</label>
           <span id="research-mcp-state" class="fm-field-hint" role="status"></span>
           <label class="fm-toggle">
             <input id="research-mcp-enabled" type="checkbox" role="switch" aria-labelledby="research-mcp-label" disabled />
             <span class="fm-toggle-slider" aria-hidden="true"></span>
           </label>
         </div>
-        <p id="research-mcp-off" class="fm-field-hint" data-i18n="filaBrain.mcpOffHint" hidden>External MCP access is off. Turn it on to connect an external client or pair one under Advanced options in a research drawer.</p>
+        <p id="research-mcp-off" class="fm-field-hint" data-i18n="filaBrain.mcpOffHint" hidden>The separate FilaBrain endpoint is off. FilaMan’s built-in MCP has its own settings.</p>
         <div id="research-mcp-setup" class="fm-compact-form" hidden>
           <label>
             <span data-i18n="filaBrain.mcpUrl">MCP URL</span>
@@ -73,3 +115,16 @@
       </div></section>
     </div>
   </div>
+  <section class="fm-card fm-section" id="research-pairing" aria-labelledby="research-pair-title" hidden>
+    <header class="fm-section-header"><h2 id="research-pair-title" data-i18n="filaBrain.pairDraft">Pair this draft</h2></header>
+    <div class="fm-section-body">
+      <p class="fm-field-hint" data-i18n="filaBrain.researchPairHint">Connect an external MCP client to send proposals to this draft.</p>
+      <div><button type="button" class="fm-btn fm-btn-outline" id="pair-client" data-i18n="filaBrain.pair">Pair a client</button></div>
+      <div class="field-grid" id="pair-credentials" hidden>
+        <label><span data-i18n="filaBrain.mcpUrl">MCP URL</span><input id="pair-url" readonly></label>
+        <label><span data-i18n="filaBrain.mcpToken">Bearer token (expires in 15 minutes)</span><input id="pair-token" readonly></label>
+        <div><button class="fm-btn fm-btn-outline" type="button" id="pair-revoke" data-i18n="filaBrain.revoke">Disconnect</button></div>
+      </div>
+      <p id="pair-status" class="fm-field-hint" role="status"></p>
+    </div>
+  </section>

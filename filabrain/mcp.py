@@ -82,6 +82,11 @@ class ResearchArguments(BaseModel):
     sku_hint: str = Field("", max_length=255)
 
 
+async def research_read_tool(args, db, _principal, *, deadline=None):
+    data = ProposalRequest(mode="edit" if args.filament_id is not None else "create", **args.model_dump())
+    return {"proposal": jsonable_encoder(await research(db, data, deadline=deadline))}
+
+
 class ProposeArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
     proposal_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]
@@ -468,9 +473,7 @@ async def _call_standalone(db, principal, name, arguments):
         return await _find(db, principal, arguments)
     if name == "research_filament":
         await ensure_any_permission(db, principal, "filaments:read")
-        args = ResearchArguments.model_validate(arguments)
-        data = ProposalRequest(mode="edit" if args.filament_id is not None else "create", **args.model_dump())
-        return {"proposal": jsonable_encoder(await research(db, data))}
+        return await research_read_tool(ResearchArguments.model_validate(arguments), db, principal)
     if name == "create_filament":
         await ensure_any_permission(db, principal, "filaments:create")
         data = CreateFilamentArguments.model_validate(arguments)

@@ -9,7 +9,7 @@ from app.main import app
 from app.models import Filament, InstalledPlugin, Manufacturer, Spool
 from app.services import plugin_service
 from fastapi import HTTPException
-from httpx import ASGITransport, AsyncClient, MockTransport
+from httpx import ASGITransport, AsyncClient, MockTransport, Response
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -28,7 +28,7 @@ async def installed(auth_client, db_session, monkeypatch):
     plugin = InstalledPlugin(
         plugin_key="filabrain",
         name="FilaBrain",
-        version="1.0",
+        version=json.loads((ROOT / "filabrain/plugin.json").read_text())["version"],
         plugin_type="integration",
         is_active=True,
     )
@@ -38,6 +38,7 @@ async def installed(auth_client, db_session, monkeypatch):
     monkeypatch.setattr(plugin_service, "PLUGINS_DIR", ROOT)
     monkeypatch.setattr(app.router, "routes", list(app.router.routes))
     monkeypatch.setattr(app.router, "lifespan_context", app.router.lifespan_context)
+    monkeypatch.setattr(app.state, "plugin_mcp_tools", {}, raising=False)
     assert mount_plugin_router_on_app(app, plugin.plugin_key)
     from filabrain.db import Base as PluginBase
 
@@ -74,6 +75,547 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
     assert saved["mcp_enabled"] is False
 
 
+async def test_search_connection_checks_unsaved_url_and_reports_no_results(installed, monkeypatch):
+    from filabrain import settings
+
+    async def search(url, query):
+        assert query == "3D printing filament"
+        return ["https://fixture.example/filament"] if url == "http://searxng:8080" else []
+
+    monkeypatch.setattr(settings, "search_web", search)
+    route = f"{BASE}/settings/test-search"
+    before = (await installed.get(f"{BASE}/settings")).json()["search_url"]
+    assert (await installed.post(route, json={"search_url": "http://searxng:8080"})).json() == {"ok": True}
+    assert (await installed.post(route, json={"search_url": "http://searxng:8081"})).status_code == 502
+    assert (await installed.post(route, json={})).status_code == 422
+    assert (await installed.get(f"{BASE}/settings")).json()["search_url"] == before
+
+
+@pytest.mark.parametrize("response", [[], {"results": {}}, {"results": [], "padding": "x" * (512 * 1024)}])
+async def test_search_web_rejects_invalid_or_oversized_results(monkeypatch, response):
+    from httpx import Response
+    from filabrain import sources
+
+    monkeypatch.setattr(sources.httpx, "AsyncClient", lambda **kwargs: AsyncClient(
+        transport=MockTransport(lambda _request: Response(200, json=response)), **kwargs,
+    ))
+    with pytest.raises(ValueError, match="SearXNG"):
+        await sources.search_web("https://searxng.test", "PLA")
+
+
+async def test_research_sources_keep_defaults_and_survive_older_settings_clients(installed):
+    url = f"{BASE}/settings"
+    current = (await installed.get(url)).json()
+    assert current["supplier_sites"] == []
+    supplier_sites = [
+        {"domain": " WWW.Filament.example. ", "enabled": True},
+        {"domain": "other.example", "enabled": False},
+    ]
+    response = await installed.put(url, json={
+        "supplier_sites": supplier_sites,
+    })
+    assert response.status_code == 200, response.text
+    supplier_sites[0]["domain"] = "filament.example"
+    assert response.json()["supplier_sites"] == supplier_sites
+    assert (await installed.put(url, json={})).status_code == 200
+    saved = (await installed.get(url)).json()
+    assert saved["supplier_sites"] == supplier_sites
+
+
+async def test_supplier_download_limit_persists_and_applies_to_research(installed, monkeypatch):
+    from filabrain import proposals
+
+    url = f"{BASE}/settings"
+    assert (await installed.get(url)).json()["supplier_download_mib"] == 8
+    assert (await installed.put(url, json={"supplier_download_mib": 0})).status_code == 422
+    assert (await installed.put(url, json={"supplier_download_mib": 33})).status_code == 422
+    assert (await installed.put(url, json={"supplier_download_mib": 12})).status_code == 200
+    assert (await installed.put(url, json={})).json()["supplier_download_mib"] == 12
+
+    async def fetch(link, *, max_bytes):
+        assert max_bytes == 12 * 1024 * 1024
+        return proposals.Evidence(link, "Fixture PLA", "Fixture PLA")
+
+    async def catalog(_identity):
+        return [], "", True
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "product_url": "https://supplier.example/products/fixture-pla",
+        "identity": {"designation": "Fixture PLA"},
+    })
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("has_sitemap", [True, False])
+async def test_oversized_supplier_page_finds_specific_replacement(installed, db_session, monkeypatch, has_sitemap):
+    from filabrain import proposals
+
+    site = "https://supplier.example"
+    original = f"{site}/store"
+    replacement = f"{site}/products/abs-black"
+    heading = "ABS (Black) 1.75mm 1kg Filament [AB-42]"
+    searches = []
+
+    async def fetch(url, **_):
+        if url == original:
+            raise ValueError("Supplier page is too large")
+        assert url == replacement
+        return proposals.Evidence(url, heading, heading, {"designation": heading}, scopes=(
+            heading, 'Spool Size: 2.25" ID / 7.75" OD / 2.25" Depth',
+        ))
+
+    async def sitemap(url):
+        assert url == original
+        return (site, f"{site}/products/pla-black", replacement) if has_sitemap else ()
+
+    async def search(_url, query):
+        searches.append(query)
+        return [site, "https://unrelated.example/products/abs-black", replacement] if query.startswith("site:supplier.example ") and "technical data sheet" in query else []
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap, raising=False)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    assert (await installed.put(f"{BASE}/settings", json={"search_url": "http://searxng:8080"})).status_code == 200
+    maker = Manufacturer(name="Fixture Manufacturer", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation="ABS (Black)", material_type="ABS",
+        diameter_mm=1.75, shop_url=original,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.status_code == 200
+    result = response.json()
+    width = next((s for s in result["suggestions"] if s["field"] == "spool_width_mm"), None)
+    assert width and width["sources"][0]["url"] == replacement
+    assert {"code": "supplier_alternative_found", "url": replacement} in result["issues"]
+    assert not any(issue.get("url") == original for issue in result["issues"])
+    assert any("technical data sheet" in query and "filetype:pdf" not in query for query in searches) is not has_sitemap
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "create", "product_url": original})
+    assert response.is_success, response.text
+    assert any(issue.get("product_url") == replacement for issue in response.json()["issues"])
+
+
+@pytest.mark.parametrize("store_host", ["us.fixturebrand.example", "fixturebrand.example"])
+@pytest.mark.parametrize("ambiguous", [False, True])
+async def test_oversized_storefront_recovers_specs_from_manufacturer_pdf(installed, monkeypatch, store_host, ambiguous):
+    from filabrain import proposals
+
+    site = "https://fixturebrand.example/"
+    store = f"https://{store_host}/products/matte-pla"
+    sheet = f"{site}documents/polyterra.pdf"
+    wrong = f"{site}documents/polyterra-plus.pdf"
+    fake = "https://fixturebrand.example.unrelated.example/documents/polyterra.pdf"
+    sheet_text = (
+        "TECHNICAL\nDATA SHEET\nV6.0\n\nPolyTerra TM PLA\n"
+        "Density             ISO1183             1.31g/cm3 at 23°C\n"
+        "Nozzle temperature                    250 (°C)\n"
+        "RECOMMENDED PRINTING CONDITIONS\n"
+        "Nozzle temperature                 190 – 230 (°C)                 Printing speed          50 - 300 (mm/s)\n"
+        "Build plate temperature            25 - 50 (˚C)                   Drying temp. and time   55˚C for 6h\n"
+    )
+
+    async def fetch(url, *, max_bytes):
+        assert max_bytes == 2 * 1024 * 1024
+        if url == store:
+            raise ValueError(proposals.SUPPLIER_TOO_LARGE)
+        if url == site:
+            return proposals.Evidence(url, "Fixture Brand | 3D printing filament", "Fixture Brand makes filament.")
+        assert url in (sheet, wrong)
+        if ambiguous:
+            content = sheet_text + f"\nSKU: {'PT-001' if url == sheet else 'PT-002'}"
+        else:
+            content = sheet_text if url == sheet else sheet_text.replace("PolyTerra TM PLA", "PolyTerra™ PLA+")
+        return proposals.Evidence(url, "Technical data sheet", content, datasheet=True)
+
+    async def search(_url, query):
+        if query == "Fixture Brand filament official website":
+            raise proposals.SearchEnginesUnavailable("Upstream search engines failed to return results")
+        if query == "site:fixturebrand.example polyterra pla technical data sheet filetype:pdf":
+            return [fake, wrong, sheet]
+        return []
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def no_results(_manufacturer):
+        return []
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", no_results)
+    monkeypatch.setattr(proposals, "manufacturer_website", no_results)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    assert (await installed.put(f"{BASE}/settings", json={
+        "search_url": "http://searxng:8080", "supplier_download_mib": 2,
+    })).is_success
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "product_url": store,
+        "identity": {"manufacturer": "Fixture Brand", "designation": "PolyTerra PLA - Forest Green", "color": "Forest Green"},
+    })
+    assert response.is_success, response.text
+    result = response.json()
+    if ambiguous:
+        assert {"code": "supplier_download_limit", "url": store} in result["issues"]
+        assert not any(issue["code"] == "supplier_alternative_found" for issue in result["issues"])
+        assert not result["suggestions"]
+        return
+    assert {"code": "supplier_alternative_found", "url": sheet} in result["issues"]
+    assert not any(issue.get("url") in (store, wrong, fake) for issue in result["issues"])
+    specs = {suggestion["field"]: suggestion for suggestion in result["suggestions"]}
+    expected = {
+        "density_g_cm3": 1.31,
+        "extruder_temp_range_c": {"min": 190, "max": 230},
+        "bed_temp_range_c": {"min": 25, "max": 50},
+        "drying_temp_c": 55,
+        "drying_time_hours": 6,
+        "datasheet_url": sheet,
+    }
+    assert {field: spec["value"] for field, spec in specs.items()} == expected
+    for field, spec in specs.items():
+        assert {source["url"] for source in spec["sources"]} == {sheet}
+        if field != "datasheet_url":
+            assert spec["sources"][0]["evidence"] in " ".join(sheet_text.split())
+
+
+@pytest.mark.parametrize(("designation", "material", "color", "text", "expected"), [
+    ("PLA+", "PLA+", "", (
+        "PLA+                          Technical Data Sheet\n"
+        "Density     GB/T 1033           1.24g/cm 3\n"
+        "Recommended Printing Parameters                   Data\n"
+        "Drying Preparation        50℃，8~12h\n"
+        "Nozzle Temperature        210-230℃\n"
+        "Build Platform Temperature        45~60℃\n"
+        "Printing Test Conditions\n"
+        "Build Platform Temperature       65℃"
+    ), {"density_g_cm3": 1.24, "drying_temp_c": 50,
+        "extruder_temp_range_c": {"min": 210, "max": 230},
+        "bed_temp_range_c": {"min": 45, "max": 60}}),
+    ("Black PLA+ 2.0", "PLA+", "Black", (
+        "三绿物性表 ISO                 页码/总页数 1/4\n"
+        "产品名称 Product Name: PLA+2.0\n"
+        "密度 Density      ISO 1183     23℃    g/cm 3\n"
+        "                                          1.21\n"
+        "建议打印参数 Recommended Printing Parameters\n"
+        "喷嘴温度 Nozzle Temp.\n"
+        "                        205-215          50-100\n"
+        "                        215-245         100-200\n"
+        "平台温度 Plate Temp.            50-60℃"
+    ), {"density_g_cm3": 1.21, "bed_temp_range_c": {"min": 50, "max": 60}}),
+])
+async def test_datasheet_layout_keeps_exact_identity_and_cites_only_supported_values(
+    designation, material, color, text, expected,
+):
+    from filabrain import proposals
+
+    identity = proposals.Identity(designation=designation, material=material, color=color)
+    url = "https://manufacturer.example/technical.pdf"
+    page = proposals.Evidence(url, "Technical data sheet", text, datasheet=True)
+    titles = proposals._product_titles(identity)
+    assert proposals._sheet_matches(page, titles, identity)
+    wrong = proposals.replace(page, text=text.replace("PLA+", "High Speed PLA+", 1))
+    assert not proposals._sheet_matches(wrong, titles, identity)
+    specs, issues = proposals._sheet_specs(page)
+    assert not issues
+    assert {item["field"]: item["value"] for item in specs} == expected
+    assert all(item["sources"][0]["url"] == url for item in specs)
+
+async def test_datasheet_product_label_overrides_generic_header_cell():
+    from filabrain import proposals
+
+    identity = proposals.Identity(designation="PLA", material="PLA")
+    page = proposals.Evidence(
+        "https://manufacturer.example/technical.pdf", "Technical data sheet",
+        "Technical Data Sheet\nProduct Name: PLA High Speed\nBase Material     PLA",
+        datasheet=True,
+    )
+    assert not proposals._sheet_matches(page, {"PLA"}, identity)
+
+
+async def test_datasheet_matches_sku_only_with_explicit_exact_label():
+    from filabrain import proposals
+
+    identity = proposals.Identity(sku="FP-1234")
+    sheet = proposals.Evidence(
+        "https://manufacturer.example/technical.pdf", "Technical data sheet",
+        "Technical Data Sheet\nFast PLA\nSKU: FP-1234", datasheet=True,
+    )
+    assert proposals._sheet_matches(sheet, proposals._product_titles(identity), identity)
+    assert not proposals._sheet_matches(proposals.replace(sheet, text=sheet.text + "\nSKU: FP-1235"), set(), identity)
+
+
+@pytest.mark.parametrize("section, expected", [
+    ("• Sample Preparation\nNozzle Temperature 240 °C", {}),
+    ("• Recommended Printing Settings\nNozzle Temperature 210 °C\n"
+     "• Sample Preparation\nBed Temperature 70 °C", {"extruder_temp_range_c": {"min": 210, "max": 210}}),
+    ("Recommended Printing Settings\nNozzle Temperature 210 °C\n"
+     "Specimen Printing Parameters\nBed Temperature 70 °C", {"extruder_temp_range_c": {"min": 210, "max": 210}}),
+    ("Recommended Printing Settings\nNozzle Temperature 210 °C\n"
+     "1. Sample Preparation\nBed Temperature 70 °C", {"extruder_temp_range_c": {"min": 210, "max": 210}}),
+])
+async def test_datasheet_extracts_only_recommended_temperatures(section, expected):
+    from filabrain import proposals
+
+    page = proposals.Evidence("https://manufacturer.example/technical.pdf", "Technical data sheet", section, datasheet=True)
+    values, _ = proposals._sheet_specs(page)
+    assert {item["field"]: item["value"] for item in values} == expected
+
+
+@pytest.mark.parametrize("pdf_state", ["ok", "oversized", "manual", "conflict"])
+async def test_datasheet_from_manufacturer_product_page_can_use_a_cdn(installed, db_session, monkeypatch, pdf_state):
+    from filabrain import proposals
+
+    site = "https://manufacturer.example/"
+    product = site + "products/pla-basic"
+    sheet = "https://cdn.example/technical.pdf"
+    replacement = site + "pla-basic.pdf"
+    unrelated = "https://other.example/products/pla-basic"
+    pdf = proposals.Evidence(
+        sheet, "Technical data sheet",
+        "Technical Data Sheet\nPLA Basic\nDensity 1.24 g/cm³", datasheet=True,
+    )
+
+    async def fetch(url, **_):
+        if url == sheet:
+            if pdf_state == "oversized":
+                raise ValueError(proposals.SUPPLIER_TOO_LARGE)
+            if pdf_state == "manual":
+                return proposals.replace(pdf, manual=True, text="")
+            return pdf
+        if url == replacement:
+            return proposals.replace(pdf, url=url, text=pdf.text.replace("1.24", "1.26") if pdf_state == "conflict" else pdf.text)
+        linked = (sheet, replacement) if pdf_state == "conflict" else (sheet,)
+        return proposals.Evidence(url, "PLA Basic | Fixture Brand", "PLA Basic Density 1.31 g/cm³", datasheets=linked if url == product else ())
+
+    async def search(_url, query):
+        return [replacement] if pdf_state == "oversized" and "filetype:pdf" in query else []
+
+    async def extract(*args, **kwargs):
+        return [{"field": "density_g_cm3", "value": 1.31, "sources": [{"url": product, "title": "Store", "evidence": "1.31 g/cm³"}]}], []
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "_supplier_scopes", lambda identity, page, snapshot=None: [page] if page.url == product else [])
+    monkeypatch.setattr(proposals, "request_extraction", extract)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    db_session.add(Manufacturer(name="Fixture Brand", url=site))
+    await db_session.commit()
+    assert (await installed.put(f"{BASE}/settings", json={
+        "search_url": "http://searxng:8080", "model_url": "http://ollama:11434/v1", "model_id": "fixture",
+    })).is_success
+
+    for url in (product, unrelated):
+        response = await installed.post(f"{BASE}/proposals", json={
+            "mode": "create", "product_url": url,
+            "identity": {"manufacturer": "Fixture Brand", "designation": "PLA Basic"},
+        })
+        assert response.is_success, response.text
+        result = response.json()
+        density = next((s for s in result["suggestions"] if s["field"] == "density_g_cm3"), None)
+        if url == product:
+            if pdf_state == "manual":
+                assert {"code": "manual_datasheet", "url": sheet} in result["issues"]
+            elif pdf_state == "conflict":
+                assert density is None
+                assert any(issue["code"] == "conflict" and issue.get("field") == "density_g_cm3" for issue in result["issues"])
+            else:
+                assert density and density["value"] == 1.24
+                assert density["sources"][0]["url"] == (replacement if pdf_state == "oversized" else sheet)
+                assert any(issue["code"] == "source_disagreement" and issue.get("field") == "density_g_cm3" for issue in result["issues"])
+        else:
+            assert density is None
+
+
+async def test_supplier_sitemap_follows_product_index_without_fetching_pages(monkeypatch):
+    from filabrain import sources
+
+    site = "https://sitemap-fixture.example"
+    product = f"{site}/products/abs-black"
+    requests = []
+    bodies = {
+        "/robots.txt": f"Sitemap: {site}/index.xml",
+        "/index.xml": (
+            f"<sitemapindex><sitemap><loc>{site}/products.xml</loc></sitemap>"
+            "<sitemap><loc>https://other.example/index.xml</loc></sitemap></sitemapindex>"
+        ),
+        "/products.xml": f"<urlset><url><loc>{product}</loc></url></urlset>",
+    }
+
+    def fetch(url, _address, _deadline, *, max_bytes, index):
+        assert index and max_bytes == 512 * 1024
+        assert url.hostname == "sitemap-fixture.example"
+        requests.append(url.path)
+        return 200, "", "text/xml", bodies[url.path].encode()
+
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "203.0.113.10")
+    monkeypatch.setattr(sources, "_get_pinned", fetch)
+    assert await sources.supplier_sitemap_urls(f"{site}/oversized") == (product,)
+    assert requests == ["/robots.txt", "/index.xml", "/products.xml"]
+
+
+@pytest.mark.parametrize("domain", ["https://example.org", "localhost", "192.168.0.1", "example.org path"])
+async def test_research_settings_reject_non_domain_sources(installed, domain):
+    response = await installed.put(f"{BASE}/settings", json={
+        "supplier_sites": [{"domain": domain, "enabled": True}],
+    })
+    assert response.status_code == 422
+
+
+async def test_research_uses_enabled_supplier_domains_and_keeps_builtin_catalogs(installed, monkeypatch):
+    from filabrain import proposals
+
+    # A client using the earlier preview must not be able to turn off the catalogs.
+    response = await installed.put(f"{BASE}/settings", json={
+        "search_url": "http://searxng:8080",
+        "disabled_sources": ["filamandb", "open_filament_database"],
+        "supplier_sites": [
+            {"domain": "supplier.example", "enabled": True},
+            {"domain": "disabled.example", "enabled": False},
+        ],
+    })
+    assert response.status_code == 200
+    queries = []
+    fetched = []
+    catalogs = set()
+    supplier_url = "https://shop.supplier.example/fixture-pla"
+
+    async def search(_url, query):
+        queries.append(query)
+        if query.startswith("site:supplier.example "):
+            return ["https://unrelated.example/fixture-pla", supplier_url]
+        return []
+
+    async def catalog(_identity):
+        catalogs.add("filamandb")
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        catalogs.add("open_filament_database")
+        return [], ""
+
+    async def fetch(url, **_):
+        fetched.append(url)
+        return proposals.Evidence(url, "Fixture PLA", "Fixture PLA")
+
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "identity": {"manufacturer": "Fixture Brand", "designation": "Fixture PLA"},
+    })
+    assert response.status_code == 200
+    assert "site:supplier.example Fixture Brand Fixture PLA" in queries
+    assert all("disabled.example" not in query for query in queries)
+    assert fetched == [supplier_url]
+    assert catalogs == {"filamandb", "open_filament_database"}
+
+
+@pytest.mark.parametrize("catalog_has_site", [True, False])
+async def test_missing_manufacturer_site_is_discovered_and_can_be_saved(
+    installed, db_session, monkeypatch, normal_user, catalog_has_site,
+):
+    from app.core.security import generate_token_secret, hash_token
+    from app.models import UserSession
+
+    from filabrain import proposals
+
+    website = "https://fixturebrand.example/"
+    manufacturer = Manufacturer(name="Fixture Brand")
+    db_session.add(manufacturer)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=manufacturer.id, designation="Fixture PLA", material_type="PLA", diameter_mm=1.75,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    if not catalog_has_site:
+        assert (await installed.put(f"{BASE}/settings", json={"search_url": "http://searxng:8080"})).is_success
+
+    async def catalog_request(path, params):
+        assert path == "/manufacturers"
+        return {"items": [
+            {"name": "Fixture Brand Store", "website": "https://retailer.example/"},
+            {"name": "Fixture Brand", "website": website if catalog_has_site else None},
+        ]}
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_name):
+        return [], ""
+
+    async def search(_url, query):
+        if query == "Fixture Brand filament official website":
+            return ["https://shop.fixturebrand.example/", website, "https://presets.fixturebrand.example/"]
+        return []
+
+    async def fetch(url, **_):
+        assert url in (website, "https://shop.fixturebrand.example/", "https://presets.fixturebrand.example/")
+        return proposals.Evidence(url, "Fixture Brand | 3D printing filament", "Fixture Brand makes filament.")
+
+    monkeypatch.setattr(filamentdb_proxy, "_proxy_get", catalog_request)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "search_web", search)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.is_success, response.text
+    issue = next(issue for issue in response.json()["issues"] if issue["code"] == "manufacturer_website_found")
+    assert issue["url"] == website
+    assert issue["source"] == ("FilaManDB" if catalog_has_site else "SearXNG")
+    assert (await installed.get(f"/api/v1/manufacturers/{manufacturer.id}")).json()["url"] is None
+    payload = {"manufacturer_id": manufacturer.id, "name": manufacturer.name, "url": issue["url"]}
+    endpoint = f"{BASE}/filaments/{filament.id}/manufacturer-website"
+    if catalog_has_site:
+        token = generate_token_secret()
+        session = UserSession(user_id=normal_user.id, session_token_hash=hash_token(token))
+        db_session.add(session)
+        await db_session.commit()
+        csrf = generate_token_secret()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="https://filaman.test",
+            cookies={"session_id": f"sess.{session.id}.{token}", "csrf_token": csrf},
+            headers={"X-CSRF-Token": csrf},
+        ) as viewer:
+            assert (await viewer.get(f"{BASE}/status")).json()["can_update_manufacturer"] is False
+            assert (await viewer.put(endpoint, json=payload)).status_code == 403
+    assert (await installed.put(endpoint, json=payload | {"manufacturer_id": manufacturer.id + 1})).status_code == 409
+    assert (await installed.put(endpoint, json=payload | {"url": "http://127.0.0.1/"})).status_code == 422
+    assert (await installed.put(endpoint, json=payload)).status_code == 204
+    assert (await installed.get(f"/api/v1/manufacturers/{manufacturer.id}")).json()["url"] == website
+    assert (await installed.put(endpoint, json=payload | {"url": "https://other.example/"})).status_code == 409
+
+
 async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     from filabrain import research, settings
 
@@ -102,6 +644,57 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     assert (await installed.post(f"{BASE}/chat", json=chat)).status_code == 200
     assert calls == ["fixture:alternate", "fixture:default"]
     assert (await installed.get(f"{BASE}/settings")).json()["model_id"] == "fixture:default"
+
+
+@pytest.mark.parametrize(("upstream_response", "expected"), [
+    (Response(200, json={"results": [{"url": "https://maker.example/specs"}]}), 200),
+    (Response(200, json={"results": []}), 502),
+    (Response(200, json={"status": "ok"}), 502),
+    (Response(403), 502),
+])
+async def test_searxng_connection_uses_unsaved_url(installed, monkeypatch, upstream_response, expected):
+    from filabrain import sources
+
+    original = (await installed.get(f"{BASE}/settings")).json()
+    requests = []
+
+    def upstream(request):
+        requests.append(request)
+        return upstream_response
+
+    monkeypatch.setattr(sources.httpx, "AsyncClient", lambda **kwargs: AsyncClient(
+        transport=MockTransport(upstream), **kwargs,
+    ))
+    path = f"{BASE}/settings/test-search"
+    assert (await installed.post(path, json={"search_url": "https://user:secret@searxng.test"})).status_code == 422
+    assert (await installed.post(path, json={"search_url": " "})).status_code == 422
+    assert (await installed.post(path, json={"search_url": "http://searxng.test:8080/", "api_key": "unused"})).status_code == 422
+    response = await installed.post(path, json={"search_url": "http://searxng.test:8080/"})
+    assert response.status_code == expected, response.text
+    assert len(requests) == 1
+    request, = requests
+    assert request.method == "GET"
+    assert request.url.host == "searxng.test"
+    assert request.url.path == "/search"
+    assert request.url.params["format"] == "json"
+    assert "Authorization" not in request.headers
+    assert (await installed.get(f"{BASE}/settings")).json() == original
+
+
+async def test_searxng_connection_requires_plugin_admin(installed, normal_user, db_session):
+    from app.core.security import generate_token_secret, hash_token
+    from app.models import UserApiKey
+
+    secret = generate_token_secret()
+    key = UserApiKey(user_id=normal_user.id, name="Limited key", key_hash=hash_token(secret), scopes=["filaments:read"])
+    db_session.add(key)
+    await db_session.commit()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://filaman.test") as client:
+        response = await client.post(
+            f"{BASE}/settings/test-search", json={"search_url": "http://searxng.test"},
+            headers={"Authorization": f"ApiKey uak.{key.id}.{secret}"},
+        )
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize(("base_url", "limit"), [
@@ -238,6 +831,100 @@ async def test_stock_host_session_pairing_and_built_in_proposals(
     assert (await installed.post(f"{BASE}/proposals", json=target)).status_code == 200
 
 
+@pytest.mark.parametrize("oversized", [False, True])
+async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_session, monkeypatch, oversized):
+    from app.core.config import settings
+    from app.models import AppSettings
+
+    if not hasattr(settings, "mcp_plugin_read_tools"):
+        pytest.skip("Host does not support MCP plugin tools")
+
+    from filabrain import research
+
+    async def proposal(_db, identity, **hints):
+        assert identity.sku == "ABC-123"
+        assert hints["product_url"] == "https://manufacturer.test/pla"
+        assert hints["deadline"] is not None and hints["release_read"]
+        return {
+            "suggestions": [{
+                "field": "density_g_cm3", "value": 1.24,
+                "sources": [{"url": hints["product_url"], "evidence": "1.24 g/cm³"}]
+                * (1000 if oversized else 1),
+            }],
+            "issues": [],
+        }
+
+    monkeypatch.setattr(research, "research_products", proposal)
+    name = "filabrain-research_filament"
+    monkeypatch.setattr(settings, "mcp_plugin_read_tools", name)
+    row = await db_session.get(AppSettings, 1)
+    if row is None:
+        row = AppSettings(id=1)
+        db_session.add(row)
+    row.mcp_enabled = True
+    row.mcp_write_enabled = False
+    await db_session.commit()
+    key = await installed.post("/api/v1/me/api-keys", json={"name": "Host MCP", "scopes": ["filaments:read"]})
+    assert key.status_code == 201
+    assert (await installed.put(f"{BASE}/settings/mcp", json={"mcp_enabled": False})).status_code == 200
+    token = key.json()["token"]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="https://filaman.test") as client:
+        listing = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        response = await client.post("/mcp", json=listing, headers={"Authorization": f"ApiKey {token}"})
+        names = {tool["name"] for tool in response.json()["result"]["tools"]}
+        assert name in names
+        assert "filabrain-propose_filament" not in names
+        assert "create_filament" not in names
+        request = {
+            **listing, "method": "tools/call",
+            "params": {"name": name, "arguments": {
+                "identity": {"sku": "ABC-123"}, "product_url": "https://manufacturer.test/pla",
+            }},
+        }
+        response = await client.post("/mcp", json=request, headers={"Authorization": f"ApiKey {token}"})
+        result = response.json()["result"]
+        parsed = json.loads(result["content"][0]["text"])
+        assert result["isError"] is oversized, result
+        if oversized:
+            assert parsed["http_status"] == 422
+        else:
+            assert parsed["proposal"]["suggestions"][0]["sources"][0]["evidence"] == "1.24 g/cm³"
+        response = await client.post(f"{BASE}/mcp", json=listing, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 404
+
+    assert not (await db_session.scalars(select(Filament))).all()
+
+
+async def test_research_deadline_preserves_verified_datasheet(installed, db_session, monkeypatch):
+    import asyncio
+    from filabrain import proposals
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def fetch(url, **_):
+        return proposals.Evidence(url, "Technical Data Sheet", "Technical Data Sheet\nFixture PLA\nDensity 1.24 g/cm³", datasheet=True)
+
+    async def search(*_args):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "search_web", search)
+    assert (await installed.put(f"{BASE}/settings", json={"search_url": "http://searxng.test"})).is_success
+    snapshot = {"designation": "Fixture PLA", "manufacturer_name": "Fixture", "material_type": "PLA",
+                "manufacturer_url": "https://fixture.example", "datasheet_url": "https://fixture.example/specs.pdf"}
+    async with asyncio.timeout(1):
+        result = await proposals.research_products(
+            db_session, proposals.Identity(designation="Fixture PLA", manufacturer="Fixture", material="PLA"),
+            snapshot=snapshot, release_read=True,
+            deadline=asyncio.get_running_loop().time() + 0.1,
+        )
+    assert any(item["field"] == "density_g_cm3" and item["value"] == 1.24 for item in result["suggestions"])
+    assert any(issue["code"] == "unavailable_source" and issue["source"] == "Web search" for issue in result["issues"])
+
+
 async def test_stock_host_batch_claim_and_apply(
     installed, db_engine, db_session, monkeypatch
 ):
@@ -271,9 +958,49 @@ async def test_stock_host_batch_claim_and_apply(
     )
     db_session.add(filament)
     await db_session.commit()
+    identity = {
+        "id": filament.id,
+        "manufacturer_id": maker.id,
+        "designation": filament.designation,
+        "material_type": filament.material_type,
+    }
+    previous_token = getattr(filament, "record_token", None)
+    stale = await installed.post(
+        f"{BASE}/batches",
+        json={"mode": "fill", "filament_ids": [filament.id],
+              "expected_filaments": [{**identity, "designation": "Old filament"}]},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "filament_selection_changed"
+    await db_session.rollback()
+    if previous_token is not None:
+        assert (await installed.delete(f"/api/v1/filaments/{identity['id']}")).status_code == 204
+        replacement = await installed.post("/api/v1/filaments", json={
+            **{key: value for key, value in identity.items() if key != "id"},
+            "diameter_mm": 2.85,
+        })
+        assert replacement.status_code == 201, replacement.text
+        assert replacement.json()["id"] == identity["id"]
+        stale = await installed.post(
+            f"{BASE}/batches",
+            json={"mode": "fill", "filament_ids": [identity["id"]],
+                  "expected_filaments": [{**identity, "record_token": previous_token}]},
+        )
+        assert stale.status_code == 409, stale.text
+        assert stale.json()["detail"]["code"] == "filament_selection_changed"
+        await db_session.rollback()
+        listed = await installed.get("/api/v1/filaments", params={
+            "include_record_token": "true", "filament_id": identity["id"],
+        })
+        assert listed.is_success, listed.text
+        identity["record_token"] = next(
+            item["record_token"] for item in listed.json()["items"] if item["id"] == identity["id"]
+        )
+        assert identity["record_token"] and identity["record_token"] != previous_token
     response = await installed.post(
         f"{BASE}/batches",
-        json={"mode": "fill", "filament_ids": [filament.id]},
+        json={"mode": "fill", "filament_ids": [identity["id"]],
+              "expected_filaments": [identity]},
     )
     assert response.status_code == 200, response.text
     path = f"{BASE}/batches/{response.json()['id']}"
@@ -295,8 +1022,8 @@ async def test_stock_host_batch_claim_and_apply(
     selection["decision_revision"] = decision.json()["items"][0]["decision_revision"]
     applied = await installed.post(f"{path}/apply", json={"items": [selection]})
     assert applied.status_code == 200, applied.text
-    await db_session.refresh(filament)
-    assert filament.density_g_cm3 == 1.24
+    current = await db_session.get(Filament, identity["id"], populate_existing=True)
+    assert current.density_g_cm3 == 1.24
 
 
 async def test_stock_filamentdb_partial_fuzzy_search_is_incomplete(monkeypatch):
@@ -353,7 +1080,7 @@ async def test_manufacturer_product_from_its_own_catalog(
 
     ))
 
-    async def pages(url):
+    async def pages(url, **_):
         if url == product_url:
             return product
         return Evidence(url, "ABS (Master Spool) 1.75mm 1kg Filament", "Multi-color kit")
@@ -444,7 +1171,7 @@ async def test_paramount_pasted_url_proposes_identity_and_published_specs(
         "Compatible with Bambu AMS",
     ))
 
-    async def fetch(requested):
+    async def fetch(requested, **_):
         assert requested == url
         return page
 
@@ -493,6 +1220,8 @@ async def test_research_uses_only_the_linked_spool_profile(installed, db_session
     from filabrain import proposals
 
     async def profile(path, params=None):
+        if path == "/manufacturers":
+            return {"items": []}
         assert path == "/spool-profiles/732"
         return {
             "id": profile_id, "is_active": True, "name": "250g Spool", "empty_weight_g": 250.0,
@@ -549,11 +1278,11 @@ async def test_blocked_manufacturer_page_can_use_a_dated_capture(
     heading = "ABS (Black) 1.75mm 1kg Filament [AB-42]"
     calls = []
 
-    async def fetch(requested):
+    async def fetch(requested, **_):
         assert requested == url
         raise ValueError(error)
 
-    async def archived(requested):
+    async def archived(requested, **_):
         calls.append(requested)
         return Evidence(archive, heading, heading, {"designation": heading}, scopes=(
             heading, 'Spool Size: 2.25" ID / 7.75" OD / 2.25" Depth',
@@ -608,7 +1337,7 @@ async def test_bundle_product_specs_survive_storefront_navigation(monkeypatch):
         Bed Temperature 25-60°C, Net Weight 1kg per spool</div>
     </div>"""
     monkeypatch.setattr(sources, "_public_address", lambda *_: "203.0.113.10")
-    monkeypatch.setattr(sources, "_get_pinned", lambda *_: (200, "", "text/html", html.encode()))
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **_kwargs: (200, "", "text/html", html.encode()))
     page = sources._fetch_supplier("https://manufacturer.example/bundle")
     identity = proposals.Identity(
         designation="PLA CMYK Yellow", material="PLA", color="CMYK Yellow",

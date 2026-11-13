@@ -208,7 +208,7 @@ async def _store_result(db: AsyncSession, claim: Claim, result: dict) -> None:
             codes = {issue["code"] for issue in item.issues}
             if item.proposals:
                 item.status = "ready"
-            elif "unavailable_source" in codes:
+            elif codes & {"unavailable_source", "supplier_download_limit"}:
                 item.status = "failed"
             elif "needs_match" in codes:
                 item.status = "needs_match"
