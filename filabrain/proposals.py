@@ -1827,8 +1827,9 @@ async def research_products(
 
     def retry_without_slash(link):
         parsed = urlsplit(link)
-        if fetch_errors.get(link) == SUPPLIER_TOO_LARGE and parsed.path.endswith("/"):
-            return urlunsplit(parsed._replace(path=parsed.path.rstrip("/")))
+        path = parsed.path.rstrip("/")
+        if path and path != parsed.path and fetch_errors.get(link) == SUPPLIER_TOO_LARGE:
+            return urlunsplit(parsed._replace(path=path))
         return None
 
     async def check_alternatives(host, urls, *, recover_sheet=False, recover_product=True):
@@ -1837,13 +1838,6 @@ async def research_products(
             and _site_host(link) == host and urlsplit(link).path not in ("", "/")
         ))[:3]
         alternatives = await check_pages(links)
-        if recover_sheet:
-            # Some sitemap URLs redirect to a larger storefront only when the path ends in a slash.
-            for link in links:
-                if without_slash := retry_without_slash(link):
-                    await check_pages([without_slash])
-                    links = list(dict.fromkeys([*links, without_slash]))
-                    break
         alternative = None
         for link in links:
             page = checked_pages.get(link)
@@ -1880,6 +1874,31 @@ async def research_products(
         return alternative
 
     product_line = product_line or lookup_sku
+
+    def record_recovery(original, alternative):
+        if alternative and original not in recovered_urls:
+            recovered_urls.add(original)
+            issues.append({"code": "supplier_alternative_found", "url": alternative})
+
+    async def recover_alternatives(host, original, urls, *, recover_sheet, recover_product):
+        alternative = await check_alternatives(
+            host, urls, recover_sheet=recover_sheet, recover_product=recover_product,
+        )
+        record_recovery(original, alternative)
+        if recover_sheet and not has_usable_fallback():
+            # Some product URLs redirect to a larger storefront only when the path ends in a slash.
+            for url in urls:
+                if (link := public_link(url)) and _site_host(link) == host and (
+                    without_slash := retry_without_slash(supplier_page_url(link))
+                ):
+                    found = await check_alternatives(
+                        host, [without_slash], recover_sheet=True, recover_product=recover_product and not alternative,
+                    )
+                    alternative = alternative or found
+                    record_recovery(original, alternative)
+                    break
+        return alternative
+
     try:
         async with network_time(15):
             if product_line and document_domain and official_oversized:
@@ -1931,20 +1950,16 @@ async def research_products(
                         exact_slug = bool(product_slug and _product_key(slug) == product_slug)
                         matches.append((link, sku_match, len(words & color), exact_slug))
                 matches.sort(key=lambda match: (-match[1], -match[2], -match[3]))
-                alternative = await check_alternatives(
-                    host, [url for url, *_ in matches[:2]],
+                alternative = await recover_alternatives(
+                    host, original, [url for url, *_ in matches[:2]],
                     recover_sheet=recover_sheet, recover_product=recover_product,
                 )
                 query = supplier_query if identity.designation or lookup_sku else " ".join(sorted(url_words(original)))
                 if query and (not alternative or (recover_sheet and oversized_sheets and not has_usable_fallback())):
-                    found = await check_alternatives(
-                        host, await search(f"site:{host} {query} technical data sheet"),
+                    await recover_alternatives(
+                        host, original, await search(f"site:{host} {query} technical data sheet"),
                         recover_sheet=recover_sheet, recover_product=recover_product and not alternative,
                     )
-                    alternative = alternative or found
-                if alternative:
-                    recovered_urls.add(original)
-                    issues.append({"code": "supplier_alternative_found", "url": alternative})
     except TimeoutError:
         pass
 

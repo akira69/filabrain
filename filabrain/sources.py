@@ -24,7 +24,7 @@ MAX_TEXT = 12_000
 MAX_SEARCH_RESPONSE_BYTES = 512 * 1024
 SHARED_SPEC = re.compile(r"\b(?:applies to all variants|same for all variants|all variants share)\b", re.IGNORECASE)
 DATASHEET_LABEL = re.compile(
-    r"(?<![^\W_])(?:technical[ _-]*data[ _-]*sheet|tds)(?![^\W_])", re.IGNORECASE
+    r"technical[ _-]*data[ _-]*sheet|(?<![^\W_])tds(?![^\W_])", re.IGNORECASE
 )
 DATASHEET_HEADING = re.compile(r"(?:technical\s+data\s*sheet(?:\s*\(tds\))?|tds)\s*:?", re.IGNORECASE)
 SAFETY_SHEET_LABEL = re.compile(
@@ -120,6 +120,7 @@ class _ProductPage(HTMLParser):
         self.title: list[str] = []
         self.products: list[dict] = []
         self.datasheets: list[str] = []
+        self.heading_datasheets: list[str] = []
         self._pdf_link: str | None = None
         self._link_text: list[str] = []
         self._heading_tag: str | None = None
@@ -188,10 +189,11 @@ class _ProductPage(HTMLParser):
     def handle_endtag(self, tag):
         if tag == "a" and self._pdf_link:
             label = " ".join(self._link_text)
-            if not SAFETY_SHEET_LABEL.search(label) and (
-                self._datasheet_depth is not None or DATASHEET_LABEL.search(label)
-            ):
-                self.datasheets.append(self._pdf_link)
+            if not SAFETY_SHEET_LABEL.search(label):
+                if DATASHEET_LABEL.search(label):
+                    self.datasheets.append(self._pdf_link)
+                elif self._datasheet_depth is not None:
+                    self.heading_datasheets.append(self._pdf_link)
             self._pdf_link = None
         if self._skip is None:
             if tag == self._heading_tag:
@@ -455,7 +457,9 @@ def _fetch_supplier(
             (prefix + visible)[:MAX_TEXT],
             product,
             scopes=tuple(scope[:MAX_TEXT] for scope in scopes if scope)[:100],
-            datasheets=tuple(dict.fromkeys(urljoin(url, link) for link in parser.datasheets))[:4],
+            datasheets=tuple(dict.fromkeys(
+                urljoin(url, link) for link in (*parser.datasheets, *parser.heading_datasheets)
+            ))[:4],
             origin="openfilamentdatabase.org" if re.search(r"open filament database", visible, re.IGNORECASE) else "",
         )
     raise ValueError("Too many supplier redirects")

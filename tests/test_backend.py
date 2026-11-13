@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 
@@ -593,6 +594,8 @@ async def test_datasheet_link_parser_recognizes_filename_and_accessible_labels()
         <a href="/docs/french.pdf" aria-label="Technical Data Sheet">FR</a>
         <a href="/docs/PolyTerra_TDS%2EPDF">English</a>
         <a href="/download/123" download="PolyTerra_TDS.pdf">US - EN</a>
+        <a href="/docs/PLATechnicalDataSheet.pdf">EN</a>
+        <a href="/docs/plural.pdf">Technical Data Sheets</a>
         <a href="/docs/plaTDSunrelated.pdf">Product guide</a>
     """)
     parser.close()
@@ -602,6 +605,8 @@ async def test_datasheet_link_parser_recognizes_filename_and_accessible_labels()
         "/docs/french.pdf",
         "/docs/PolyTerra_TDS%2EPDF",
         "/download/123",
+        "/docs/PLATechnicalDataSheet.pdf",
+        "/docs/plural.pdf",
     ]
 
 
@@ -628,16 +633,39 @@ async def test_datasheet_links_inherit_tds_heading_until_the_next_heading_or_sec
         <footer><a href="/docs/666.pdf">Download</a></footer>
     """)
     parser.close()
-    assert parser.datasheets == ["/docs/123.pdf", "/download/456", "/docs/789.pdf", "/download/222", "/docs/555.pdf"]
+    assert not parser.datasheets
+    assert parser.heading_datasheets == ["/docs/123.pdf", "/download/456", "/docs/789.pdf", "/download/222", "/docs/555.pdf"]
 
 
-@pytest.mark.parametrize("direct_product_url", [False, True])
-async def test_datasheet_discovery_from_official_sitemap_without_search(installed, monkeypatch, direct_product_url):
+async def test_explicit_datasheet_links_take_priority_over_heading_only_candidates(monkeypatch):
+    from filabrain import sources
+
+    site = "https://fixture.example"
+    html = b"""
+        <h3>TDS</h3>
+        <a href="/download/1" download>EN</a>
+        <a href="/download/2" download>FR</a>
+        <a href="/download/3" download>DE</a>
+        <a href="/download/4" download>JP</a>
+        <a href="/docs/product_TDS.pdf">Download</a>
+    """
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "203.0.113.10")
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **__: (200, "", "text/html", html))
+
+    page = await sources.fetch_supplier(site)
+
+    assert page.datasheets == tuple(
+        site + path for path in ("/docs/product_TDS.pdf", "/download/1", "/download/2", "/download/3")
+    )
+
+
+@pytest.mark.parametrize("recovery_path", ["sitemap", "direct", "search"])
+async def test_datasheet_discovery_from_official_product_page(installed, monkeypatch, recovery_path):
     from filabrain import proposals, sources
 
     site = "https://fixture-maker.example"
     product = site + "/product/polyterra-pla"
-    original = product + "/" if direct_product_url else "https://shop.fixture-maker.example/products/polyterra-pla"
+    original = product + "/" if recovery_path == "direct" else "https://shop.fixture-maker.example/products/polyterra-pla"
     sheet = site + "/docs/123.pdf"
 
     async def fetch(url, *, max_bytes):
@@ -655,14 +683,19 @@ async def test_datasheet_discovery_from_official_sitemap_without_search(installe
             parser.feed(f'<h3>TDS</h3><a href="{sheet}" download>US - EN</a>')
             parser.close()
             # Discovery must work even when the HTML has no usable specs for this color.
-            return proposals.Evidence(url, "PolyTerra PLA", "", datasheets=tuple(parser.datasheets))
+            return proposals.Evidence(url, "PolyTerra PLA", "", datasheets=tuple(parser.heading_datasheets))
         return proposals.Evidence(url, "Downloads", "")
 
     async def sitemap(_url):
+        if recovery_path == "search":
+            return ()
         return (site + "/faq/does-polyterra-pla-print-fast/", site + "/library/polyterra-pla-sds/", product + "/")
 
-    async def no_search(*_):
-        pytest.fail("Search must stay disabled")
+    async def search(_url, query):
+        assert recovery_path == "search", "Search must stay disabled"
+        if "technical data sheet" in query and "filetype:pdf" not in query:
+            return [product + "/"]
+        return []
 
     async def no_manufacturer_website(_):
         return None
@@ -675,13 +708,16 @@ async def test_datasheet_discovery_from_official_sitemap_without_search(installe
 
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
     monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
-    monkeypatch.setattr(proposals, "search_web", no_search)
+    monkeypatch.setattr(proposals, "search_web", search)
     monkeypatch.setattr(proposals, "manufacturer_website", no_manufacturer_website)
     monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap)
     monkeypatch.setattr(proposals, "fetch_supplier", fetch)
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
-    assert (await installed.put(f"{BASE}/settings", json={"supplier_download_mib": 2})).is_success
+    settings = {"supplier_download_mib": 2}
+    if recovery_path == "search":
+        settings["search_url"] = "http://searxng.test"
+    assert (await installed.put(f"{BASE}/settings", json=settings)).is_success
     response = await installed.post(f"{BASE}/proposals", json={
         "mode": "create", "product_url": original,
         "identity": {"manufacturer": "Fixture Maker", "designation": "PolyTerra PLA", "color": "Forest Green"},
@@ -692,6 +728,55 @@ async def test_datasheet_discovery_from_official_sitemap_without_search(installe
     assert density and density["value"] == 1.31 and density["sources"][0]["url"] == sheet
     assert {"code": "supplier_alternative_found", "url": sheet} in result["issues"]
     assert not any(row["code"] == "supplier_download_limit" for row in result["issues"])
+
+
+async def test_slow_sitemap_retry_preserves_already_fetched_product(installed, db_session, monkeypatch):
+    from filabrain import proposals
+
+    site = "https://fixture.example"
+    original = site + "/store/fixture-pla"
+    oversized = site + "/product/fixture-pla/"
+    replacement = site + "/product/fixture-pla-black"
+    retried = False
+
+    async def fetch(url, **_):
+        nonlocal retried
+        if url in (original, oversized):
+            raise ValueError(proposals.SUPPLIER_TOO_LARGE)
+        if url == oversized.rstrip("/"):
+            retried = True
+            await asyncio.sleep(5)
+            pytest.fail("The retry should reach the research deadline")
+        assert url == replacement
+        return proposals.Evidence(url, "Fixture PLA", "Fixture Brand Fixture PLA")
+
+    async def sitemap(_):
+        return (oversized, replacement)
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    db_session.add(Manufacturer(name="Fixture Brand", url=site))
+    await db_session.commit()
+
+    assert (await installed.get(f"{BASE}/settings")).is_success
+    result = await proposals.research_products(
+        db_session, proposals.Identity(manufacturer="Fixture Brand", designation="Fixture PLA", material="PLA"),
+        product_url=original, deadline=asyncio.get_running_loop().time() + 0.5,
+    )
+
+    assert retried
+    assert {"code": "supplier_alternative_found", "url": replacement} in result["issues"]
+    assert any(row["field"] == "shop_url" and row["value"] == replacement for row in result["suggestions"])
 
 
 @pytest.mark.parametrize("domain", ["https://example.org", "localhost", "192.168.0.1", "example.org path"])
