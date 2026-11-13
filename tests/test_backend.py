@@ -605,6 +605,32 @@ async def test_datasheet_link_parser_recognizes_filename_and_accessible_labels()
     ]
 
 
+async def test_datasheet_links_inherit_tds_heading_until_the_next_heading_or_section_end():
+    from filabrain import sources
+
+    parser = sources._ProductPage()
+    parser.feed("""
+        <section>
+          <h3>Technical <span>Data Sheet</span> (TDS)</h3>
+          <ul><li><a href="/docs/123.pdf">EN</a></li></ul>
+          <a href="/download/456" type="application/pdf"><svg><use href="#download"></use></svg></a>
+          <a href="/docs/789.pdf"><img src="download.svg" alt=""></a>
+          <a href="/docs/filament_SDS.pdf">EN</a>
+          <a href="/tds/111.pdf" aria-label="Safety Data Sheet">EN</a>
+          <h4>Safety data sheet</h4><a href="/docs/111.pdf">EN</a>
+          <h4>TDS</h4><a href="/download/222" download aria-label="Download"></a>
+          <a href="/downloads">More documents</a>
+        </section>
+        <a href="/docs/333.pdf">Download</a>
+        <h5>How to read a TDS</h5><a href="/docs/444.pdf">EN</a>
+        <div role="heading"><div class="icon"></div><span>TDS</span></div>
+        <a href="/docs/555.pdf">English</a>
+        <footer><a href="/docs/666.pdf">Download</a></footer>
+    """)
+    parser.close()
+    assert parser.datasheets == ["/docs/123.pdf", "/download/456", "/docs/789.pdf", "/download/222", "/docs/555.pdf"]
+
+
 @pytest.mark.parametrize("direct_product_url", [False, True])
 async def test_datasheet_discovery_from_official_sitemap_without_search(installed, monkeypatch, direct_product_url):
     from filabrain import proposals, sources
@@ -612,7 +638,7 @@ async def test_datasheet_discovery_from_official_sitemap_without_search(installe
     site = "https://fixture-maker.example"
     product = site + "/product/polyterra-pla"
     original = product + "/" if direct_product_url else "https://shop.fixture-maker.example/products/polyterra-pla"
-    sheet = site + "/docs/TDS_PolyTerra_PLA_V6.0.pdf"
+    sheet = site + "/docs/123.pdf"
 
     async def fetch(url, *, max_bytes):
         assert max_bytes == 2 * 1024 * 1024
@@ -626,7 +652,7 @@ async def test_datasheet_discovery_from_official_sitemap_without_search(installe
             )
         if url == product:
             parser = sources._ProductPage()
-            parser.feed(f'<a href="{sheet}" download>US - EN</a>')
+            parser.feed(f'<h3>TDS</h3><a href="{sheet}" download>US - EN</a>')
             parser.close()
             # Discovery must work even when the HTML has no usable specs for this color.
             return proposals.Evidence(url, "PolyTerra PLA", "", datasheets=tuple(parser.datasheets))
