@@ -175,13 +175,18 @@ async function main() {
       message.textContent = 'FilaBrain is disabled.'
       return
     }
+    const setGuide = mountDocs()
     if (hostMode === 'editor' || hostMode === 'selection') {
       const context = await hostRequest<EditorContext | SelectionContext>('filaman:filament-context')
       if (hostMode === 'editor' && (context.mode === 'create' || context.mode === 'edit')) {
         if (context.mode === 'create' ? !status.can_create : !status.can_update) throw new Error('Filament access is required.')
         element('plugin-header').hidden = true
         document.querySelector<HTMLElement>('[data-view="new"]')!.hidden = false
-        mountResearch(status, context)
+        const chat = mountChat(status.chat_model, undefined, context.filament_id ? 'editor:' + context.filament_id : '')
+        mountResearch(status, chat, () => {
+          document.querySelector<HTMLElement>('[data-view="new"]')!.hidden = true
+          document.querySelector<HTMLElement>('[data-view="chat"]')!.hidden = false
+        }, context)
       } else if (hostMode === 'selection' && context.mode === 'selection' && status.can_update) {
         element('plugin-header').hidden = true
         document.querySelector<HTMLElement>('[data-view="library"]')!.hidden = false
@@ -190,9 +195,19 @@ async function main() {
       message.textContent = ''
       return
     }
+    let chat: ReturnType<typeof mountChat> | undefined
+    let startResearch: (() => void) | undefined
+    function openConversation() {
+      const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
+      view.hidden = false
+      chat ??= mountChat(status.chat_model, status.can_configure ? openSettings : undefined, undefined, !status.can_chat)
+      if (status.can_create && !startResearch) {
+        startResearch = mountResearch(status, chat, () => setGuide('new'))
+      }
+    }
     const mount: Record<string, (() => void) | false> = {
-      chat: status.can_chat && (() => mountChat(status.can_configure ? openSettings : undefined)),
-      new: status.can_create && (() => mountResearch(status)),
+      chat: status.can_chat && (() => { openConversation(); chat?.showChat() }),
+      new: status.can_create && (() => { openConversation(); startResearch?.() }),
       library: status.can_update && (() => mountLibrary()),
       batches: status.can_update && (() => {
         const batch = element('filament-batches')
@@ -211,8 +226,12 @@ async function main() {
         if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
         else button.removeAttribute('aria-current')
       }
-      for (const view of document.querySelectorAll<HTMLElement>('[data-view]')) view.hidden = view.dataset.view !== tab
-      if (!visited.has(tab)) {
+      setGuide(tab)
+      const activeView = tab === 'new' ? 'chat' : tab
+      for (const view of document.querySelectorAll<HTMLElement>('[data-view]')) view.hidden = view.dataset.view !== activeView
+      if (tab === 'chat' || tab === 'new') {
+        run()
+      } else if (!visited.has(tab)) {
         visited.add(tab)
         run()
       }
@@ -232,7 +251,15 @@ async function main() {
       return
     }
     message.textContent = ''
-    mountDocs()
+    document.addEventListener('filabrain:chat-mode', event => {
+      const researching = (event as CustomEvent<boolean>).detail
+      const tab = researching ? 'new' : status.can_chat ? 'chat' : 'new'
+      for (const button of buttons) {
+        if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
+        else button.removeAttribute('aria-current')
+      }
+      setGuide(tab)
+    })
     const tab = params.get('tab') || available
     show(Object.hasOwn(mount, tab) && mount[tab] ? tab : available)
   } catch (error) {

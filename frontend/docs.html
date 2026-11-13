@@ -11,7 +11,7 @@
     <div class="docs-art">
       <img src="/api/v1/filabrain/guide-art?v=3" width="1774" height="887" loading="lazy" alt="FilaBrain AI, a cybernetic brain connected by Ethernet to the FilaMan spool">
     </div>
-    <details open>
+    <details data-guide-settings open>
       <summary>Model providers</summary>
       <dl>
         <dt><a href="https://docs.ollama.com/api/openai-compatibility" target="_blank" rel="noopener noreferrer">Ollama setup</a></dt>
@@ -24,19 +24,30 @@
       <p>In <strong>Model &amp; MCP settings</strong>, enter the model server URL and API key if required. Use <strong>Load models</strong> or open <strong>Enter a model ID manually</strong>. Select <strong>Test connection</strong>, then <strong>Save</strong>.</p>
       <p>The model selector in chat can switch models on the configured server for that conversation. For server-managed credentials, configure <code>FILABRAIN_MODEL_URL</code> and <code>FILABRAIN_API_KEY</code>. FilaMan uses <code>OIDC_ENC_KEY</code> to encrypt keys saved in the UI.</p>
     </details>
-    <section aria-labelledby="docs-start">
-      <h3 id="docs-start">Start here</h3>
-      <p>Ask about materials or print problems in <strong>Chat</strong>. To add a filament, start with the manufacturer and product name, or paste a product URL in <strong>Research new filament</strong>.</p>
-      <p>Review suggested fields and open their sources before saving. Use <strong>Research library</strong> to queue up to 50 existing filaments, then review and apply proposals in <strong>Research batches</strong>.</p>
-      <p>Manufacturer sources take priority. A configured <strong>SearXNG</strong> server lets FilaBrain search more broadly for datasheets, catalogs and alternate sources.</p>
+    <section data-guide-topic="chat">
+      <h3 data-i18n="filaBrain.chat">Chat</h3>
+      <p>Ask about materials, print settings, or troubleshooting. Open <strong>History</strong> to continue a conversation saved in this browser.</p>
     </section>
-    <details>
+    <section data-guide-topic="new" hidden>
+      <h3>Research new filament</h3>
+      <p>Enter a product name or paste a product URL, then select <strong>Find specifications</strong>. Use the chat input to ask a follow-up. Review the values and their sources before saving.</p>
+      <p>Manufacturer sources take priority. SearXNG can find additional product pages and datasheets.</p>
+    </section>
+    <section data-guide-topic="library" hidden>
+      <h3>Research library</h3>
+      <p>Select up to 50 existing filaments and choose a research mode. Review the results in <strong>Research batches</strong>.</p>
+    </section>
+    <section data-guide-topic="batches" hidden>
+      <h3 data-i18n="researchBatches.title">Research batches</h3>
+      <p>Open a batch, review the sources for each filament, and approve the values you want. Use <strong>Apply approved changes</strong> to save them.</p>
+    </section>
+    <details data-guide-settings hidden>
       <summary>External MCP</summary>
       <p>Turn on <strong>Enable MCP access</strong> in settings and copy the MCP URL. Configure your client for Streamable HTTP on <code>/api/v1/filabrain/mcp</code>. Remote connections use HTTPS.</p>
       <p>Send <code>Authorization: Bearer &lt;FilaMan API key&gt;</code>. The key controls access to tools such as <code>find_filaments</code>, <code>research_filament</code>, <code>create_filament</code> and <code>create_spool</code>. Start with <code>find_filaments</code> to verify the connection.</p>
       <p>To send proposals to an open editor draft, use <strong>Advanced options → Pair a client</strong> in the research drawer. Its separate bearer token expires in 15 minutes.</p>
     </details>
-    <details>
+    <details data-guide-settings hidden>
       <summary>Connect ChatGPT or Claude to FilaMan</summary>
       <p><strong>Claude custom connectors</strong> can use a fixed <code>Authorization</code> header with a FilaMan bearer key. Claude must be able to reach the HTTPS endpoint. <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp" target="_blank" rel="noopener noreferrer">Claude connector setup</a></p>
       <p><strong>ChatGPT web</strong> requires OAuth for an authenticated MCP connector. FilaBrain's bearer endpoint needs an OAuth adapter for this path. <a href="https://developers.openai.com/plugins/build/auth" target="_blank" rel="noopener noreferrer">ChatGPT authentication</a></p>
