@@ -118,6 +118,9 @@ try {
       const target = req.postDataJSON()
       if (target.filament_id === 10 && target.action === 'fill') assert.equal(target.model_id, 'fixture:alternate')
       if (target.product_url) assert.equal(target.product_url, evidence[0].url)
+      if (target.guidance === 'Continue in stale tab') return route.fulfill({
+        status: 502, json: { detail: 'Source unavailable' },
+      })
       if (target.guidance && target.mode === 'create') assert.equal(target.guidance, 'Look for a datasheet')
       if (target.guidance && target.mode === 'edit') {
         assert.equal(target.action, 'standardize')
@@ -376,9 +379,16 @@ try {
   assert.deepEqual(writes, [{ manufacturer_id: 7, designation: 'Fixture PLA', material_type: 'PLA',
     diameter_mm: 1.75, density_g_cm3: 1.24 }])
 
+  await page.locator('#research-options > summary').click()
+  await page.getByLabel('Product name', { exact: true }).fill('Unsaved Fixture PETG')
+  await page.getByRole('button', { name: 'Find specifications' }).click()
+  await page.getByRole('checkbox', { name: /Density/ }).check()
   await secondConfirm.click()
   await second.getByRole('link', { name: 'Open saved filament' }).waitFor()
   assert.equal(writes.length, 1, 'a stale confirmation does not submit a second create')
+  await second.getByRole('textbox', { name: 'Follow up on this search' }).fill('Continue in stale tab')
+  await second.getByRole('button', { name: 'Send follow-up' }).click()
+  await second.getByText('Source unavailable', { exact: true }).waitFor()
   await second.close()
 
   await page.reload()
@@ -396,10 +406,12 @@ try {
   await earlierResult.first().click()
   await earlierSource.waitFor()
   await page.getByRole('link', { name: 'Fixture catalog' }).first().waitFor()
+  await page.getByRole('log').getByText(/Unsaved Fixture PETG/).waitFor()
+  assert.equal(await page.getByRole('checkbox', { name: /Density/ }).isChecked(), true)
+  assert.equal(await page.getByRole('button', { name: 'Save new filament' }).isEnabled(), true)
   const savedLink = page.getByRole('link', { name: 'Open saved filament' })
   await savedLink.waitFor()
   assert.match(await savedLink.getAttribute('href'), /^\/api\/v1\/filabrain\/saved-filaments\/[a-z0-9-]+$/)
-  assert.equal(await page.getByRole('button', { name: 'Save new filament' }).count(), 0)
   account = 8
   await page.reload()
   await history.click()
@@ -745,10 +757,12 @@ try {
   await page.locator('[data-chat-history] summary').click()
   await page.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
   await page.getByRole('link', { name: 'Open saved filament' }).waitFor()
+  await page.locator('#research-options > summary').click()
   await page.getByLabel('Product name', { exact: true }).fill('Fixture PETG')
   await page.getByLabel('Manufacturer', { exact: true }).selectOption('7')
-  await page.getByText('Search options', { exact: true }).click()
-
+  if (!await page.getByLabel('Material', { exact: true }).isVisible()) {
+    await page.locator('#research-advanced-fields > summary').click()
+  }
   await page.getByLabel('Material', { exact: true }).fill('PETG')
   await page.getByLabel('Diameter (mm)').fill('1.75')
   await page.getByRole('button', { name: 'Find specifications' }).click()

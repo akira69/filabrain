@@ -51,6 +51,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   let researching = false
   let research: Research | undefined
   let activeAnswer: HTMLElement | undefined
+  let forkNextResearchTurn = false
   const modelPicker = mountModelPicker(form, model, openSettings)
   const picker = form.querySelector<HTMLElement>('.chat-model-picker')!
   status.removeAttribute('data-i18n')
@@ -199,6 +200,14 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     return conversation.messages.some(message => message.savedDraftId === draftId)
   }
 
+  function hasStoredReceipt(id: string) {
+    try {
+      return readHistory().some(item => item.id === current.id && hasReceipt(item, id))
+    } catch {
+      return false
+    }
+  }
+
   function mergeConversation(local: Conversation, stored: Conversation): Conversation {
     const localDraftSaved = local.research && hasReceipt(stored, local.research.saveId ?? local.id)
     const storedDraftSaved = stored.research && hasReceipt(local, stored.research.saveId ?? stored.id)
@@ -269,6 +278,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     request?.abort()
     request = undefined
     current = { id: '', title: '', messages: [] }
+    forkNextResearchTurn = false
     researching = useResearch
     research?.reset()
     document.dispatchEvent(new CustomEvent('filabrain:chat-mode', { detail: useResearch }))
@@ -378,12 +388,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     get draftId() { return draftId() },
     get savedDraft() {
       const id = draftId()
-      if (hasReceipt(current, id)) return true
-      try {
-        return readHistory().some(item => item.id === current.id && hasReceipt(item, id))
-      } catch {
-        return false
-      }
+      return hasReceipt(current, id) || hasStoredReceipt(id)
     },
     completeResearch(id: string, alreadySaved = false) {
       if (draftId() !== id || hasReceipt(current, id)) return
@@ -395,7 +400,9 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       const message: Message = { role: 'assistant', content: t(alreadySaved ? 'filaBrain.draftAlreadySaved' : 'filaBrain.filamentSaved'), savedDraftId: id }
       current.messages.push(message)
       append(message)
-      remember()
+      // The stale tab can show its confirmation without replacing the newer draft in History.
+      forkNextResearchTurn = hasStoredReceipt(id)
+      if (!forkNextResearchTurn) remember()
     },
     saveSelection(selection: ResearchDraft['selection']) {
       if (!current.research) return
@@ -410,6 +417,11 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     },
     async researchTurn(content: string, run: () => Promise<{ reply: string; draft?: ResearchDraft }>) {
       if (busyResearch) return false
+      if (forkNextResearchTurn) {
+        current.id = newId()
+        current.title = content.slice(0, 100)
+        forkNextResearchTurn = false
+      }
       const question: Message = { role: 'user', content }
       const questionBubble = append(question)
       const note = append({ role: 'assistant', content: t('filaBrain.searching') })
