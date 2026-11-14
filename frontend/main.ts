@@ -322,7 +322,10 @@ async function main() {
     }
     function openSettings() {
       show('settings')
-      element('filabrain-settings').querySelector<HTMLInputElement>('[name="model_url"]')!.focus()
+      const form = element('filabrain-settings')
+      const url = form.querySelector<HTMLInputElement>('[name="model_url"]')!
+      if (url.matches(':disabled')) form.querySelector<HTMLButtonElement>('#research-add-endpoint')!.focus()
+      else url.focus()
     }
     for (const button of buttons) {
       const tab = button.dataset.tab!

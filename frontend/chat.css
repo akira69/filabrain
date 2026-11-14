@@ -97,6 +97,7 @@
     color: var(--text-muted);
     font-size: .75rem;
     font-weight: 600;
+    overflow-wrap: anywhere;
   }
   .chat-model-option {
     display: flex;
@@ -110,6 +111,7 @@
     font-size: .85rem;
     text-align: start;
   }
+  [data-model-options] .chat-model-option { padding-inline-start: 1.1rem; }
   .chat-model-option:hover, .chat-model-option:focus-visible, .chat-model-option[aria-checked="true"] {
     background: var(--bg-soft);
   }

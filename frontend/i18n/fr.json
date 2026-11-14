@@ -1,5 +1,15 @@
 {
   "filaBrain": {
+    "endpoint": "Point de connexion",
+    "addEndpoint": "Ajouter un point de connexion",
+    "endpointName": "Nom du point de connexion",
+    "defaultEndpoint": "Point de connexion par défaut",
+    "makeDefault": "Définir par défaut",
+    "removeEndpoint": "Supprimer le point de connexion",
+    "modelVisibility": "Modèles affichés dans le chat",
+    "endpointIncomplete": "Renseignez un nom, une URL de serveur et un identifiant de modèle.",
+    "endpointModelsUnavailable": "Impossible de charger les modèles de {names}.",
+    "modelSelectionUnavailable": "Ce modèle est indisponible. Choisissez un autre modèle.",
     "clearLibrarySelection": "Effacer la sélection",
     "libraryInventoryChanged": "La bibliothèque de filaments a changé. Sélectionnez de nouveau vos filaments.",
     "docs": "Guide",

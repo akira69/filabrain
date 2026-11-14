@@ -1056,7 +1056,7 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     monkeypatch.setattr(settings, "model_ids", models)
     monkeypatch.setattr(research, "request_completion", complete)
     response = await installed.get(f"{BASE}/models")
-    assert response.json() == {"models": ["fixture:alternate"]}
+    assert response.json()["models"] == ["fixture:default", "fixture:alternate"]
     chat = {"messages": [{"role": "user", "content": "Which filament is easier to print?"}]}
     response = await installed.post(f"{BASE}/chat", json=chat | {"model_id": "fixture:alternate"})
     assert response.status_code == 200
@@ -1065,6 +1065,91 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     assert (await installed.post(f"{BASE}/chat", json=chat)).status_code == 200
     assert calls == ["fixture:alternate", "fixture:default"]
     assert (await installed.get(f"{BASE}/settings")).json()["model_id"] == "fixture:default"
+
+
+async def test_named_model_endpoints_preserve_legacy_key_and_route_by_endpoint(installed, db_session, monkeypatch):
+    from filabrain import proposals, research, settings
+    from filabrain.db import FilamentResearchSettings
+
+    await installed.get(f"{BASE}/settings")
+    row = FilamentResearchSettings(id=1, config={
+        "model_url": "http://local-model:11434/v1", "model_id": "shared",
+        "encrypted_key": "local-encrypted",
+    })
+    db_session.add(row)
+    await db_session.commit()
+    monkeypatch.setattr(settings, "decrypt_secret", lambda key: key.removesuffix("-encrypted"))
+    monkeypatch.setattr(settings, "encrypt_secret", lambda key: key + "-encrypted")
+    monkeypatch.setattr(settings.settings, "oidc_enc_key", "configured")
+    route = f"{BASE}/settings"
+    migrated, = (await installed.get(route)).json()["model_endpoints"]
+    assert migrated["model_id"] == "shared" and migrated["has_key"]
+    assert "encrypted_key" not in migrated
+    response = await installed.put(route, json={
+        "default_endpoint_id": migrated["id"],
+        "model_endpoints": [migrated | {"name": "Local", "models": ["shared"]}, {
+            "id": "remote", "name": "Remote", "model_url": "https://other.model.test/v1",
+            "model_id": "shared", "models": ["shared", "hidden"], "hidden_models": ["hidden"],
+            "api_key": "remote",
+        }],
+    })
+    assert response.status_code == 200, response.text
+    assert (await installed.put(route, json={"supplier_download_mib": 12})).status_code == 200
+    assert "encrypted_key" not in (await installed.get(route)).text
+
+    async def complete(url, model, key, _messages, **_options):
+        return f"{url} {model} {key}"
+
+    monkeypatch.setattr(research, "request_completion", complete)
+    catalog = (await installed.get(f"{BASE}/models")).json()
+    assert [(group["name"], group["models"]) for group in catalog["groups"]] == [
+        ("Local", ["shared"]), ("Remote", ["shared"]),
+    ]
+    assert catalog["default_endpoint_id"] == migrated["id"]
+    chat = {"messages": [{"role": "user", "content": "Which filament is easier to print?"}]}
+    base = (await installed.post(f"{BASE}/chat", json=chat)).json()
+    other = (await installed.post(f"{BASE}/chat", json=chat | {"endpoint_id": "remote", "model_id": "shared"})).json()
+    assert base["reply"] == "http://local-model:11434/v1 shared local"
+    assert other["reply"] == "https://other.model.test/v1 shared remote"
+    for selection in [{"endpoint_id": "gone", "model_id": "shared"}, {"endpoint_id": "remote", "model_id": "hidden"},
+                      {"endpoint_id": "remote"}]:
+        assert (await installed.post(f"{BASE}/chat", json=chat | selection)).status_code == 422
+
+    url = "https://maker.example/products/pla"
+    calls = []
+
+    async def unavailable_catalog(_identity):
+        return [], "", False
+
+    async def fetch(link, **_):
+        return proposals.Evidence(link, "Fixture PLA", "Fixture PLA Density: 1.24 g/cm³")
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    async def extract(url, model, key, *_args, **_kwargs):
+        calls.append((url, model, key))
+        return [], []
+
+    monkeypatch.setattr(proposals, "catalog_candidates", unavailable_catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "_supplier_scopes", lambda identity, page, snapshot=None: [page] if page.url == url else [])
+    monkeypatch.setattr(proposals, "request_extraction", extract)
+    db_session.add(Manufacturer(name="Fixture Brand", url="https://maker.example"))
+    await db_session.commit()
+    draft = {"mode": "create", "product_url": url, "identity": {"manufacturer": "Fixture Brand", "designation": "Fixture PLA"}}
+    path = f"{BASE}/proposals"
+    assert (await installed.post(path, json=draft | {"endpoint_id": "remote", "model_id": "shared"})).is_success
+    assert (await installed.post(path, json=draft)).is_success
+    assert calls == [("https://other.model.test/v1", "shared", "remote"), ("http://local-model:11434/v1", "shared", "local")]
+
+    saved = (await installed.get(route)).json()["model_endpoints"]
+    saved[1]["model_url"] = "https://replacement.model.test/v1"
+    response = await installed.put(route, json={"default_endpoint_id": "remote", "model_endpoints": saved})
+    assert response.is_success and not response.json()["model_endpoints"][1]["has_key"]
+    replacement = (await installed.post(f"{BASE}/chat", json=chat)).json()
+    assert replacement["reply"] == "https://replacement.model.test/v1 shared"
 
 
 @pytest.mark.parametrize(("upstream_response", "expected"), [

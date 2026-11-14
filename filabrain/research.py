@@ -30,10 +30,13 @@ from .proposals import (
     research_products,
 )
 from .settings import (
+    EndpointId,
+    ModelId,
     config_record,
-    configured_models,
+    endpoints,
     lock_research_plugin,
     mcp_access_enabled,
+    model_group,
     model_key,
     resolve_model,
 )
@@ -50,7 +53,6 @@ CHAT_PAGES = {
 PAGE_MARKER = re.compile(r"(?m)^\[\[open:([a-z_]+)(?:\|([^\]\r\n]{1,255}))?\]\][ \t]*$")
 RecordToken = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
 DraftId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")]
-ModelId = Annotated[str, StringConstraints(min_length=1, max_length=150, pattern=r"^\S+$")]
 
 
 class ProposalRequest(BaseModel):
@@ -63,6 +65,7 @@ class ProposalRequest(BaseModel):
     guidance: Annotated[str, Field(max_length=400)] = ""
     action: Literal["fill", "standardize"] = "fill"
     model_id: ModelId | None = None
+    endpoint_id: EndpointId | None = None
 
 
 class ChatMessage(BaseModel):
@@ -80,6 +83,7 @@ class ManufacturerWebsite(BaseModel):
 class ChatRequest(BaseModel):
     messages: Annotated[list[ChatMessage], Field(min_length=1, max_length=11)]
     model_id: ModelId | None = None
+    endpoint_id: EndpointId | None = None
 
 
 async def is_enabled(db: DBSession) -> bool:
@@ -150,7 +154,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     if not (config["model_url"] and config["model_id"]):
         raise HTTPException(503, "Configure a model in FilaBrain settings")
     await db.rollback()
-    model = await resolve_model(config, data.model_id)
+    endpoint, model = await resolve_model(config, data.model_id, data.endpoint_id)
     messages = [
         {"role": "system", "content": (
             "You are the FilaMan assistant. Help with general questions, especially 3D printing, "
@@ -168,7 +172,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     try:
         async with asyncio.timeout(50):
             answer = await request_completion(
-                config["model_url"], model, model_key(config), messages, timeout=45,
+                endpoint["model_url"], model, model_key(endpoint), messages, timeout=45,
             )
         if not answer.strip():
             raise ValueError("Empty model response")
@@ -196,7 +200,12 @@ async def research_models(db: DBSession, principal: PrincipalDep):
     await ensure_any_permission(db, principal, "filaments:read", "filaments:create", "filaments:update")
     _, config = await config_record(db)
     await db.rollback()
-    return {"models": await configured_models(config)}
+    saved = endpoints(config)
+    # Saved catalogs are local data. Legacy and manual-only endpoints may need discovery.
+    groups = await asyncio.gather(*(model_group(endpoint) for endpoint in saved))
+    default_id = config.get("default_endpoint_id", saved[0]["id"] if saved else None)
+    default_group = next((group for group in groups if group["id"] == default_id), None)
+    return {"groups": groups, "default_endpoint_id": default_id, "models": (default_group or {}).get("models", [])}
 
 
 async def get_edit_filament(db: DBSession, filament_id: int) -> Filament:
@@ -247,7 +256,7 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
             "target": target,
             **await research_products(
                 db, identity, product_url=data.product_url, sku_hint=data.sku_hint,
-                guidance=data.guidance, model_id=data.model_id, deadline=deadline,
+                guidance=data.guidance, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
                 release_read=deadline is not None,
             ),
         }
@@ -255,7 +264,7 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
     result = await batch_proposal(
         db, snapshot, data.action,
         sku_hint=data.sku_hint, product_url=data.product_url, guidance=data.guidance,
-        release_read=deadline is not None, model_id=data.model_id, deadline=deadline,
+        release_read=deadline is not None, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
     )
     if data.action == "standardize":
         return {
