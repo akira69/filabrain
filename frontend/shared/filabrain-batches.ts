@@ -38,7 +38,7 @@ type Item = {
     diameter_mm?: number
   }
   proposals: Proposal[]
-  issues: { code: string; field?: string; source?: string; name?: string; message?: string; reason?: string; url?: string; options?: ResearchOption[] }[]
+  issues: { code: string; field?: string; source?: string; name?: string; message?: string; reason?: string; url?: string; product_url?: string | null; options?: ResearchOption[] }[]
   approved_ids: string[]
   changed_fields: string[]
   applied_at: string | null
@@ -51,6 +51,10 @@ type Summary = {
   finished_at: string | null
   total: number
 }
+export function listResearchRuns() {
+  return api.get<Summary[]>(route, { cache: 'no-store' })
+}
+
 type Batch = Summary & { items: Item[] }
 type Binding = { item_id: number; revision: number; decision_revision: number; approved_ids: string[] }
 type ApplyResult = { item_id: number; status: 'applied' | 'already_applied' | 'stale' | 'approval_changed' | 'error'; changed_fields: string[] }
@@ -72,8 +76,8 @@ const binding = (item: Item, approved_ids: string[]): Binding => ({
 })
 const button = (name: string, action: string, primary = false) =>
   `<button type="button" class="fm-btn fm-btn-${primary ? 'primary' : 'outline'}" data-action="${action}">${escapeHtml(tr(name))}</button>`
-const link = (url: string, text: string) =>
-  `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`
+const link = (url: string, text: string, className = '') =>
+  `<a class="${className}" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`
 const valueText = (value: Value) => value == null || value === '' ? '—'
   : typeof value === 'object' ? formatNumericRange(value) || '—' : String(value)
 
@@ -109,15 +113,59 @@ function fieldsList(proposal: Proposal) {
 
 function proposalCard(proposal: Proposal, checked: boolean, editable: boolean) {
   const name = Object.keys(proposal.fields).map(fieldName).join(' + ')
+  const fields = Object.entries(proposal.fields).map(([field, { old, value }]) => {
+    const hasOldValue = old != null && old !== ''
+    const hostname = !hasOldValue && typeof value === 'string' && proposal.sources.some(source => source.url === value)
+      ? /^https?:\/\/(?:www\.)?([^/\s?#]+)/i.exec(value)?.[1] : undefined
+    return `
+      <span class="batch-review-change">
+        <span>${escapeHtml(fieldName(field))}</span>
+        <span class="batch-review-values">
+          ${hasOldValue ? `<span class="batch-muted">${escapeHtml(valueText(old))} →</span>` : ''}
+          <strong${hostname ? ` title="${escapeHtml(valueText(value))}"` : ''}>${escapeHtml(hostname || valueText(value))}</strong>
+        </span>
+      </span>`
+  }).join('')
   return `<li class="batch-proposal">
-    ${editable ? `<label class="batch-option"><input type="checkbox" class="fm-checkbox" name="proposal" value="${escapeHtml(proposal.id)}" ${checked ? 'checked' : ''} /> ${escapeHtml(name)}</label>` : ''}
-    ${fieldsList(proposal)}
-    ${proposal.reason ? `<p>${escapeHtml(proposal.reason)}</p>` : ''}
-    ${proposal.sources.length ? `<ul class="batch-evidence">${proposal.sources.map(source => `
-      <li>${source.url && /^https?:\/\//i.test(source.url) ? link(source.url, source.title) : escapeHtml(source.title)}
-        ${source.quote ? `<blockquote>${escapeHtml(source.quote)}</blockquote>` : ''}
-      </li>`).join('')}</ul>` : ''}
+    ${editable ? `<label class="batch-choice">
+      <input type="checkbox" class="fm-checkbox" name="proposal" value="${escapeHtml(proposal.id)}"
+        aria-label="${escapeHtml(name)}" ${checked ? 'checked' : ''} />
+      <span class="batch-review-fields">${fields}</span>
+    </label>` : `<div class="batch-review-fields">${fields}</div>`}
+    ${proposal.reason && proposal.reason !== 'Fills a blank using evidence for the matching product and variant.'
+      ? `<p class="batch-muted">${escapeHtml(proposal.reason)}</p>` : ''}
   </li>`
+}
+
+function proposalSources(proposals: Proposal[]) {
+  const sources = new Map<string, {
+    title: string; url?: string | null; fields: Set<string>; quotes: Set<string>
+  }>()
+  for (const proposal of proposals) {
+    for (const { title, url, quote } of proposal.sources) {
+      const key = url || title
+      const source = sources.get(key) ?? { title, url, fields: new Set<string>(), quotes: new Set<string>() }
+      for (const field of Object.keys(proposal.fields)) source.fields.add(fieldName(field))
+      const text = quote?.trim()
+      if (text) source.quotes.add(text)
+      sources.set(key, source)
+    }
+  }
+  return sources
+}
+
+function renderSources(sources: ReturnType<typeof proposalSources>) {
+  if (!sources.size) return ''
+  return `<details class="batch-disclosure">
+    <summary>${escapeHtml(tr('sources', { count: sources.size }))}</summary>
+    <ul class="batch-evidence">${[...sources.values()].map(({ title, url, fields, quotes }) => `
+      <li>
+        ${url && /^https?:\/\//i.test(url) ? link(url, title) : escapeHtml(title)}
+        <p class="batch-muted">${escapeHtml([...fields].join(' · '))}</p>
+        ${[...quotes].filter(quote => title !== quote && !title.startsWith(quote + ' | '))
+          .map(quote => `<blockquote>${escapeHtml(quote)}</blockquote>`).join('')}
+      </li>`).join('')}</ul>
+  </details>`
 }
 
 function issueText(issue: Item['issues'][number]) {
@@ -126,6 +174,25 @@ function issueText(issue: Item['issues'][number]) {
   const key = 'filaBrain.' + issue.code
   const description = t(key, { name: issue.name || issue.source || (issue.field ? fieldName(issue.field) : ''), source: issue.source || '' })
   return description === key ? issue.code.replaceAll('_', ' ') : description
+}
+
+function issueList(issues: Item['issues'], evidence: ReturnType<typeof proposalSources>, changedFields: string[] = []) {
+  const linked = new Set(evidence.keys())
+  return `<ul class="batch-evidence">
+    ${issues.map(issue => {
+      const url = issue.url && /^https?:\/\//i.test(issue.url) && !linked.has(issue.url) ? issue.url : ''
+      if (url) linked.add(url)
+      return `<li>${escapeHtml(issueText(issue))}${issue.reason ? ` (${escapeHtml(issue.reason)})` : ''}
+      ${url ? link(url, tr('source')) : ''}
+      ${issue.options?.length ? `<ul>${issue.options.map(option => `
+        <li>${escapeHtml(researchOptionValue(option.value))}
+          ${option.sources.map(source => source.url && /^https?:\/\//i.test(source.url)
+            ? link(source.url, source.title) : escapeHtml(source.title)).join(' ')}
+        </li>`).join('')}</ul>` : ''}
+    </li>`
+    }).join('')}
+    ${changedFields.map(field => `<li>${escapeHtml(fieldName(field))}</li>`).join('')}
+  </ul>`
 }
 
 function groupsFor(items: Item[]) {
@@ -144,6 +211,12 @@ function groupsFor(items: Item[]) {
 export function mountResearchBatches(host: HTMLElement, id: string | null) {
   const history = host.querySelector<HTMLElement>('[data-batch-history]')!
   const workspace = host.querySelector<HTMLElement>('[data-batch-workspace]')!
+  const content = host.querySelector<HTMLElement>('[data-batch-content]')!
+  const toolbar = host.querySelector<HTMLElement>('.batch-toolbar')!
+  toolbar.hidden = !id
+  host.querySelector<HTMLElement>('.batch-overview')!.toggleAttribute('data-batch-detail', !!id)
+  host.querySelector<HTMLElement>('[data-batch-history-header]')!.hidden = !!id
+  host.querySelector<HTMLElement>('[data-batch-intro]')!.hidden = !!id
   const queue = host.querySelector<HTMLElement>('[data-batch-queue]')!
   const card = host.querySelector<HTMLElement>('[data-batch-review]')!
   const progress = host.querySelector<HTMLElement>('[data-batch-progress]')!
@@ -220,35 +293,49 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       return
     }
     const identity = item.identity
-    const details = [identity.manufacturer_name, identity.material_type, identity.material_subgroup,
+    const designation = identity.designation?.toLocaleLowerCase() || ''
+    const details = [...new Set([identity.manufacturer_name, identity.material_type, identity.material_subgroup,
       identity.manufacturer_color_name, identity.manufacturer_sku,
-      identity.diameter_mm == null ? '' : identity.diameter_mm + ' mm'].filter(Boolean)
+      identity.diameter_mm == null ? '' : identity.diameter_mm + ' mm']
+      .filter(value => value && !designation.includes(value.toLocaleLowerCase())))]
+    const proposals = item.proposals.filter(proposal => item.status !== 'applied' || item.approved_ids.includes(proposal.id))
+    const evidence = proposalSources(proposals)
+    const notes: Item['issues'] = []
+    const diagnostics: Item['issues'] = []
+    const seenIssues = new Set<string>()
+    const checkedUrls = new Set(item.issues.filter(issue => issue.code === 'manufacturer_page' ||
+      issue.code === 'unavailable_source' || issue.code === 'supplier_download_limit').map(issue => issue.url).filter(Boolean))
+    for (const issue of item.issues) {
+      const key = JSON.stringify(issue)
+      if (seenIssues.has(key)) continue
+      seenIssues.add(key)
+      if (issue.code === 'manufacturer_page' || issue.code === 'possible_match') {
+        const productUrl = issue.code === 'manufacturer_page' ? issue.url : issue.product_url
+        if (productUrl && (evidence.has(productUrl) || issue.code === 'possible_match' && checkedUrls.has(productUrl))) continue
+        diagnostics.push(issue)
+      } else if (proposals.length && ['unavailable_source', 'supplier_download_limit'].includes(issue.code)) {
+        diagnostics.push(issue)
+      } else notes.push(issue)
+    }
+    const changedFields = item.status === 'stale' ? item.changed_fields : []
     const editor = item.live_filament_id
-      ? link(`/filaments/${item.live_filament_id}?edit=1`, tr('openEditor')) : ''
+      ? link(`/filaments/${item.live_filament_id}?edit=1`, tr('openEditor'), 'batch-editor') : ''
     const choosing = editable && item.status === 'ready' && item.decision !== 'skipped'
     const canReopen = editable && item.decision === 'skipped' &&
       ['ready', 'no_change', 'failed', 'needs_match', 'stale'].includes(item.status)
     const previous = batch.items.indexOf(item) > 0 ? button('back', 'back') : ''
     card.innerHTML = `
-      <header class="fm-section-header"><h2 tabindex="-1">${escapeHtml(label(item))}</h2><span class="batch-status">${escapeHtml(status(item))}</span></header>
+      <header class="fm-section-header">
+        <h2 tabindex="-1">${escapeHtml(label(item))}</h2>
+        ${editor}
+      </header>
       <div class="fm-section-body">
       <p class="batch-muted">${escapeHtml([tr('record', { id: item.filament_id }), ...details].join(' · '))}</p>
-      ${editor ? `<p>${editor}</p>` : ''}
-      ${item.proposals.length ? `<ul class="batch-proposals">${item.proposals
-        .filter(proposal => item.status !== 'applied' || item.approved_ids.includes(proposal.id)).map(proposal =>
+      ${proposals.length ? `<ul class="batch-proposals">${proposals.map(proposal =>
         proposalCard(proposal, item.approved_ids.includes(proposal.id), choosing)).join('')}</ul>` : ''}
-      ${item.issues.length || item.changed_fields.length && item.status === 'stale' ? `
-        <h3>${escapeHtml(tr('issues'))}</h3><ul class="batch-evidence">
-          ${item.issues.map(issue => `<li>${escapeHtml(issueText(issue))}${issue.reason ? ` (${escapeHtml(issue.reason)})` : ''}
-            ${issue.url && /^https?:\/\//i.test(issue.url) ? link(issue.url, tr('source')) : ''}
-            ${issue.options?.length ? `<ul>${issue.options.map(option => `
-              <li>${escapeHtml(researchOptionValue(option.value))}
-                ${option.sources.map(source => source.url && /^https?:\/\//i.test(source.url)
-                  ? link(source.url, source.title) : escapeHtml(source.title)).join(' ')}
-              </li>`).join('')}</ul>` : ''}
-          </li>`).join('')}
-          ${item.status === 'stale' ? item.changed_fields.map(field => `<li>${escapeHtml(fieldName(field))}</li>`).join('') : ''}
-        </ul>` : ''}
+      ${renderSources(evidence)}
+      ${notes.length || changedFields.length ? `
+        <div class="batch-notes">${issueList(notes, evidence, changedFields)}</div>` : ''}
       ${editable && canRetry(item) && item.decision !== 'skipped' ? `
         <form class="batch-retry">
           <label>${escapeHtml(tr('retrySku'))}<input class="fm-input" name="sku_hint" maxlength="250" /></label>
@@ -259,7 +346,12 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
         ${canReopen ? button('reopen', 'reopen') : ''}
         ${editable && item.decision !== 'skipped' && (choosing || canRetry(item)) ? button('skip', 'skip') : ''}
         ${choosing ? button('approve', 'approve', true) : ''}
-      </div></div>`
+      </div>
+      ${diagnostics.length ? `<details class="batch-disclosure batch-diagnostics">
+        <summary>${escapeHtml(tr('searchDetails', { count: diagnostics.length }))}</summary>
+        ${issueList(diagnostics, evidence)}
+      </details>` : ''}
+      </div>`
     updateApproveButton()
   }
 
@@ -306,8 +398,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
     const working = batch.items.filter(researching).length
     const ready = batch.items.filter(item => item.status === 'ready' && item.decision === 'pending').length
     const approved = batch.items.filter(item => item.status === 'ready' && item.decision === 'approved')
-    progress.textContent = tr('progress', { mode: tr('mode.' + batch.mode), ready, working, total: batch.total })
-      + ' · ' + tr('status.' + batch.status)
+    progress.textContent = tr(working ? 'progress' : 'progressIdle', { mode: tr('mode.' + batch.mode), ready, working, total: batch.total })
+      + (batch.status === 'active' ? '' : ' · ' + tr('status.' + batch.status))
     apply.hidden = !available || !approved.length
     cancel.hidden = !available || batch.status !== 'active'
     const focusedItem = queue.querySelector<HTMLButtonElement>('button[data-item]:focus')?.dataset.item
@@ -393,7 +485,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       const wasReadOnly = accessLost
       accessLost = false
       if (wasLoading || wasReadOnly || JSON.stringify(batch) !== JSON.stringify(detail)) adopt(detail)
-      workspace.hidden = false
+      content.hidden = false
       if (wasLoading || wasReadOnly) message.textContent = ''
     } catch (error) {
       if (loading.signal.aborted || isAbortError(error)) return
@@ -512,7 +604,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
 
   async function loadHistory() {
     try {
-      const summaries = await api.get<Summary[]>(route, { cache: 'no-store' })
+      const summaries = await listResearchRuns()
       history.hidden = false
       history.innerHTML = summaries.length ? `<ul class="batch-history">${summaries.map(summary => `
         <li class="batch-row">

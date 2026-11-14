@@ -14,35 +14,56 @@
     align-items: start; gap: 12px;
   }
   .batch-layout nav { min-width: 0; }
-  .batch-toolbar { margin: 12px 0; }
-  .batch-section { margin-top: 12px; }
-  #filament-batches .batch-status {
-    color: var(--text-muted); border: 1px solid var(--border);
-    border-radius: 999px; padding: .2rem .65rem; font-size: .8rem;
+  #filament-batches .batch-overview[data-batch-detail] {
+    border: 0; background: transparent; margin-block-end: .75rem;
   }
+  .batch-overview[data-batch-detail] > .fm-section-body { padding: 0; }
+  .batch-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem; }
+  .batch-toolbar > [data-batch-progress] { flex: 1 1 auto; font-size: .875rem; color: var(--text-muted); }
+  #filament-batches :is(.batch-toolbar, [data-batch-review]) .fm-btn { min-height: 44px; }
+  #filament-batches [data-batch-review] .fm-section-header { flex-wrap: wrap; padding-block: .2rem; }
+  #filament-batches [data-batch-review] h2 { overflow-wrap: anywhere; }
+  #filament-batches .batch-editor { display: inline-flex; align-items: center; min-height: 44px; font-size: .85rem; white-space: nowrap; }
+  .batch-section { margin-top: 12px; }
   #filament-batches [data-batch-queue], #filament-batches .batch-history,
   #filament-batches .batch-proposals, #filament-batches .batch-changes {
     list-style: none; padding: 0; margin: 0;
   }
   #filament-batches [data-batch-queue] { display: grid; gap: .35rem; max-height: 30rem; overflow: auto; }
   #filament-batches [data-batch-queue] button {
-    display: grid; width: 100%; padding: .5rem; gap: .1rem; text-align: left;
+    display: grid; width: 100%; min-height: 44px; padding: .5rem; gap: .1rem; text-align: left;
     overflow-wrap: anywhere; border-radius: var(--radius-sm); cursor: pointer;
   }
   #filament-batches [data-batch-queue] button[aria-current],
   #filament-batches [data-batch-queue] button:hover { background: var(--bg-soft); }
-  #filament-batches [data-batch-queue] small,
-  #filament-batches .batch-proposal small { color: var(--text-muted); }
+  #filament-batches [data-batch-queue] small { color: var(--text-muted); }
   #filament-batches .batch-history li {
     border-block-start: 1px solid var(--border); padding-block: .75rem;
   }
   #filament-batches .batch-history li:last-child { padding-block-end: 0; }
   #filament-batches .batch-history :is(span, small) { color: var(--text-muted); }
-  #filament-batches .batch-overview p:last-child { margin-block-end: 0; }
+  #filament-batches [data-batch-intro]:not([hidden]) { display: grid; gap: .4rem; }
   #filament-batches .batch-proposal, #filament-batches .batch-group {
-    border-block-start: 1px solid var(--border); padding: .75rem 0; overflow-wrap: anywhere;
+    border-block-start: 1px solid var(--border); overflow-wrap: anywhere;
   }
-  #filament-batches .batch-option { display: block; cursor: pointer; font-weight: 600; margin-bottom: .4rem; }
+  #filament-batches .batch-group { padding: .75rem 0; }
+  .batch-choice {
+    display: grid; grid-template-columns: auto minmax(0, 1fr);
+    align-items: center; gap: .6rem; min-height: 44px; cursor: pointer;
+  }
+  .batch-choice .fm-checkbox { margin: 0; accent-color: var(--accent); }
+  .batch-review-fields { display: grid; gap: .35rem; padding-block: .65rem; }
+  .batch-review-change {
+    display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    align-items: baseline; gap: .4rem .75rem; font-size: .875rem;
+  }
+  .batch-review-values { display: flex; flex-wrap: wrap; align-items: baseline; gap: .15rem .4rem; }
+  #filament-batches .batch-proposal > p { padding: 0 0 .6rem; }
+  .batch-disclosure { border-block-start: 1px solid var(--border); }
+  .batch-disclosure summary { cursor: pointer; padding-block: .7rem; min-height: 44px; font-size: .875rem; }
+  .batch-disclosure .batch-evidence { margin: 0 0 .55rem; }
+  .batch-evidence li + li { margin-block-start: .35rem; }
+  .batch-notes .batch-evidence { margin: 0; }
   #filament-batches .batch-change {
     display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: baseline; gap: .45rem; margin-block: .4rem; font-size: .85rem; overflow-wrap: anywhere;
@@ -59,5 +80,10 @@
   #filament-batches [data-batch-report] li a { margin-inline-start: .5rem; }
   @media (max-width: 720px) {
     .batch-layout { grid-template-columns: minmax(0, 1fr); }
-    #filament-batches [data-batch-queue] { max-height: 12rem; }
+    .batch-layout nav > .fm-section-body { padding-block: .55rem; }
+    .batch-toolbar > [data-batch-progress] { order: 1; flex-basis: 100%; }
+    .batch-toolbar > .batch-actions { margin-inline-start: auto; }
+    #filament-batches [data-batch-queue] { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 11rem; }
+    #filament-batches [data-batch-queue] button { height: 100%; }
+    .batch-review-change { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   }
