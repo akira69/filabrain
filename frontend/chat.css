@@ -5,6 +5,7 @@
 }
   .research-chat {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr) auto;
     height: min(42rem, max(28rem, 76dvh));
     margin-inline: auto;
@@ -37,6 +38,7 @@
   .chat-composer { width: min(100%, 50rem); margin-inline: auto; padding: .35rem 1rem max(1rem, env(safe-area-inset-bottom)); }
   .chat-composer p:not(:empty) { margin: .25rem .2rem .5rem; }
   .message-composer {
+    grid-template-columns: minmax(0, 1fr);
     padding: .55rem;
     gap: .35rem;
     border: 1px solid var(--border);

@@ -43,22 +43,29 @@ main { max-width: 76rem; margin: auto; padding: clamp(.65rem, 2vw, 1.25rem); }
 #plugin-header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: "logo tabs guide";
-  align-items: start;
+  grid-template-areas: "logo tabs utilities";
+  align-items: center;
   gap: .5rem 1rem;
   margin-bottom: 1rem;
-}
-@media (max-width: 1120px) {
-  #plugin-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "logo logo" "tabs guide";
-  }
 }
 h1, h2, h3 { line-height: 1.2; }
 #plugin-header h1 { grid-area: logo; margin: 0; font: 700 clamp(1.5rem, 5vw, 2rem) var(--font-serif); }
 #plugin-header nav { grid-area: tabs; }
-#plugin-header .docs-trigger { grid-area: guide; }
-#plugin-header :is(nav button, .docs-trigger) { min-height: 2.5rem; font-size: .875rem; }
+.header-utilities { grid-area: utilities; display: flex; justify-content: flex-end; gap: .35rem; }
+#plugin-header button { min-height: 44px; font-size: .875rem; }
+.header-utilities button { display: inline-flex; align-items: center; justify-content: center; width: 44px; padding: 0; }
+.header-utilities .action-icon { margin: 0; }
+.header-utilities .docs-trigger span, .tab-label-short { display: none; }
+@media (max-width: 1120px) {
+  #plugin-header {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  #plugin-header h1 { max-width: 100%; gap: min(.7rem, 12px); overflow-wrap: anywhere; }
+  #plugin-header .filabrain-mark { width: min(2.5rem, 44px); height: auto; }
+  #plugin-header nav { flex-basis: 100%; }
+  .header-utilities { margin-inline-start: auto; }
+}
 .filabrain-heading { display: flex; align-items: center; gap: .7rem; }
 .filabrain-mark { width: 2.5rem; height: 2.5rem; flex: none; }
 .filabrain-heading h2 { margin: 0; }
@@ -72,6 +79,15 @@ h1, h2, h3 { line-height: 1.2; }
   display: inline-flex; align-items: center; background: var(--bg-elevated);
   padding-inline: .55rem; font-size: .875rem;
 }
+@media (max-width: 800px) {
+  #plugin-header { margin-bottom: .65rem; }
+  #plugin-header nav { gap: .1875rem; }
+  #plugin-header nav button { flex: 1 0 auto; justify-content: center; min-width: 44px; padding-inline: .1875rem; font-size: .8125rem; }
+  #plugin-header nav .action-icon { width: 13px; height: 13px; margin-inline-end: .125rem; }
+  .tab-label-wide { display: none; }
+  .tab-label-short { display: inline; }
+}
+
 .fm-section-header {
   display: flex; align-items: center; justify-content: space-between; gap: .65rem;
   padding: .65rem 1rem; background: var(--bg-soft); border-bottom: 1px solid var(--border);
@@ -81,7 +97,7 @@ h1, h2, h3 { line-height: 1.2; }
 .fm-section-body { display: grid; gap: .75rem; min-width: 0; padding: 1rem; }
 .fm-section-body > :is(p, #library-research) { margin: 0; }
 .action-icon { flex: none; margin-inline-end: .35rem; }
-#plugin-header nav button[aria-current] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
+#plugin-header button[aria-current] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
 a { color: var(--accent); }
 button, input, textarea, select { font: inherit; color: inherit; }
 button, .fm-btn { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .45rem .75rem; background: var(--bg-elevated); color: var(--text); cursor: pointer; }
