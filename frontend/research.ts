@@ -448,7 +448,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
             product_url: productUrl || undefined,
             sku_hint: sku,
             guidance: prompt,
-            model_id: action === 'fill' ? chat.model : undefined,
+            ...(action === 'fill' ? chat.model : undefined),
           })
           if (revision !== formRevision) return { reply: t('filaBrain.identityChanged') }
           render(proposal, context)

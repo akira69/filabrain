@@ -1,6 +1,6 @@
 import { api } from './shared/api'
 import { t } from './shared/i18n'
-import { mountModelPicker } from './shared/model-picker'
+import { mountModelPicker, type ModelSelection } from './shared/model-picker'
 import { identity, type ResearchDraft } from './research'
 
 const pageLabels = {
@@ -16,7 +16,7 @@ type Message = {
 }
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
-  researching?: true; model?: string; updatedAt?: number
+  researching?: true; model?: string | ModelSelection; updatedAt?: number
 }
 type Research = {
   start(): void
@@ -350,7 +350,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     try {
       const { reply, action } = await api.post<{ reply: string; action: Action | null }>('/filabrain/chat', {
         messages: [...current.messages.slice(-10), question].map(({ role, content }) => ({ role, content })),
-        model_id: modelPicker.selected,
+        ...modelPicker.selected,
       }, { signal: controller.signal })
       if (request !== controller) return
       const answer: Message = { role: 'assistant', content: reply, action: action ?? undefined }

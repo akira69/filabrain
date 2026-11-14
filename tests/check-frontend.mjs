@@ -35,6 +35,8 @@ try {
   let supplierSites = []
   let savedManufacturerWebsite
   let chatModelId = 'fixture:default'
+  let endpoints = []
+  let defaultEndpoint = null
   let canConfigure = true
   let modelsUnavailable = false
   let hostPicker = false
@@ -114,20 +116,39 @@ try {
       savedManufacturerWebsite = req.postDataJSON()
       return route.fulfill({ status: 204 })
     }
-    if (path.endsWith('/settings/models') && heldModelList) await heldModelList
+    if (path.endsWith('/settings/models')) {
+      if (heldModelList) await heldModelList
+      const { model_url } = req.postDataJSON()
+      if (model_url.includes('offline')) return route.fulfill({ status: 502, json: { detail: 'Could not load models from this server.' } })
+      return route.fulfill({ json: { models: model_url.includes('remote')
+        ? ['fixture:alternate', 'fixture:hidden'] : ['fixture:default', 'fixture:alternate'] } })
+    }
     if (path.endsWith('/models')) return modelsUnavailable
       ? route.fulfill({ status: 502, json: {} })
-      : route.fulfill({ json: { models: ['fixture:default', 'fixture:alternate'] } })
+      : route.fulfill({ json: {
+        default_endpoint_id: defaultEndpoint || 'default',
+        groups: (endpoints.length ? endpoints : [{ id: 'default', name: 'Default endpoint', models: null, hidden_models: [] }])
+          .map(({ id, name, models, hidden_models, model_id }) => ({ id, name, models: [...new Set([
+            ...(model_id ? [model_id] : []), ...(models?.length ? models : id === defaultEndpoint || id === 'default'
+              ? ['fixture:default', 'fixture:alternate'] : []),
+          ])].filter(model => !hidden_models.includes(model)) })),
+      } })
     if (path.endsWith('/chat')) {
       assert.equal(req.postDataJSON().messages[0].content, 'Compare these materials')
-      if (chatRequests++ === 0) assert.equal(req.postDataJSON().model_id, 'fixture:alternate')
+      if (chatRequests++ === 0) {
+        assert.equal(req.postDataJSON().model_id, 'fixture:alternate')
+        assert.equal(req.postDataJSON().endpoint_id, defaultEndpoint)
+      }
       else assert.deepEqual(req.postDataJSON().messages.map(message => message.role), ['user', 'assistant', 'user'])
       return route.fulfill({ json: { reply: 'PLA is easier to print.', action: null } })
     }
     if (path.endsWith('/proposals')) {
       proposalRequests++
       const target = req.postDataJSON()
-      if (target.filament_id === 10 && target.action === 'fill') assert.equal(target.model_id, 'fixture:alternate')
+      if (target.filament_id === 10 && target.action === 'fill') {
+        assert.equal(target.model_id, 'fixture:alternate')
+        assert.equal(target.endpoint_id, endpoints.find(endpoint => endpoint.name === 'Remote models')?.id || defaultEndpoint)
+      }
       if (target.product_url) assert.equal(target.product_url, evidence[0].url)
       if (target.guidance === 'Continue in stale tab') return route.fulfill({
         status: 502, json: { detail: 'Source unavailable' },
@@ -173,7 +194,9 @@ try {
       return route.fulfill({ json: { ok: true } })
     }
     if (path.endsWith('/settings/test')) {
-      assert.deepEqual(req.postDataJSON(), {
+      const { endpoint_id, ...credentials } = req.postDataJSON()
+      assert.equal(endpoint_id, defaultEndpoint)
+      assert.deepEqual(credentials, {
         model_url: 'http://ollama:11434', model_id: 'fixture:default', api_key: 'fixture-key', clear_key: false,
       })
       return route.fulfill({ json: { ok: true } })
@@ -192,10 +215,15 @@ try {
         searchUrl = settings.search_url
         supplierDownloadMiB = settings.supplier_download_mib
         supplierSites = settings.supplier_sites ?? supplierSites
-        if (settings.model_id) chatModelId = settings.model_id
+        if (settings.model_endpoints) {
+          endpoints = settings.model_endpoints.map(({ api_key, clear_key, ...endpoint }) => ({ ...endpoint, has_key: !!api_key && !clear_key }))
+          defaultEndpoint = settings.default_endpoint_id
+        }
+        if (settings.model_id || defaultEndpoint) chatModelId = settings.model_id || endpoints.find(endpoint => endpoint.id === defaultEndpoint).model_id
       }
       return route.fulfill({ json: {
-        model_url: settings?.model_url || '', model_id: settings?.model_id || '',
+        model_url: endpoints.find(endpoint => endpoint.id === defaultEndpoint)?.model_url || '', model_id: chatModelId,
+        model_endpoints: endpoints, default_endpoint_id: defaultEndpoint,
         search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
         supplier_sites: supplierSites, supplier_download_mib: supplierDownloadMiB,
       } })
@@ -253,7 +281,7 @@ try {
   assert.equal(await page.getByRole('textbox', { name: 'Your question' }).isVisible(), false)
   await setupModel.click()
   const modelUrl = page.getByRole('textbox', { name: 'Model server URL' })
-  assert.equal(await modelUrl.evaluate(el => document.activeElement === el), true)
+  await page.waitForFunction(() => document.activeElement === document.querySelector('[name="model_url"]'))
   await modelUrl.fill('http://ollama:11434')
   const modelId = page.getByRole('textbox', { name: 'Model ID', exact: true })
   assert.equal(await modelId.isVisible(), false)
@@ -285,7 +313,7 @@ try {
   assert.equal(await warning.evaluate(el => getComputedStyle(el).color), 'rgb(255, 211, 107)')
   assert.equal(await warning.getAttribute('href'), '?tab=settings')
   await warning.press('Enter')
-  assert.equal(await modelUrl.evaluate(el => el === document.activeElement), true)
+  await page.waitForFunction(() => document.activeElement === document.querySelector('[name="model_url"]'))
 
   canConfigure = false
   await page.reload()
@@ -308,7 +336,7 @@ try {
   assert.equal(await alternateModel.evaluate(el => el === document.activeElement), true)
   await alternateModel.press('Enter')
   await chatMenu.waitFor({ state: 'hidden' })
-  assert.match(await chatModel.innerText(), /fixture:alternate/)
+  assert.match(await chatModel.innerText(), /fixture:alternate.*Default endpoint/s)
   await page.getByRole('textbox', { name: 'Your question' }).fill('Compare these materials')
   await page.getByRole('button', { name: 'Send message' }).click()
   await page.getByText('PLA is easier to print.').waitFor()
@@ -529,7 +557,7 @@ try {
   await searchField.fill('invalid-search-url')
   await searchPassed.waitFor({ state: 'hidden' })
   await modelUrl.fill('http://ollama:11434')
-  if (!await modelId.isVisible()) await page.locator('#filabrain-settings summary').click()
+  if (!await modelId.isVisible()) await page.locator('#filabrain-settings').getByText('Enter a model ID manually', { exact: true }).click()
   await modelId.fill('fixture:default')
   const modelKey = page.locator('#filabrain-settings input[name=api_key]')
   await modelKey.fill('fixture-key')
@@ -562,6 +590,37 @@ try {
   assert.equal(await searchField.inputValue(), searchUrl)
   assert.equal(await downloadLimit.inputValue(), '12')
   assert.equal(await supplier.isChecked(), true)
+  const endpointPicker = page.getByRole('combobox', { name: 'Model endpoint' })
+  const visibility = page.getByRole('region', { name: 'Model settings' }).getByText('Models shown in chat', { exact: true })
+  const desktopSize = page.viewportSize()
+  await page.setViewportSize({ width: 320, height: 760 })
+  await page.getByRole('button', { name: 'Add endpoint' }).click()
+  await page.getByRole('textbox', { name: 'Endpoint name' }).fill('Remote models')
+  await modelUrl.fill('https://offline.test/v1')
+  await loadModels.click()
+  await page.getByText('Could not load models from this server.').waitFor()
+  await modelUrl.fill('https://remote.test/v1')
+  await loadModels.click()
+  await page.getByLabel('Available models').selectOption('fixture:alternate')
+  await visibility.click()
+  await page.getByRole('checkbox', { name: 'fixture:hidden', exact: true }).uncheck()
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320)
+  await page.setViewportSize(desktopSize)
+  await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByText('Settings saved.').waitFor()
+  await page.reload()
+  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await endpointPicker.selectOption({ label: 'Remote models' })
+  await visibility.click()
+  assert.equal(await page.getByRole('checkbox', { name: 'fixture:hidden', exact: true }).isChecked(), false)
+  await page.getByRole('button', { name: 'Chat', exact: true }).click()
+  await chatModel.click()
+  const remoteGroup = chatMenu.getByRole('group', { name: 'Remote models' })
+  await remoteGroup.waitFor()
+  assert.equal(await remoteGroup.getByRole('menuitemradio', { name: 'fixture:hidden' }).count(), 0)
+  await remoteGroup.getByRole('menuitemradio', { name: 'fixture:alternate' }).click()
+  assert.match(await chatModel.innerText(), /fixture:alternate.*Remote models/s)
+  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   await supplier.uncheck()
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('Settings saved.').waitFor()
@@ -603,7 +662,7 @@ try {
   await researchMenu.getByRole('menuitemradio', { name: 'fixture:default Default' }).press('Escape')
   await researchMenu.waitFor({ state: 'hidden' })
   await researchModel.click()
-  await researchMenu.getByRole('menuitemradio', { name: 'fixture:alternate' }).click()
+  await researchMenu.getByRole('group', { name: 'Remote models' }).getByRole('menuitemradio', { name: 'fixture:alternate' }).click()
   await researchMenu.waitFor({ state: 'hidden' })
   assert.equal(await frame.getByText('Advanced options', { exact: true }).count(), 0)
   assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).isVisible(), false)

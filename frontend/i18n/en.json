@@ -1,5 +1,15 @@
 {
   "filaBrain": {
+    "endpoint": "Model endpoint",
+    "addEndpoint": "Add endpoint",
+    "endpointName": "Endpoint name",
+    "defaultEndpoint": "Default endpoint",
+    "makeDefault": "Make default",
+    "removeEndpoint": "Remove endpoint",
+    "modelVisibility": "Models shown in chat",
+    "endpointIncomplete": "Enter a name, a server URL and a model ID for this endpoint.",
+    "endpointModelsUnavailable": "Could not load models from {names}.",
+    "modelSelectionUnavailable": "This model is unavailable. Choose another model.",
     "clearLibrarySelection": "Clear selection",
     "libraryInventoryChanged": "The filament library changed. Select your filaments again.",
     "docs": "Guide",
