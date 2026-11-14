@@ -1,5 +1,11 @@
 {
   "filaBrain": {
+    "navNewFilament": "Neues Filament",
+    "navNew": "Neu",
+    "navResearchLibrary": "Filamentrecherche",
+    "navLibrary": "Bibliothek",
+    "navBatches": "Serien",
+    "navSettings": "Modell- und MCP-Einstellungen",
     "clearLibrarySelection": "Auswahl aufheben",
     "libraryInventoryChanged": "Die Filamentbibliothek wurde geändert. Wähle die Filamente erneut aus.",
     "docs": "Anleitung",
