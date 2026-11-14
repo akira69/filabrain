@@ -1,5 +1,11 @@
 {
   "filaBrain": {
+    "navNewFilament": "Nouveau filament",
+    "navNew": "Nouveau",
+    "navResearchLibrary": "Recherche dans la bibliothèque",
+    "navLibrary": "Bibliothèque",
+    "navBatches": "Lots",
+    "navSettings": "Paramètres du modèle et de MCP",
     "clearLibrarySelection": "Effacer la sélection",
     "libraryInventoryChanged": "La bibliothèque de filaments a changé. Sélectionnez de nouveau vos filaments.",
     "docs": "Guide",

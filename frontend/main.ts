@@ -275,6 +275,19 @@ async function main() {
       message.textContent = ''
       return
     }
+    const header = element('plugin-header')
+    const nav = header.querySelector('nav')!
+    const utilities = header.querySelector('.header-utilities')!
+    const stackedHeader = matchMedia('(max-width: 1120px)')
+    function syncHeaderOrder() {
+      const focused = document.activeElement
+      if (stackedHeader.matches) nav.before(utilities)
+      else nav.after(utilities)
+      if (focused instanceof HTMLElement && utilities.contains(focused)) focused.focus({ preventScroll: true })
+    }
+    if (stackedHeader.matches) syncHeaderOrder()
+    stackedHeader.addEventListener('change', syncHeaderOrder)
+
     let chat: ReturnType<typeof mountChat> | undefined
     let startResearch: (() => void) | undefined
     let draftOpen = false
