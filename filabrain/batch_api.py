@@ -102,11 +102,14 @@ class SwatchChoice(BatchInput):
     token: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     action: Literal["keep", "reuse", "create"]
     color_id: ID | None = None
+    color_name: Annotated[str, Field(max_length=100)] | None = None
 
     @model_validator(mode="after")
     def valid_color_selection(self):
-        if (self.action == "reuse") != (self.color_id is not None):
-            raise ValueError("Supply a color ID when reusing a swatch")
+        if self.action == "reuse" and (self.color_id is None or self.color_name is None):
+            raise ValueError("Supply the selected swatch ID and name")
+        if self.action != "reuse" and (self.color_id is not None or self.color_name is not None):
+            raise ValueError("Supply a swatch only when reusing one")
         return self
 
 
@@ -301,6 +304,12 @@ async def swatch_item(db: DBSession, batch_id: str, item_id: int, principal: Pri
     filament = await load_filament(db, item) if locked else await db.get(Filament, item.live_filament_id)
     if filament is None:
         raise HTTPException(404, "Filament is unavailable")
+    identity_fields = ("manufacturer_id", "designation", "material_type", "material_subgroup",
+                       "diameter_mm", "manufacturer_color_name", "finish_type", "color_mode")
+    if any(field in item.identity and item.identity[field] != getattr(filament, field) for field in identity_fields) or (
+        item.identity.get("manufacturer_sku") and item.identity["manufacturer_sku"] != filament.manufacturer_sku
+    ):
+        raise HTTPException(409, "The filament changed after research. Start a new run to review its color.")
     return batch, item, filament
 
 
@@ -321,11 +330,11 @@ def saved_color_references(filament: Filament) -> list[dict]:
     return [item for item in saved if isinstance(item, dict)] if isinstance(saved, list) else []
 
 
-def color_preview_token(item: Item, filament: Filament, assignments, code: str, manufacturer_source, preview: dict) -> str:
+def color_preview_token(item: Item, filament: Filament, assignments, code: str, source: dict, preview: dict) -> str:
     state = [item.revision, filament.id, getattr(filament, "record_token", None), filament.manufacturer_id,
              filament.designation, filament.manufacturer_color_name, filament.color_mode,
              [(assignment.id, assignment.display_name_override, swatch_data(color)) for assignment, color in assignments],
-             saved_color_references(filament), code, manufacturer_source, preview]
+             saved_color_references(filament), code, source, preview]
     return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
 
 
@@ -336,11 +345,17 @@ async def may_create_color(db: DBSession, owner_id: int) -> bool:
 
 @router.get("/{batch_id}/items/{item_id}/swatches")
 async def preview_swatches(batch_id: str, item_id: int, db: DBSession, principal: PrincipalDep):
-    batch, item, filament = await swatch_item(db, batch_id, item_id, principal)
+    _, item, filament = await swatch_item(db, batch_id, item_id, principal)
     references = list(references_from(item.issues, filament.manufacturer_color_name).items())[:4]
+    await db.rollback()
     previews = await asyncio.gather(*(resolve_preview(code) for code, _ in references))
+
+    batch, item, filament = await swatch_item(db, batch_id, item_id, principal)
+    if references != list(references_from(item.issues, filament.manufacturer_color_name).items())[:4]:
+        raise HTTPException(409, "The research references changed. Reopen the run and review them again.")
     assignments = await attached_swatches(db, filament.id)
     current = [swatch_data(color) for _, color in assignments]
+    current_ids = {color["id"] for color in current}
     saved = saved_color_references(filament)
     hex_codes = {preview["hex_code"] for preview in previews} - {None}
     matching = list(await db.scalars(select(Color).where(func.upper(Color.hex_code).in_(hex_codes))
@@ -351,10 +366,10 @@ async def preview_swatches(batch_id: str, item_id: int, db: DBSession, principal
         "can_save": not batch.canceled_at,
         "can_create": await may_create_color(db, principal.user_id),
         "references": [
-            {"code": code, **preview, "manufacturer_source": source,
+            {"code": code, **preview, **source,
              "saved": any(reference.get("code") == code for reference in saved),
              "matches": [swatch_data(color) for color in matching if color.hex_code.upper() == preview["hex_code"]
-                         and color.id not in {current_color["id"] for current_color in current}],
+                         and color.id not in current_ids],
              "token": color_preview_token(item, filament, assignments, code, source, preview)}
             for (code, source), preview in zip(references, previews)
         ],
@@ -376,10 +391,14 @@ async def apply_swatch(batch_id: str, item_id: int, data: SwatchChoice, db: DBSe
     references = references_from(item.issues, filament.manufacturer_color_name)
     assignments = await attached_swatches(db, filament.id, locked=True)
     source = references.get(data.code)
-    if data.code not in references or data.token != color_preview_token(item, filament, assignments, data.code, source, preview):
+    saved = saved_color_references(filament)
+    if source is None or data.token != color_preview_token(item, filament, assignments, data.code, source, preview):
         raise HTTPException(409, "The color preview changed. Reload the swatches and review again.")
 
-    reference = {"code": data.code, **preview, "manufacturer_source": source}
+    existing_reference = next((entry for entry in saved if entry.get("code") == data.code), None)
+    reference = {"code": data.code, **preview, **source}
+    if preview["hex_code"] is None and existing_reference and existing_reference.get("hex_code"):
+        reference = existing_reference
     color = None
     made_color = False
     if data.action != "keep":
@@ -387,10 +406,12 @@ async def apply_swatch(batch_id: str, item_id: int, data: SwatchChoice, db: DBSe
             raise HTTPException(409, "A single-color swatch is required to change the assignment")
         if data.action == "reuse":
             color = await db.get(Color, data.color_id, with_for_update=True)
-            if not color or color.hex_code.upper() != preview["hex_code"]:
+            if not color or color.name != data.color_name or color.hex_code.upper() != preview["hex_code"]:
                 raise HTTPException(409, "The selected swatch changed. Review it again.")
         else:
-            name = data.code if preview["name"] == data.code else f"{preview['name']} ({data.code})"
+            display_name = preview["name"] or data.code
+            suffix = f" ({data.code})"
+            name = data.code if display_name == data.code else display_name[:100 - len(suffix)].rstrip() + suffix
             color = await db.scalar(select(Color).where(Color.name == name, Color.hex_code == preview["hex_code"]))
             if color is None:
                 if not await may_create_color(db, principal.user_id):
@@ -411,7 +432,7 @@ async def apply_swatch(batch_id: str, item_id: int, data: SwatchChoice, db: DBSe
         else:
             db.add(FilamentColor(filament_id=filament.id, color_id=color.id, position=1))
 
-    saved = [entry for entry in saved_color_references(filament) if entry.get("code") != data.code]
+    saved = [entry for entry in saved if entry.get("code") != data.code]
     filament.custom_fields = {**(filament.custom_fields or {}), COLOR_REFERENCES: [*saved, reference]}
     await db.commit()
     response_cache.delete("filter_options:filaments")

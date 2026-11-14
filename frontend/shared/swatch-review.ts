@@ -1,4 +1,4 @@
-import { api } from './api'
+import { api, ApiError } from './api'
 import { CACHE_KEYS, invalidateCache } from './cache'
 import { escapeHtml as escape } from './extra-fields'
 import { t } from './i18n'
@@ -9,6 +9,7 @@ type Reference = {
   name: string
   hex_code: string | null
   manufacturer_source: string | null
+  from_product_url?: boolean
   source: string | null
   saved: boolean
   matches: Swatch[]
@@ -49,7 +50,7 @@ export async function mountSwatchReview(panel: HTMLElement, path: string) {
             <p class="swatch-label">${label('reference')}${reference.saved ? ' · ' + label('savedTag') : ''}</p>
             ${reference.hex_code ? chip(reference.code === reference.name ? reference.code : reference.name + ' · ' + reference.code, reference.hex_code)
               : `<p><strong>${escape(reference.code)}</strong> · ${label('unavailable')}</p>`}
-            <div class="swatch-sources">${source(reference.source, 'paletteSource')}${source(reference.manufacturer_source, 'manufacturerSource')}</div>
+            <div class="swatch-sources">${source(reference.source, 'paletteSource')}${source(reference.manufacturer_source, reference.from_product_url ? 'manufacturerProductUrl' : 'manufacturerSource')}</div>
           </div>`).join('')}
         </div>
       </div>
@@ -83,10 +84,13 @@ export async function mountSwatchReview(panel: HTMLElement, path: string) {
         event.stopPropagation()
         if (content.inert) return
         const [action, id] = select.value.split(':')
+        const match = reference.matches.find(swatch => swatch.id === Number(id))
         content.inert = true
         status.textContent = ''
         try {
-          await api.post(path, { code: reference.code, token: reference.token, action, color_id: id ? Number(id) : undefined })
+          await api.post(path, {
+            code: reference.code, token: reference.token, action, color_id: match?.id, color_name: match?.name,
+          })
           invalidateCache(CACHE_KEYS.FILAMENTS)
           invalidateCache(CACHE_KEYS.FILAMENT_FILTER_OPTIONS)
           status.textContent = tr('saved')
@@ -103,7 +107,7 @@ export async function mountSwatchReview(panel: HTMLElement, path: string) {
 
   try {
     await load()
-  } catch {
-    status.textContent = tr('loadFailed')
+  } catch (error) {
+    status.textContent = error instanceof ApiError && error.status === 409 ? error.message : tr('loadFailed')
   }
 }

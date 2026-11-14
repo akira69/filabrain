@@ -1,8 +1,9 @@
 """Resolve exact color references to the publishers' screen previews."""
+import asyncio
 import io
 import re
 from html import unescape
-from urllib.parse import unquote, urljoin
+from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
 from app.core.cache import TTLCache
@@ -26,9 +27,12 @@ RAL_SWATCH = re.compile(
     r'(?:\s*<div class="subtext">[^<]*<br\s*/?>(?P<name>[^<]+)</div>)?', re.I,
 )
 HEX = re.compile(r"background-color\s*:\s*(#[0-9a-f]{6})\b", re.I)
+URL_RAL = re.compile(r"(?:^|-)ral-?(\d{4})(?=-|$)", re.I)
+URL_PANTONE = re.compile(r"(?:^|-)pantone-?(?:[a-z]+-){0,8}(\d{2,4})(?:-)?(cp|up|c|u)(?=-|$)", re.I)
 HREF = re.compile(r'\bhref="([^"]+)"')
 _previews = TTLCache()
 _ral_page = TTLCache()
+_ral_load = asyncio.Lock()
 
 
 def normalize_reference(value: str) -> str | None:
@@ -39,34 +43,49 @@ def normalize_reference(value: str) -> str | None:
     return None
 
 
-def references_from(issues: list[dict], manufacturer_color_name: str | None) -> dict[str, str | None]:
+def references_in_product_url(url: str) -> list[str]:
+    slug = unquote(urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1]).lower()
+    return list(dict.fromkeys([
+        *(f"RAL {match[1]}" for match in URL_RAL.finditer(slug)),
+        *(f"Pantone {match[1]} {match[2].upper()}" for match in URL_PANTONE.finditer(slug)),
+    ]))
+
+
+def references_from(issues: list[dict], manufacturer_color_name: str | None) -> dict[str, dict]:
     references = {}
     for issue in issues:
         if issue.get("code") == "manufacturer_color_reference" and (code := normalize_reference(issue.get("name") or "")):
-            references.setdefault(code, issue.get("url"))
+            references.setdefault(code, {
+                "manufacturer_source": issue.get("url"),
+                "from_product_url": bool(issue.get("from_product_url")),
+            })
     if code := normalize_reference(manufacturer_color_name or ""):
-        references.setdefault(code, None)
+        references.setdefault(code, {"manufacturer_source": None, "from_product_url": False})
     return references
 
 
 async def read_asset(url: str) -> bytes:
     # Only fixed publisher URLs and normalized code paths reach this function.
-    async with httpx.AsyncClient(timeout=6, follow_redirects=False, trust_env=False) as client:
-        async with client.stream("GET", url, headers={"User-Agent": "FilaBrain"}) as response:
-            response.raise_for_status()
-            body = bytearray()
-            async for chunk in response.aiter_bytes():
-                if len(body) + len(chunk) > 2_000_000:
-                    raise ValueError("Color reference asset is too large")
-                body.extend(chunk)
+    async with asyncio.timeout(8):
+        async with httpx.AsyncClient(timeout=6, follow_redirects=False, trust_env=False) as client:
+            async with client.stream("GET", url, headers={"User-Agent": "FilaBrain"}) as response:
+                response.raise_for_status()
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(body) + len(chunk) > 2_000_000:
+                        raise ValueError("Color reference asset is too large")
+                    body.extend(chunk)
     return bytes(body)
 
 
 async def _ral_preview(code: str) -> dict | None:
     page = _ral_page.get(RAL_PAGE)
     if page is None:
-        page = (await read_asset(RAL_PAGE)).decode("utf-8")
-        _ral_page.set(RAL_PAGE, page, ttl=3600)
+        async with _ral_load:
+            page = _ral_page.get(RAL_PAGE)
+            if page is None:
+                page = (await read_asset(RAL_PAGE)).decode("utf-8")
+                _ral_page.set(RAL_PAGE, page, ttl=3600)
     for match in RAL_SWATCH.finditer(page):
         if match["code"] != code.removeprefix("RAL "):
             continue
@@ -85,8 +104,12 @@ async def _pantone_preview(code: str) -> dict | None:
     url = PANTONE_PAGE + slug
     image_url = PANTONE_ASSETS + f"pantone-color-chip-{slug}.webp"
     page = unquote(unescape((await read_asset(url)).decode("utf-8")))
-    alt = re.search(rf'alt="PANTONE {re.escape(number)}([^"]{{0,100}}) Chip"', page, re.I)
-    if image_url not in page or not alt:
+    exact_asset = re.compile(re.escape(image_url) + r'(?=[?&"\s])')
+    alt = next((match for tag in re.findall(r"<img\b[^>]+>", page, re.I)
+                if exact_asset.search(tag) and (match := re.search(
+                    rf'alt="PANTONE {re.escape(number)}([^"]{{0,100}}) Chip"', tag, re.I
+                ))), None)
+    if alt is None:
         return None
     with Image.open(io.BytesIO(await read_asset(image_url)), formats=["WEBP"]) as image:
         if max(image.size) > 2048:
@@ -105,7 +128,7 @@ async def resolve_preview(code: str) -> dict:
         return preview
     try:
         preview = await (_ral_preview(code) if code.startswith("RAL ") else _pantone_preview(code))
-    except (httpx.HTTPError, OSError, ValueError):
+    except (httpx.HTTPError, OSError, ValueError, Image.DecompressionBombError):
         preview = None
     if preview:
         _previews.purge_expired()

@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from sqlalchemy import func, or_, select
 
 from .catalog import linked_spool_profile, lookup_filaments, manufacturer_website
-from .color_standards import RAL_NUMBER, normalize_reference
+from .color_standards import RAL_NUMBER, normalize_reference, references_in_product_url
 from .model import (
     LIMITS,
     SPEC_LABELS,
@@ -677,6 +677,20 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
     ):
         sku = product["sku"]
     return title, sku, float(diameter), nominal_weight
+
+
+def _paramount_color_family(page: Evidence) -> tuple[str, str] | None:
+    if (not page.manufacturer_page or page.archived_at or _site_host(page.url) != "paramount-3d.com"
+            or not urlsplit(page.url).path.startswith("/product-page/")):
+        return None
+    title = (page.product or {}).get("designation") or page.title.split("|", 1)[0].strip()
+    package = _PACKAGED_TITLE.fullmatch(title)
+    if not package or not package["sku"] or not _PACKAGED_NAME.fullmatch(package["name"]):
+        return None
+    sku = _norm(package["sku"])
+    if float(package["diameter"]) == 3:
+        sku = sku.removesuffix(".3")
+    return _norm(package["name"]), sku
 
 
 def _paramount_url_identity(page: Evidence) -> Identity | None:
@@ -2080,6 +2094,8 @@ async def research_products(
     )
 
     has_published_color = False
+    url_color_references = {}
+    verified_color_families = set()
     if not unresolved_variants:
         for page, citation_title, scopes in official_scopes:
             for spec in _bundle_temperatures(supplier_identity, replace(page, title=citation_title), snapshot):
@@ -2100,7 +2116,12 @@ async def research_products(
                 issue = {"code": "manufacturer_color_reference", "name": color, "url": page.url}
                 if issue not in issues:
                     issues.append(issue)
+            if not page.archived_at:
+                for code in references_in_product_url(page.url):
+                    url_color_references.setdefault(code, page.url)
             if product := _packaged_product(supplier_identity, page, snapshot):
+                if family := _paramount_color_family(page):
+                    verified_color_families.add(family)
                 title, part, diameter, weight = product
                 sku_quote = next((
                     line for line in page.scopes or () if part and _LABELLED_SKU.findall(line) == [part]
@@ -2123,6 +2144,24 @@ async def research_products(
                     if size := _REEL_SIZE.search(scope.text):
                         for field, value in zip(("spool_outer_diameter_mm", "spool_width_mm"), size.groups()):
                             add(field, round(float(value) * 25.4, 2), cite(size[0]), primary=True)
+
+    declared_color_systems = {
+        code.split()[0] for issue in issues
+        if issue["code"] == "manufacturer_color_reference" and (code := normalize_reference(issue["name"]))
+    }
+    checked_url_systems = {code.split()[0] for code in url_color_references}
+    for page, _, scopes in official_scopes:
+        if any(not scope.shared for scope in scopes) or _paramount_color_family(page) not in verified_color_families:
+            continue
+        for code in references_in_product_url(page.url):
+            if code.split()[0] not in checked_url_systems:
+                url_color_references.setdefault(code, page.url)
+    for system in ("RAL", "Pantone"):
+        found = [(code, url) for code, url in url_color_references.items() if code.split()[0] == system]
+        if system not in declared_color_systems and len(found) == 1:
+            code, url = found[0]
+            issues.append({"code": "manufacturer_color_reference", "name": code, "url": url,
+                           "from_product_url": True})
 
     if unresolved_variants:
         evidence = [source for source in evidence if source.shared]

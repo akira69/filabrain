@@ -1897,9 +1897,96 @@ async def test_color_standard_preview_and_apply(installed, db_session, monkeypat
     await db_session.commit()
     updated = (await installed.get(path)).json()['references'][0]
     assert [(option['id'], option['name']) for option in updated['matches']] == [(matching.id, matching.name)]
+    renamed = await installed.post(path, json={
+        'code': updated['code'], 'token': updated['token'], 'action': 'reuse', 'color_id': matching.id,
+        'color_name': 'The color had a different name when I previewed it',
+    })
+    assert renamed.status_code == 409
     reused = await installed.post(path, json={
         'code': updated['code'], 'token': updated['token'], 'action': 'reuse', 'color_id': matching.id,
+        'color_name': matching.name,
     })
     assert reused.status_code == 200
     await db_session.refresh(assignment)
     assert assignment.color_id == matching.id
+
+    filament.manufacturer_color_name = 'New green variant'
+    await db_session.commit()
+    assert (await installed.get(path)).status_code == 409
+
+
+async def test_paramount_uses_matched_color_family_url_only(installed, db_session, monkeypatch):
+    from filabrain import proposals
+    from filabrain.sources import Evidence
+
+    site = "https://www.paramount-3d.com"
+    primary = site + "/product-page/pla-military-green-1-75mm-1kg-filament-ogrl60037764c"
+    sibling = site + "/product-page/pla-pantone-military-green-7764c-3-00mm-1kg-filament-ogrl60037764c"
+    other = site + "/product-page/pla-pantone-military-khaki-7530c-3-00mm-1kg-filament-gbrl10197530c"
+    titles = {
+        primary: "PLA (Military Green) 1.75mm 1kg Filament [OGRL60037764C]",
+        sibling: "PLA (Military Green) 3.00mm 1kg Filament [OGRL60037764C.3]",
+        other: "PLA (Military Khaki) 3.00mm 1kg Filament [GBRL10197530C.3]",
+    }
+
+    async def fetch(url, **_):
+        name = titles[url]
+        scopes = (name,) if url == primary else (name, 'Bed / Print Temperature: 1-2 C / 3-4 C')
+        return Evidence(url, name, name, {"designation": name}, scopes=scopes)
+
+    async def sitemap():
+        return tuple(titles)
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "paramount_product_urls", sitemap)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    manufacturer = Manufacturer(name="Paramount 3D", url=site)
+    db_session.add(manufacturer)
+    await db_session.flush()
+    filament = Filament(manufacturer_id=manufacturer.id, designation="PLA Military Green",
+                        material_type="PLA", diameter_mm=1.75, manufacturer_color_name="535435",
+                        shop_url="OGRL60037764C")
+    db_session.add(filament)
+    await db_session.commit()
+    result = (await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})).json()
+    refs = [issue for issue in result["issues"] if issue["code"] == "manufacturer_color_reference"]
+    assert refs == [{"code": "manufacturer_color_reference", "name": "Pantone 7764 C", "url": sibling,
+                     "from_product_url": True}]
+    assert not {"bed_temp_range_c", "extruder_temp_range_c"} & {entry["field"] for entry in result["suggestions"]}
+
+
+async def test_pantone_preview_binds_chip_to_requested_code(monkeypatch):
+    import io
+    from PIL import Image
+    from filabrain import color_standards as colors
+
+    asset = colors.PANTONE_ASSETS + "pantone-color-chip-7546-c.webp"
+    image = io.BytesIO()
+    Image.new("RGB", (16, 16), (36, 55, 70)).save(image, "WEBP", lossless=True)
+
+    async def fetch(url):
+        if url == asset:
+            return image.getvalue()
+        assert url == colors.PANTONE_PAGE + "7546-c"
+        return f'<img alt="PANTONE 7546 CP Incorrect Chip" src="{asset}-other"><img src="{asset}">'.encode()
+
+    monkeypatch.setattr(colors, "read_asset", fetch)
+    assert (await colors.resolve_preview("Pantone 7546 C"))["hex_code"] is None
+
+    async def corrected(url):
+        if url == asset:
+            return image.getvalue()
+        return f'<img alt="PANTONE 7546 C Chip" src="{asset}">'.encode()
+
+    monkeypatch.setattr(colors, "read_asset", corrected)
+    result = await colors.resolve_preview("Pantone 7546 C")
+    assert result["hex_code"] == "#243746"
