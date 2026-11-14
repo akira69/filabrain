@@ -36,6 +36,7 @@ try {
   let savedManufacturerWebsite
   let chatModelId = 'fixture:default'
   let canConfigure = true
+  let canUseFilaments = true
   let modelsUnavailable = false
   let hostPicker = false
   let account = 7
@@ -105,8 +106,8 @@ try {
         })
       </script>` })
     if (path.endsWith('/me')) return route.fulfill({ json: { id: account } })
-    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: chatModelId,
-      can_create: true, can_update: true, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
+    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: canUseFilaments, chat_model: chatModelId,
+      can_create: canUseFilaments, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
     if (path.endsWith('/filaments/10/research-record')) return recordUnavailable
       ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { record_token: editorRecordToken } })
@@ -732,6 +733,8 @@ try {
   await frame.getByRole('button', { name: 'Find specifications' }).click()
   const researchPage = frame.getByRole('button', { name: 'Research this page' })
   await researchPage.waitFor()
+  await frame.getByRole('button', { name: 'Send follow-up' }).waitFor()
+  await frame.locator('[data-chat-form] [name="message"]:not([readonly])').waitFor()
   assert.equal(await researchPage.locator('svg[aria-hidden=true]').count(), 1)
   recordUnavailable = true
   const requestsBeforeFailedClick = proposalRequests
@@ -947,6 +950,11 @@ try {
     }
     assert.ok(tabs.every(([, top, right]) => top === tabs[0][1] && right < 320), language + ' mobile nav fits')
   }
+  canUseFilaments = false
+  await page.evaluate(() => localStorage.setItem('lang', 'en'))
+  await page.goto(url)
+  await page.getByRole('region', { name: 'Model settings' }).waitFor()
+  assert.equal(await page.getByRole('navigation', { name: 'FilaBrain' }).count(), 0)
   console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
 } finally {
   await browser.close()

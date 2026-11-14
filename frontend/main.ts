@@ -342,6 +342,7 @@ async function main() {
       button.hidden = tab === 'settings' ? !canOpenSettings() : !mount[tab]
       button.addEventListener('click', () => show(tab))
     }
+    nav.hidden = !nav.querySelector('button:not([hidden])')
     const available = Object.keys(mount).find(tab => tab === 'settings' ? canOpenSettings() : mount[tab])
     if (!available) {
       message.textContent = 'You do not have permission to use FilaBrain.'
