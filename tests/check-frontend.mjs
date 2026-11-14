@@ -515,6 +515,9 @@ try {
   await page.getByRole('heading', { name: 'Apply report' }).waitFor()
   await page.getByRole('link', { name: 'All batches' }).click()
   await page.getByRole('region', { name: 'Research batches' }).getByText('No research batches yet.').waitFor()
+  const batchOverview = page.getByRole('region', { name: 'Research batches' })
+  assert.ok(await batchOverview.getByText(/Select filaments in Library and click Start research/).isVisible())
+  assert.ok(await batchOverview.getByText(/Apply report shows which changes were saved/).isVisible())
 
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   const settingsTitle = page.getByRole('heading', { name: 'Model settings', exact: true })
