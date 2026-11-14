@@ -10,6 +10,7 @@ export type Status = {
   enabled: boolean
   can_chat: boolean
   chat_model?: string | null
+  chat_endpoint_id?: string | null
   can_create: boolean
   can_update: boolean
   can_update_manufacturer?: boolean
@@ -223,7 +224,7 @@ async function main() {
       status.mcp_enabled = (event as CustomEvent<boolean>).detail
     })
     document.addEventListener('filaman:model-change', event => {
-      status.chat_model = (event as CustomEvent<string>).detail || null
+      Object.assign(status, (event as CustomEvent<Pick<Status, 'chat_model' | 'chat_endpoint_id'>>).detail)
     })
     if (!status.enabled) {
       message.textContent = 'FilaBrain is disabled.'
@@ -264,7 +265,7 @@ async function main() {
           showChat()
           settingsButton.focus()
         })
-        const chat = mountChat(status.chat_model, status.can_configure ? openEditorSettings : undefined,
+        const chat = mountChat(status, status.can_configure ? openEditorSettings : undefined,
           context.filament_id ? 'editor:' + context.filament_id : '')
         mountResearch(status, chat, showChat, context)
       } else if (hostMode === 'selection' && context.mode === 'selection' && status.can_update) {
@@ -283,7 +284,7 @@ async function main() {
     function openConversation() {
       const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
       view.hidden = false
-      chat ??= mountChat(status.chat_model, status.can_configure ? openSettings : undefined, undefined, !status.can_chat)
+      chat ??= mountChat(status, status.can_configure ? openSettings : undefined, undefined, !status.can_chat)
       if (status.can_create && !startResearch) {
         startResearch = mountResearch(status, chat, () => setGuide('new'))
       }
@@ -322,7 +323,10 @@ async function main() {
     }
     function openSettings() {
       show('settings')
-      element('filabrain-settings').querySelector<HTMLInputElement>('[name="model_url"]')!.focus()
+      const form = element('filabrain-settings')
+      const url = form.querySelector<HTMLInputElement>('[name="model_url"]')!
+      if (url.matches(':disabled')) form.querySelector<HTMLButtonElement>('#research-add-endpoint')!.focus()
+      else url.focus()
     }
     for (const button of buttons) {
       const tab = button.dataset.tab!

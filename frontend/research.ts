@@ -428,12 +428,17 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       notice.textContent = t('filaBrain.chatResearchStart')
       return
     }
+    if (action === 'fill' && chat.needsModelSelection) {
+      notice.textContent = t('filaBrain.chooseModel')
+      return
+    }
     showInChat()
     busy = true
     buttons.forEach(button => { button.disabled = true })
     updateSave()
     notice.textContent = ''
     conversation.hidden = false
+    if (action === 'fill') chat.preserveModel()
     if (!prompt) {
       optionsSummary.hidden = false
       searchOptions.open = false
@@ -448,7 +453,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
             product_url: productUrl || undefined,
             sku_hint: sku,
             guidance: prompt,
-            model_id: action === 'fill' ? chat.model : undefined,
+            ...(action === 'fill' ? chat.model : undefined),
           })
           if (revision !== formRevision) return { reply: t('filaBrain.identityChanged') }
           render(proposal, context)
@@ -715,9 +720,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     if (form.closest<HTMLElement>('[data-view]')?.hidden) return
     try {
       const current = await api.get<Status>(route + '/status', { cache: 'no-store' })
-      if ((status.chat_model ?? null) !== (current.chat_model ?? null)) {
-        status.chat_model = current.chat_model
-        document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: current.chat_model }))
+      if (status.chat_model !== current.chat_model || status.chat_endpoint_id !== current.chat_endpoint_id) {
+        document.dispatchEvent(new CustomEvent('filaman:model-change', {
+          detail: { chat_model: current.chat_model, chat_endpoint_id: current.chat_endpoint_id },
+        }))
       }
       status.mcp_enabled = current.mcp_enabled
       showPairing(current.mcp_enabled)

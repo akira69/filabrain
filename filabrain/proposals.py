@@ -26,7 +26,7 @@ from .model import (
     extract_proposal,
     request_extraction,
 )
-from .settings import config_record, model_key, resolve_model
+from .settings import check_model_catalog, config_record, model_key, select_model
 from .sources import (
     SHARED_SPEC,
     SUPPLIER_TOO_LARGE,
@@ -1206,7 +1206,8 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
 
 async def research_products(
     db: DBSession, identity: Identity, *, product_url=None, sku_hint="", snapshot=None,
-    guidance="", release_read=False, model_id: str | None = None, deadline: float | None = None,
+    guidance="", release_read=False, model_id: str | None = None, endpoint_id: str | None = None,
+    deadline: float | None = None,
 ) -> dict:
     proposal = {"suggestions": [], "issues": []}
     issues = proposal["issues"]
@@ -1217,6 +1218,7 @@ async def research_products(
         issues.extend({"code": "duplicate", "filament_id": ident} for ident in duplicates)
         return proposal
     _, config = await config_record(db)
+    endpoint, model = select_model(config, model_id, endpoint_id)
     if release_read:
         # The worker supplies a detached authorized snapshot; do not hold a read
         # transaction across supplier, catalog or model calls.
@@ -2136,14 +2138,14 @@ async def research_products(
         first_by_site.setdefault(_site_host(source.url), source)
     extraction_evidence = [*first_by_site.values(), *(source for source in evidence if source not in first_by_site.values())]
 
-    if evidence and config["model_url"] and (config["model_id"] or model_id):
+    if evidence and endpoint["model_url"] and model:
         try:
             async with network_time(22):
-                model = await resolve_model(config, model_id)
+                await check_model_catalog(endpoint, model)
                 extracted, model_issues = await request_extraction(
-                    config["model_url"],
+                    endpoint["model_url"],
                     model,
-                    model_key(config),
+                    model_key(endpoint),
                     supplier_identity.model_dump() | ({
                         field: snapshot[field] for field in ("finish_type", "material_subgroup", "color_mode")
                     } if snapshot is not None else {}),
@@ -2165,6 +2167,10 @@ async def research_products(
                 add(field, result["value"], result["sources"], primary=primary)
                 for option in result.get("options", []):
                     remember(field, option["value"], option["sources"])
+        except HTTPException as exc:
+            if exc.status_code != 502:
+                raise
+            issues.append({"code": "unavailable_source", "source": "Configured model"})
         except (
             httpx.HTTPError,
             TimeoutError,
@@ -2262,7 +2268,8 @@ async def research_products(
 
 async def batch_proposal(
     db: DBSession, snapshot: dict, mode: str, *, sku_hint="", product_url=None,
-    guidance="", release_read=True, skip_complete=False, model_id: str | None = None, deadline: float | None = None,
+    guidance="", release_read=True, skip_complete=False, model_id: str | None = None, endpoint_id: str | None = None,
+    deadline: float | None = None,
 ) -> dict:
     if mode == "standardize":
         return await _local_conventions(db, snapshot)
@@ -2276,7 +2283,7 @@ async def batch_proposal(
         return {**result, "issues": [{"code": "needs_match", "field": "manufacturer_sku"}]}
     raw = await research_products(
         db, identity, product_url=product_url, sku_hint=sku_hint, snapshot=snapshot,
-        guidance=guidance, release_read=release_read, model_id=model_id, deadline=deadline,
+        guidance=guidance, release_read=release_read, model_id=model_id, endpoint_id=endpoint_id, deadline=deadline,
     )
     for suggestion in raw["suggestions"]:
         field = suggestion["field"]

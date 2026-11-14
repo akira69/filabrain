@@ -2,7 +2,7 @@
 
 ![FilaBrain AI connected to FilaMan over Ethernet](filabrain/guide-art.webp)
 
-FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the FilaMan library, checks manufacturer and catalog sources, and presents proposals for review. It supports an OpenAI-compatible model server, including Ollama, and can expose its tools to a separate MCP client.
+FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the FilaMan library, checks manufacturer and catalog sources, and presents proposals for review. It supports multiple OpenAI-compatible model endpoints, including Ollama, and can expose its tools to a separate MCP client.
 
 ## Install
 
@@ -33,6 +33,10 @@ npm ci
 npm run build
 python3 scripts/package_plugin.py
 ```
+
+## Model endpoints
+
+Open **Model & MCP settings** and use **Add endpoint** for each model server. Give it a name, enter its URL and API key if required, then load models or enter a model ID manually. Use **Models shown in chat** to choose which models appear under that endpoint in the chat picker. Save your changes after testing the connection. **Make default** sets the endpoint and model that new conversations and background research batches use.
 
 ## Optional SearXNG search
 

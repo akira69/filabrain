@@ -1,5 +1,15 @@
 {
   "filaBrain": {
+    "endpoint": "Modell-Endpunkt",
+    "addEndpoint": "Endpunkt hinzufügen",
+    "endpointName": "Name des Endpunkts",
+    "defaultEndpoint": "Standard-Endpunkt",
+    "makeDefault": "Als Standard festlegen",
+    "removeEndpoint": "Endpunkt entfernen",
+    "modelVisibility": "Im Chat angezeigte Modelle",
+    "endpointIncomplete": "Gib einen Namen, eine Server-URL und eine Modell-ID für diesen Endpunkt ein.",
+    "endpointModelsUnavailable": "Modelle konnten von {names} nicht geladen werden.",
+    "modelSelectionUnavailable": "Dieses Modell ist nicht verfügbar. Wähle ein anderes Modell.",
     "clearLibrarySelection": "Auswahl aufheben",
     "libraryInventoryChanged": "Die Filamentbibliothek wurde geändert. Wähle die Filamente erneut aus.",
     "docs": "Anleitung",
