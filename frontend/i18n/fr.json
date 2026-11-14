@@ -1,4 +1,24 @@
 {
+  "swatchReview": {
+    "title": "Correspondance couleur",
+    "current": "Couleur enregistrée",
+    "reference": "Aperçu de la référence",
+    "noCurrent": "Aucune couleur enregistrée",
+    "unavailable": "Aperçu indisponible",
+    "paletteSource": "Source de la palette",
+    "manufacturerSource": "Fabricant",
+    "choice": "Choix de la couleur",
+    "keep": "Garder la couleur enregistrée",
+    "referenceOnly": "Enregistrer la référence seule",
+    "reuse": "Réutiliser",
+    "create": "Créer une couleur",
+    "saveReference": "Enregistrer la référence",
+    "applySwatch": "Appliquer la couleur",
+    "savedTag": "Enregistrée",
+    "saved": "Choix de couleur enregistré.",
+    "saveFailed": "Impossible d’enregistrer le choix de couleur.",
+    "loadFailed": "Impossible de charger les couleurs."
+  },
   "filaBrain": {
     "navNewFilament": "Nouveau filament",
     "navNew": "Nouveau",

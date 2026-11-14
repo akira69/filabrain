@@ -1,4 +1,24 @@
 {
+  "swatchReview": {
+    "title": "Farbabgleich",
+    "current": "Gespeicherte Farbe",
+    "reference": "Normvorschau",
+    "noCurrent": "Keine Farbe gespeichert",
+    "unavailable": "Vorschau nicht verfügbar",
+    "paletteSource": "Palettenquelle",
+    "manufacturerSource": "Hersteller",
+    "choice": "Farbauswahl",
+    "keep": "Gespeicherte Farbe behalten",
+    "referenceOnly": "Nur Referenz speichern",
+    "reuse": "Wiederverwenden",
+    "create": "Farbe erstellen",
+    "saveReference": "Referenz speichern",
+    "applySwatch": "Farbe übernehmen",
+    "savedTag": "Gespeichert",
+    "saved": "Farbauswahl gespeichert.",
+    "saveFailed": "Die Farbauswahl konnte nicht gespeichert werden.",
+    "loadFailed": "Die Farben konnten nicht geladen werden."
+  },
   "filaBrain": {
     "navNewFilament": "Neues Filament",
     "navNew": "Neu",

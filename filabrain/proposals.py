@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from sqlalchemy import func, or_, select
 
 from .catalog import linked_spool_profile, lookup_filaments, manufacturer_website
+from .color_standards import RAL_NUMBER, normalize_reference
 from .model import (
     LIMITS,
     SPEC_LABELS,
@@ -527,7 +528,7 @@ _REEL_SIZE = re.compile(
 )
 _LABELLED_SKU = re.compile(r"\b(?:sku|article number)\s*[:#]\s*([\w.+-]+)", re.IGNORECASE)
 _COLOR_CODES = (
-    ("RAL", re.compile(r"RAL(?: Colou?r)?\s*:?\s+(\d{4})(?:\s+(.{1,90}))?", re.IGNORECASE)),
+    ("RAL", re.compile(rf"RAL(?: Colou?r)?\s*:?\s*({RAL_NUMBER})(?:\s+(.{{1,90}}))?", re.IGNORECASE)),
     ("Pantone", re.compile(
         r"Pantone(?: Colou?r)?\s*:?\s+((?:[a-z][a-z ]{0,23}\s+)?\d{2,4}(?:-\d{4})?(?:\s*[a-z]{1,4})?)",
         re.IGNORECASE,
@@ -2099,10 +2100,6 @@ async def research_products(
                 issue = {"code": "manufacturer_color_reference", "name": color, "url": page.url}
                 if issue not in issues:
                     issues.append(issue)
-            if colors:
-                has_published_color = True
-                color, quote = next(iter(colors))
-                add("manufacturer_color_name", color, cite(quote), primary=True)
             if product := _packaged_product(supplier_identity, page, snapshot):
                 title, part, diameter, weight = product
                 sku_quote = next((
@@ -2113,11 +2110,12 @@ async def research_products(
                 add("raw_material_weight_g", weight, cite(title), primary=True)
                 if not page.archived_at and (image := public_link((page.product or {}).get("image_url"))):
                     add("image_url", image, cite(title), primary=True)
+                if (colors or _site_host(page.url) == "paramount-3d.com") and (
+                    heading := _PACKAGED_TITLE.fullmatch(title)
+                ) and (name := _PACKAGED_NAME.fullmatch(heading["name"])) and not normalize_reference(name[2]):
+                    has_published_color = True
+                    add("manufacturer_color_name", name[2], cite(title), primary=True)
                 if _site_host(page.url) == "paramount-3d.com":
-                    if not colors and (heading := _PACKAGED_TITLE.fullmatch(title)) and (
-                        name := _PACKAGED_NAME.fullmatch(heading["name"])
-                    ):
-                        add("manufacturer_color_name", name[2], cite(title), primary=True)
                     for scope in verified_scopes:
                         for field, value, quote in _paramount_specs(scope.text):
                             add(field, value, cite(quote), primary=True)
@@ -2159,7 +2157,7 @@ async def research_products(
                 ))
             for result in extracted:
                 field = result["field"]
-                if has_published_color and field == "manufacturer_color_name":
+                if field == "manufacturer_color_name" and (has_published_color or normalize_reference(str(result["value"]))):
                     continue
                 primary = any(primary_source(citation["url"]) for citation in result["sources"])
                 add(field, result["value"], result["sources"], primary=primary)

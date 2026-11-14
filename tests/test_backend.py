@@ -1577,7 +1577,7 @@ async def test_manufacturer_product_from_its_own_catalog(
     else:
         reference = next(issue for issue in data["issues"] if issue["code"] == "manufacturer_color_reference")
         assert reference["name"] == "Pantone 425C"
-        assert suggestions["manufacturer_color_name"]["value"] == "Pantone 425C"
+        assert suggestions["manufacturer_color_name"]["value"] == "Graphite Gray"
         assert suggestions["manufacturer_color_name"]["sources"][0]["url"] == product_url
     if label.startswith("RAL Color:"):
         reference = next(issue for issue in data["issues"] if issue["code"] == "manufacturer_color_reference")
@@ -1598,12 +1598,12 @@ async def test_manufacturer_product_from_its_own_catalog(
     )
 
 
-@pytest.mark.parametrize(("label", "expected_color"), [
+@pytest.mark.parametrize(("label", "expected_reference"), [
     ("RAL Color: 9010 Pure White", "RAL 9010 Pure White"),
     ("PANTONE Color: 425C", "Pantone 425C"),
 ])
 async def test_paramount_pasted_url_proposes_identity_and_published_specs(
-    installed, db_session, monkeypatch, label, expected_color,
+    installed, db_session, monkeypatch, label, expected_reference,
 ):
     from filabrain import proposals
     from filabrain.sources import Evidence
@@ -1652,7 +1652,9 @@ async def test_paramount_pasted_url_proposes_identity_and_published_specs(
     assert values["manufacturer_id"] == maker.id
     assert values["designation"] == "PLA (White)"
     assert values["material_type"] == "PLA"
-    assert values["manufacturer_color_name"] == expected_color
+    assert values["manufacturer_color_name"] == "White"
+    assert any(issue["code"] == "manufacturer_color_reference" and issue["name"] == expected_reference
+               for issue in data["issues"])
     assert values["manufacturer_sku"] == "852297007008"
     assert values["shop_url"] == url
     assert values["spool_width_mm"] == 57.15
@@ -1833,3 +1835,71 @@ async def test_catalog_matches_explicit_pla_plus_version_color_and_package(monke
     )]
     assert [item["id"] for item in matches] == ["exact"]
     assert proposals.catalog_values(matches[0])["density_g_cm3"] == 1.21
+
+
+async def test_color_standard_preview_and_apply(installed, db_session, monkeypatch):
+    from app.models import Color, FilamentColor
+    from filabrain import batch_api, color_standards
+    from filabrain.db import FilamentResearchBatchItem
+
+    async def ral_page(url):
+        assert url == 'https://www.ral-farben.de/en/all-ral-colours'
+        return b'<a href="/en/colour/ral-classic/ral-3020/9143" style="background-color:#AB1519"><span>RAL</span><span class="number">3020</span><div class="subtext">Verkehrsrot<br/>Traffic red</div></a>'
+
+    monkeypatch.setattr(color_standards, 'read_asset', ral_page)
+    monkeypatch.setattr(batch_api, 'start_worker', lambda _app: None)
+    maker = Manufacturer(name='Swatch Fixture')
+    saved = Color(name='Enzo Red', hex_code='#B81D13')
+    db_session.add_all([maker, saved])
+    await db_session.flush()
+    filament = Filament(manufacturer_id=maker.id, designation='Fixture PETG', material_type='PETG',
+                        manufacturer_color_name='Enzo Red', diameter_mm=1.75, color_mode='single')
+    db_session.add(filament)
+    await db_session.flush()
+    assignment = FilamentColor(filament_id=filament.id, color_id=saved.id, position=1)
+    db_session.add(assignment)
+    await db_session.commit()
+    response = await installed.post(f'{BASE}/batches', json={'filament_ids': [filament.id], 'mode': 'fill'})
+    assert response.status_code == 200
+    run = response.json()
+    item = await db_session.get(FilamentResearchBatchItem, run['items'][0]['id'])
+    item.status = 'ready'
+    item.issues = [{'code': 'manufacturer_color_reference', 'name': 'RAL3020 Traffic red',
+                    'url': 'https://fixture.example/products/red'}]
+    await db_session.commit()
+    path = f"{BASE}/batches/{run['id']}/items/{item.id}/swatches"
+    preview = await installed.get(path)
+    assert preview.status_code == 200
+    review = preview.json()
+    assert review['current'][0]['hex_code'] == '#B81D13'
+    reference = review['references'][0]
+    assert (reference['code'], reference['hex_code'], reference['name']) == ('RAL 3020', '#AB1519', 'Traffic red')
+    assert (await db_session.get(FilamentColor, assignment.id)).color_id == saved.id
+    request = {'code': reference['code'], 'token': reference['token']}
+    kept = await installed.post(path, json=request | {'action': 'keep'})
+    assert kept.status_code == 200
+    old = await installed.post(path, json=request | {'action': 'create'})
+    assert old.status_code == 409
+    request['token'] = (await installed.get(path)).json()['references'][0]['token']
+    applied = await installed.post(path, json=request | {'action': 'create'})
+    assert applied.status_code == 200
+    await db_session.refresh(assignment)
+    await db_session.refresh(filament)
+    assert filament.manufacturer_color_name == 'Enzo Red'
+    assert filament.custom_fields['filabrain_color_references'][0]['code'] == 'RAL 3020'
+    color = await db_session.get(Color, assignment.color_id)
+    assert color.hex_code == '#AB1519'
+    await db_session.refresh(saved)
+    assert saved.hex_code == '#B81D13'
+
+    matching = Color(name='Previously saved red', hex_code='#AB1519')
+    db_session.add(matching)
+    await db_session.commit()
+    updated = (await installed.get(path)).json()['references'][0]
+    assert [(option['id'], option['name']) for option in updated['matches']] == [(matching.id, matching.name)]
+    reused = await installed.post(path, json={
+        'code': updated['code'], 'token': updated['token'], 'action': 'reuse', 'color_id': matching.id,
+    })
+    assert reused.status_code == 200
+    await db_session.refresh(assignment)
+    assert assignment.color_id == matching.id

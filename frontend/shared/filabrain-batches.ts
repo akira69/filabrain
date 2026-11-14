@@ -4,6 +4,7 @@ import { CACHE_KEYS, invalidateCache } from './cache'
 import { escapeHtml, formatNumericRange } from './extra-fields'
 import { researchFieldLabel, researchOptionValue, type ResearchOption } from './filabrain'
 import { t } from './i18n'
+import { mountSwatchReview } from './swatch-review'
 
 const route = '/filabrain/batches'
 const page = location.pathname
@@ -37,6 +38,7 @@ type Item = {
     manufacturer_sku?: string
     diameter_mm?: number
   }
+  color_references?: string[]
   proposals: Proposal[]
   issues: { code: string; field?: string; source?: string; name?: string; message?: string; reason?: string; url?: string; product_url?: string | null; options?: ResearchOption[] }[]
   approved_ids: string[]
@@ -65,12 +67,13 @@ type Preview =
 
 const fieldName = (field: string) => researchFieldLabel(field === 'manufacturer_name' ? 'manufacturer_id' : field)
 const label = (item: Item) => item.identity.designation || tr('record', { id: item.filament_id })
-const status = (item: Item) => tr('status.' + (
+const colorOnly = (item: Item) => item.status === 'no_change' && !!item.color_references?.length
+const status = (item: Item) => colorOnly(item) && item.decision === 'pending' ? t('swatchReview.title') : tr('status.' + (
   item.decision === 'skipped' && !['unavailable', 'canceled'].includes(item.status) ? 'skipped' :
   item.decision === 'approved' && item.status === 'ready' ? 'approved' : item.status))
 const researching = (item: Item) => ['queued', 'running'].includes(item.status)
 const canRetry = (item: Item) => ['failed', 'needs_match', 'stale'].includes(item.status)
-const reviewable = (item: Item) => item.decision === 'pending' && (item.status === 'ready' || canRetry(item))
+const reviewable = (item: Item) => item.decision === 'pending' && (item.status === 'ready' || canRetry(item) || colorOnly(item))
 const binding = (item: Item, approved_ids: string[]): Binding => ({
   item_id: item.id, revision: item.revision, decision_revision: item.decision_revision, approved_ids,
 })
@@ -318,6 +321,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       } else notes.push(issue)
     }
     const changedFields = item.status === 'stale' ? item.changed_fields : []
+    const showSwatches = !!item.live_filament_id && !!item.color_references?.length
+    const visibleNotes = showSwatches ? notes.filter(issue => issue.code !== 'manufacturer_color_reference') : notes
     const editor = item.live_filament_id
       ? link(`/filaments/${item.live_filament_id}?edit=1`, tr('openEditor'), 'batch-editor') : ''
     const choosing = editable && item.status === 'ready' && item.decision !== 'skipped'
@@ -334,8 +339,13 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       ${proposals.length ? `<ul class="batch-proposals">${proposals.map(proposal =>
         proposalCard(proposal, item.approved_ids.includes(proposal.id), choosing)).join('')}</ul>` : ''}
       ${renderSources(evidence)}
-      ${notes.length || changedFields.length ? `
-        <div class="batch-notes">${issueList(notes, evidence, changedFields)}</div>` : ''}
+      ${showSwatches ? `<section class="swatch-review" data-swatch-review>
+        <h3>${escapeHtml(t('swatchReview.title'))}</h3>
+        <div data-swatch-content></div>
+        <p class="batch-muted" tabindex="-1" role="status" data-swatch-status></p>
+      </section>` : ''}
+      ${visibleNotes.length || changedFields.length ? `
+        <div class="batch-notes">${issueList(visibleNotes, evidence, changedFields)}</div>` : ''}
       ${editable && canRetry(item) && item.decision !== 'skipped' ? `
         <form class="batch-retry">
           <label>${escapeHtml(tr('retrySku'))}<input class="fm-input" name="sku_hint" maxlength="250" /></label>
@@ -353,6 +363,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       </details>` : ''}
       </div>`
     updateApproveButton()
+    const swatches = card.querySelector<HTMLElement>('[data-swatch-review]')
+    if (swatches) void mountSwatchReview(swatches, path + `/items/${item.id}/swatches`)
   }
 
   function updateApproveButton() {

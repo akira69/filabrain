@@ -1,4 +1,24 @@
 {
+  "swatchReview": {
+    "title": "Color match",
+    "current": "Saved swatch",
+    "reference": "Standard preview",
+    "noCurrent": "No saved swatch",
+    "unavailable": "Preview unavailable",
+    "paletteSource": "Palette source",
+    "manufacturerSource": "Manufacturer",
+    "choice": "Swatch choice",
+    "keep": "Keep saved swatch",
+    "referenceOnly": "Save reference only",
+    "reuse": "Reuse",
+    "create": "Create swatch",
+    "saveReference": "Save reference",
+    "applySwatch": "Apply swatch",
+    "savedTag": "Saved",
+    "saved": "Color choice saved.",
+    "saveFailed": "Could not save the color choice.",
+    "loadFailed": "Could not load swatches."
+  },
   "filaBrain": {
     "navNewFilament": "New filament",
     "navNew": "New",
