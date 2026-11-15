@@ -48,6 +48,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   const historyStorage = () => editorScope === '' ? sessionStorage : localStorage
   let request: AbortController | undefined
   let busyResearch = false
+  let staging = false
   let researching = false
   let research: Research | undefined
   let activeAnswer: HTMLElement | undefined
@@ -66,15 +67,16 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     input.maxLength = researching ? 400 : 2000
     input.placeholder = t(researching ? 'filaBrain.followUpHint' : 'filaBrain.chatPlaceholder')
     input.setAttribute('aria-label', t(researching ? 'filaBrain.followUp' : 'filaBrain.chatQuestion'))
-    submit.disabled = busyResearch || !request && (input.disabled || !input.value.trim())
+    submit.disabled = busyResearch || staging || !request && (input.disabled || !input.value.trim())
     const label = t(request ? 'filaBrain.chatStop' : researching ? 'filaBrain.sendFollowUp' : 'filaBrain.chatSend')
     submit.setAttribute('aria-label', label)
     submit.title = label
     submit.toggleAttribute('data-busy', !!request)
-    input.readOnly = !!request || busyResearch
-    modelPicker.setBusy(!!request || busyResearch)
+    input.readOnly = !!request || busyResearch || staging
+    modelPicker.setBusy(!!request || busyResearch || staging)
     status.toggleAttribute('data-chat-running', !!request)
-    newChat.disabled = busyResearch || !researching && !request && !current.messages.length && !input.value
+    newChat.disabled = busyResearch || staging || !researching && !request && !current.messages.length && !input.value
+    for (const button of historyList.querySelectorAll('button')) button.disabled = busyResearch || staging
     prompts.hidden = researching || form.hidden || !!request || current.messages.length > 0
     setup.hidden = researching || !!model || current.messages.length > 0
     researchInput.hidden = researchResults.hidden = !researching
@@ -128,10 +130,11 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     for (const conversation of conversations) {
       const button = document.createElement('button')
       button.type = 'button'
+      button.disabled = busyResearch || staging
       button.textContent = conversation.title || conversation.messages[0].content.slice(0, 100)
       if (conversation.id === current.id) button.setAttribute('aria-current', 'true')
       button.addEventListener('click', async () => {
-        if (busyResearch) return
+        if (busyResearch || staging) return
         let selected = conversation
         try {
           const latest = readHistory().find(item => item.id === conversation.id)
@@ -332,7 +335,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       return
     }
     const content = input.value.trim()
-    if (!content || busyResearch) return
+    if (!content || busyResearch || staging) return
     if (researching) {
       try { await research?.followUp(content) }
       catch { status.textContent = t('filaBrain.failed') }
@@ -395,6 +398,10 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     get savedDraft() {
       const id = draftId()
       return hasReceipt(current, id) || hasStoredReceipt(id)
+    },
+    setStaging(value: boolean) {
+      staging = value
+      updateControls()
     },
     archiveResearch() {
       if (!current.research || !research) return

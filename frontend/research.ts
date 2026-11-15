@@ -226,6 +226,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     const count = editor ? selected().reduce((total, unit) => total + Object.keys(unit).length, 0) : 0
     save.disabled = !bound || duplicate || busy || saving || (!!editor && count === 0)
     if (editor) {
+      for (const control of results.querySelectorAll<HTMLInputElement>('input[type=checkbox], input[type=radio]')) {
+        control.disabled = saving
+      }
       save.textContent = t(count === 0 ? 'filaBrain.stageFields' : count === 1 ? 'filaBrain.stageOne' : 'filaBrain.stageMany', { count })
     }
   }
@@ -587,6 +590,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     const snapshot = bound
     const units = selected()
     saving = true
+    if (editor) chat.setStaging(true)
     updateSave()
     try {
       const context = await target()
@@ -597,6 +601,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       }
       if (editor) {
         const { staged, skipped } = await hostRequest<{ staged: string[]; skipped: string[] }>('filaman:filament-stage', { units })
+        if (bound !== snapshot) return
         if (!staged.length) {
           notice.textContent = t('filaBrain.identityChanged')
           return
@@ -642,6 +647,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       notice.textContent = errorText(error)
     } finally {
       saving = false
+      if (editor) chat.setStaging(false)
       updateSave()
     }
   })

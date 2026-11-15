@@ -59,6 +59,7 @@ try {
   }
   let supportsRecordToken = true
   let hostSendsIdentity = false
+  let holdStage = false
   await context.route('https://fila.test/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
@@ -97,7 +98,9 @@ try {
             filament_id:${editorMode === 'edit' ? 10 : 'null'}, record_token:${JSON.stringify(hostEditorToken)}, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75 }}, location.origin)
           if (type === 'filaman:filament-stage') {
             window.staged = units;
-            event.source.postMessage({type, request_id, staged:units.flatMap(unit => Object.keys(unit)), skipped:[]}, location.origin)
+            const reply = () => event.source.postMessage({type, request_id, staged:units.flatMap(unit => Object.keys(unit)), skipped:[]}, location.origin)
+            if (${JSON.stringify(holdStage)}) window.finishStage = reply;
+            else reply()
           }
         })
       </script>` })
@@ -573,6 +576,7 @@ try {
   await settings.getByText('On', { exact: true }).waitFor()
   assert.equal(await settings.getByRole('textbox', { name: 'MCP URL' }).isVisible(), true)
 
+  holdStage = true
   await page.goto('https://fila.test/editor-fixture')
   const frame = page.frameLocator('iframe')
   const followUp = frame.getByRole('textbox', { name: 'Follow up on this search' })
@@ -642,13 +646,21 @@ try {
     manufacturer_id: 7, name: manufacturer.name, url: 'https://manufacturer.test/', record_token: editorRecordToken,
   })
   await frame.getByRole('button', { name: 'Stage 1 field' }).click()
+  await page.waitForFunction(() => !!window.finishStage)
+  assert.equal(await frame.locator('[data-chat-new]').isDisabled(), true)
+  const unstagedSku = frame.locator('#research-results').getByRole('checkbox', { name: /FIX-123/ })
+  assert.equal(await unstagedSku.isDisabled(), true)
+  await frame.locator('[data-chat-history] summary').click()
+  assert.equal(await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications' }).isDisabled(), true)
+  await page.evaluate(() => { const reply = window.finishStage; delete window.finishStage; reply() })
   await frame.getByText('1 field staged.', { exact: false }).waitFor()
+  assert.equal(await frame.locator('[data-chat-new]').isDisabled(), false)
   const stagedFindings = frame.locator('.research-history').filter({ hasText: 'Density (g/cm³): 1.24' }).first()
   await stagedFindings.locator('summary').click()
   assert.equal(await stagedFindings.locator('.research-history-value').filter({ hasText: 'Density (g/cm³): 1.24' })
     .getByRole('link', { name: evidence[0].title }).getAttribute('href'), evidence[0].url)
   assert.equal(await frame.locator('#research-results').getByRole('checkbox', { name: /Density/ }).count(), 0)
-  await frame.locator('#research-results').getByRole('checkbox', { name: /FIX-123/ }).waitFor()
+  assert.equal(await unstagedSku.isEnabled(), true)
   assert.deepEqual(await page.evaluate(() => window.staged), [{ density_g_cm3: { old: null, value: 1.24 } }])
   await frame.locator('#research-options > summary').click()
   await frame.getByRole('button', { name: 'Find specifications' }).click()
@@ -683,6 +695,8 @@ try {
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).check()
   assert.equal(await followUp.inputValue(), '')
   await frame.getByRole('button', { name: 'Stage 2 fields' }).click()
+  await page.waitForFunction(() => !!window.finishStage)
+  await page.evaluate(() => window.finishStage())
   await frame.getByText('2 fields staged.', { exact: false }).waitFor()
   assert.deepEqual(await page.evaluate(() => window.staged), [{
     designation: { old: 'Fixture PLA', value: 'Fixture-PLA' },
@@ -691,6 +705,7 @@ try {
   assert.equal(writes.length, 1)
 
   const requestsBeforeReopen = proposalRequests
+  holdStage = false
   await page.reload()
   await frame.locator('[data-chat-history] summary').click({ timeout: 2000 })
   await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
