@@ -1613,7 +1613,6 @@ async def research_products(
         web_urls = await search(initial_query)
         first_pages.update(await check_pages(web_urls))
 
-    related_color_pages = []
     if (
         not product_url and manufacturer_site and manufacturer_domain and manufacturer_domain != "paramount-3d.com"
         and SUPPLIER_TOO_LARGE not in fetch_errors.values() and not official_match()
@@ -1624,38 +1623,6 @@ async def research_products(
                 first_pages.update(await check_pages(indexed))
         except TimeoutError:
             pass
-    elif manufacturer_site and manufacturer_domain:
-        for page in first_pages.values():
-            if (
-                not page or page.manual or page.datasheet
-                or not _on_manufacturer_site(page.url, manufacturer_domain)
-                or references_in_product_url(page.url)
-            ):
-                continue
-            official = replace(page, manufacturer_page=True)
-            if not _manufacturer_color_family(official):
-                continue
-            scopes = [
-                scope for scope in _supplier_scopes(identity, official, snapshot) if not scope.shared
-            ]
-            if not scopes or any(
-                normalize_reference(name) for scope in scopes for name, _ in _published_colors(scope.text)
-            ):
-                continue
-            try:
-                async with network_time(8):
-                    indexed = await _manufacturer_sitemap_candidates(
-                        manufacturer_site, manufacturer_domain, identity, lookup_sku, color_only=True,
-                    )
-                    related = await check_pages(indexed)
-                    related_color_pages = [
-                        replace(candidate, manufacturer_page=True) for candidate in related.values()
-                        if candidate and not (candidate.manual or candidate.datasheet)
-                        and _on_manufacturer_site(candidate.url, manufacturer_domain)
-                    ]
-            except TimeoutError:
-                pass
-            break
 
     titles = _product_titles(identity)
     authoritative_docs: dict[str, Evidence] = {}
@@ -2256,9 +2223,26 @@ async def research_products(
         if issue["code"] == "manufacturer_color_reference" and (code := normalize_reference(issue["name"]))
     }
     checked_url_systems = {code.split()[0] for code in url_color_references}
-    related_color_pages.extend(
+    related_color_pages = [
         page for page, _, scopes in official_scopes if not any(not scope.shared for scope in scopes)
-    )
+    ]
+    if verified_color_families and manufacturer_site and manufacturer_domain and not (
+        declared_color_systems or checked_url_systems
+    ):
+        indexed = []
+        try:
+            async with network_time(8):
+                indexed = await _manufacturer_sitemap_candidates(
+                    manufacturer_site, manufacturer_domain, supplier_identity, lookup_sku, color_only=True,
+                )
+                await check_pages(indexed)
+        except TimeoutError:
+            pass
+        related_color_pages.extend(
+            replace(page, manufacturer_page=True) for url in indexed
+            if (page := checked_pages.get(url)) and not (page.manual or page.datasheet)
+            and _on_manufacturer_site(page.url, manufacturer_domain)
+        )
     for page in related_color_pages:
         if _manufacturer_color_family(page) not in verified_color_families:
             continue

@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, replace
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urldefrag, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -94,7 +94,7 @@ def supplier_page_url(url: str) -> str:
         part for part in parsed.query.split("&")
         if not part.lower().startswith(("utm_", "_pos=", "_sid=", "_ss="))
     )
-    return urlunsplit(parsed._replace(query=query, fragment=""))
+    return urlunsplit(parsed._replace(query=query))
 
 
 @dataclass(frozen=True)
@@ -285,9 +285,11 @@ class _ProductPage(HTMLParser):
                 if isinstance(image, str) and len(image) <= 500:
                     self.products[-1]["image_url"] = image
                 offers = row.get("offers")
-                variant_url = row.get("url") or (offers.get("url") if isinstance(offers, dict) else None)
-                if isinstance(variant_url, str) and len(variant_url) <= 500:
-                    self.products[-1]["variant_url"] = variant_url.strip()
+                offers = offers if isinstance(offers, list) else [offers]
+                links = [row.get("url"), *(offer.get("url") for offer in offers if isinstance(offer, dict))]
+                self.products[-1]["variant_urls"] = tuple(
+                    link.strip() for link in links if isinstance(link, str) and len(link) <= 500 and link.strip()
+                )
             if isinstance(row.get("@graph"), list):
                 self._add_products(row["@graph"])
             if isinstance(row.get("hasVariant"), list):
@@ -295,22 +297,23 @@ class _ProductPage(HTMLParser):
                 self._add_products(row["hasVariant"], product_group)
 
     def product_for_url(self, url: str) -> dict | None:
-        products = [product for product in self.products if product.get("designation")]
+        products = self.products
         if len(products) > 1:
             matched = []
             requested = supplier_page_url(url)
-            requested_fragment = urlsplit(url).fragment
             for product in products:
-                if not (variant_url := product.get("variant_url")):
-                    continue
-                try:
-                    link = public_link(urljoin(url, variant_url))
-                except ValueError:
-                    continue
-                if link and supplier_page_url(link) == requested and urlsplit(link).fragment == requested_fragment:
-                    matched.append(product)
+                for variant_url in product["variant_urls"]:
+                    try:
+                        link = public_link(urljoin(url, variant_url))
+                    except ValueError:
+                        continue
+                    if link and supplier_page_url(link) == requested:
+                        matched.append(product)
+                        break
             products = matched
-        return {key: value for key, value in products[0].items() if key != "variant_url"} if len(products) == 1 else None
+        if len(products) == 1 and products[0].get("designation"):
+            return {key: value for key, value in products[0].items() if key != "variant_urls"}
+        return None
 
     def handle_data(self, data):
         if self._structured is not None:
@@ -445,6 +448,8 @@ def _fetch_supplier(
             if archive:
                 raise ValueError("Archive snapshot redirected")
             url = urljoin(url, location)
+            if parsed.fragment and "#" not in location:
+                url = f"{urldefrag(url).url}#{parsed.fragment}"
             continue
         if status != 200:
             detail = {403: "access denied", 404: "page not found", 429: "rate limited"}.get(status)
@@ -501,7 +506,7 @@ async def fetch_supplier(url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD
 
 
 async def fetch_archived_supplier(url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD_BYTES) -> Evidence | None:
-    url = supplier_page_url(url)
+    url = urldefrag(supplier_page_url(url)).url
     async with httpx.AsyncClient(timeout=4, trust_env=False) as client:
         response = await client.get("https://archive.org/wayback/available", params={"url": url})
         response.raise_for_status()

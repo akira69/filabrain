@@ -1998,14 +1998,16 @@ async def test_pantone_preview_binds_chip_to_requested_code(monkeypatch):
     assert result["hex_code"] == "#243746"
 
 
-@pytest.mark.parametrize("saved_link", [False, True])
+@pytest.mark.parametrize(("saved_link", "crowded_sitemap"), [(False, False), (False, True), (True, False)])
 @pytest.mark.parametrize("manufacturer_sku", [None, "OCEAN-175-X9"])
-async def test_general_lookup_finds_sku_and_related_color(installed, db_session, monkeypatch, manufacturer_sku, saved_link):
+async def test_general_lookup_finds_sku_and_related_color(
+    installed, db_session, monkeypatch, manufacturer_sku, saved_link, crowded_sitemap,
+):
     from filabrain import proposals
     from filabrain.sources import Evidence, _ProductPage
 
     site = "https://filament-maker.example"
-    product_url = f"{site}/shop/ocean-175-x9"
+    product_url = f"{site}/shop/ocean-175-x9" + ("#variant-ocean" if saved_link else "")
     related_url = f"{site}/shop/petg-ocean-blue-ral-5015-285mm"
     different_color_url = f"{site}/shop/petg-ocean-blue-ral-3020-285mm"
     reseller_url = "https://reseller.example/shop/ocean-175-x9"
@@ -2020,7 +2022,7 @@ async def test_general_lookup_finds_sku_and_related_color(installed, db_session,
             }) + "</script>"
         )
         scope = f"{designation} {color} PETG {diameter} mm SKU: {sku} {text}"
-        return Evidence(url, designation, scope, parser.products[0], scopes=(scope,))
+        return Evidence(url, designation, scope, parser.product_for_url(url), scopes=(scope,))
 
     designation = "PETG Ocean Blue 1.75 mm" if saved_link else "PETG Ocean Blue"
     product_title = "PETG Ocean Blue 1.75 mm Refill" if manufacturer_sku else designation
@@ -2038,7 +2040,10 @@ async def test_general_lookup_finds_sku_and_related_color(installed, db_session,
 
     async def sitemap(origin):
         assert origin.rstrip("/") == site
-        return different_color_url, reseller_url, related_url, product_url
+        urls = [different_color_url, reseller_url, related_url, product_url]
+        if crowded_sitemap:
+            urls.extend([f"{site}/shop/petg-ocean-blue-lite", f"{site}/shop/petg-ocean-blue-refill"])
+        return urls
 
     async def catalog(_):
         return [], "", True
@@ -2113,3 +2118,51 @@ async def test_supplier_selects_only_the_explicit_variant_url(monkeypatch, secon
     else:
         assert product["sku"] == expected_sku
         assert product["product_group_id"] == "OCEAN-PETG"
+
+
+@pytest.mark.parametrize(("offer_list", "size_selector"), [(False, "?size="), (True, "#size-")])
+async def test_supplier_matches_offer_url_when_product_url_is_shared(monkeypatch, offer_list, size_selector):
+    from filabrain import sources
+
+    path = "/products/ocean-blue"
+    variants = []
+    for size in (175, 285):
+        offer = {"@type": "Offer", "url": f"{path}{size_selector}{size}"}
+        variants.append({
+            "@type": "Product", "name": f"Ocean Blue {size}", "sku": f"OCEAN-{size}",
+            "url": path, "offers": [offer] if offer_list else offer,
+        })
+    markup = '<script type="application/ld+json">' + json.dumps({
+        "@type": "ProductGroup", "hasVariant": variants,
+    }) + "</script>"
+
+    def fetch(url, *_, **__):
+        if url.path == "/old-ocean-blue":
+            return 301, path, "", b""
+        return 200, "", "text/html", markup.encode()
+
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
+    monkeypatch.setattr(sources, "_get_pinned", fetch)
+    assert sources._fetch_supplier(f"https://maker.example{path}{size_selector}175").product == {
+        "designation": "Ocean Blue 175", "sku": "OCEAN-175",
+    }
+    assert sources._fetch_supplier(f"https://maker.example{path}").product is None
+    if size_selector == "#size-":
+        assert sources._fetch_supplier("https://maker.example/old-ocean-blue#size-285").product == {
+            "designation": "Ocean Blue 285", "sku": "OCEAN-285",
+        }
+
+
+async def test_supplier_does_not_substitute_named_product_for_unnamed_variant(monkeypatch):
+    from filabrain import sources
+
+    path = "/products/ocean-blue"
+    markup = '<script type="application/ld+json">' + json.dumps({
+        "@type": "ProductGroup", "hasVariant": [
+            {"@type": "Product", "name": "Ocean Blue 175", "sku": "OCEAN-175", "url": f"{path}?size=175"},
+            {"@type": "Product", "sku": "OCEAN-285", "url": f"{path}?size=285"},
+        ],
+    }) + "</script>"
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **__: (200, "", "text/html", markup.encode()))
+    assert sources._fetch_supplier(f"https://maker.example{path}?size=285").product is None
