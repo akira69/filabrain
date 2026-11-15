@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, replace
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import quote, unquote, urldefrag, urljoin, urlsplit, urlunsplit
+from urllib.parse import SplitResult, quote, unquote, urldefrag, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -97,6 +97,13 @@ def supplier_page_url(url: str) -> str:
     return urlunsplit(parsed._replace(query=query))
 
 
+def _variant_url_key(url: str) -> SplitResult:
+    parsed = urlsplit(supplier_page_url(url))
+    # Keep repeated values in order and leave the actual request URL untouched.
+    query = "&".join(sorted(parsed.query.split("&"), key=lambda part: part.partition("=")[0]))
+    return parsed._replace(query=query)
+
+
 @dataclass(frozen=True)
 class Evidence:
     url: str
@@ -111,6 +118,7 @@ class Evidence:
     datasheets: tuple[str, ...] = ()
     origin: str = ""
     archived_at: str = ""
+    selected_variant_unresolved: bool = False
 
 
 class _ProductPage(HTMLParser):
@@ -296,12 +304,12 @@ class _ProductPage(HTMLParser):
                 product_group = row.get("productGroupID") if row.get("@type") == "ProductGroup" else None
                 self._add_products(row["hasVariant"], product_group)
 
-    def product_for_url(self, url: str) -> dict | None:
+    def product_for_url(self, url: str) -> tuple[dict | None, bool]:
         products = self.products
-        requested = supplier_page_url(url)
-        selection = urlsplit(requested)
+        requested = _variant_url_key(url)
+        has_selector = bool(requested.query or requested.fragment)
         requires_match = len(products) > 1
-        if requires_match or selection.query or selection.fragment:
+        if requires_match or has_selector:
             matched = []
             for product in products:
                 for variant_url in product["variant_urls"]:
@@ -311,18 +319,17 @@ class _ProductPage(HTMLParser):
                         continue
                     if not link:
                         continue
-                    candidate = supplier_page_url(link)
+                    candidate = _variant_url_key(link)
                     if candidate == requested:
                         matched.append(product)
                         break
-                    declared = urlsplit(candidate)
-                    if declared.query or declared.fragment:
+                    if candidate.query or candidate.fragment:
                         requires_match = True
             if requires_match:
                 products = matched
         if len(products) == 1 and products[0].get("designation"):
-            return {key: value for key, value in products[0].items() if key != "variant_urls"}
-        return None
+            return {key: value for key, value in products[0].items() if key != "variant_urls"}, False
+        return None, requires_match and has_selector
 
     def handle_data(self, data):
         if self._structured is not None:
@@ -486,7 +493,7 @@ def _fetch_supplier(
         title = " ".join(" ".join(parser.title).split())
         if title.casefold().rstrip(".") in {"just a moment", "access denied", "robot check", "attention required! | cloudflare"}:
             raise ValueError("Automated access blocked")
-        product = parser.product_for_url(archived_product_url or url)
+        product, selected_variant_unresolved = parser.product_for_url(archived_product_url or url)
         scopes = list(dict.fromkeys([*parser.main_scopes, *parser.scopes])) if parser.main_scopes else parser.scopes
         visible = " ".join(" ".join(scopes if parser.main_scopes else parser.words).split())
         # Put structured identity first so evidence still contains it on long pages.
@@ -501,6 +508,7 @@ def _fetch_supplier(
                 urljoin(url, link) for link in (*parser.datasheets, *parser.heading_datasheets)
             ))[:4],
             origin="openfilamentdatabase.org" if re.search(r"open filament database", visible, re.IGNORECASE) else "",
+            selected_variant_unresolved=selected_variant_unresolved,
         )
     raise ValueError("Too many supplier redirects")
 

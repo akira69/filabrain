@@ -673,10 +673,23 @@ async def _manufacturer_sitemap_candidates(
         name_match = len(name) >= 2 and name.issubset(words)
         if sku_match or name_match:
             ranked[supplier_page_url(link)] = (sku_match, name_match, -len(words))
-    return sorted(ranked, key=ranked.get, reverse=True)[:3]
+    ordered = sorted(ranked, key=ranked.get, reverse=True)
+    if color_systems and len(color_systems) > 1:
+        first_by_system = {}
+        for link in ordered:
+            for code in references_in_product_url(link):
+                if (system := code.split()[0]) in color_systems:
+                    first_by_system.setdefault(system, link)
+            if first_by_system.keys() >= color_systems:
+                break
+        if len(set(first_by_system.values())) > 1:
+            return list(dict.fromkeys([*first_by_system.values(), *ordered]))[:4]
+    return ordered[:3]
 
 
 def _packaged_product(identity: Identity, page: Evidence, snapshot):
+    if page.selected_variant_unresolved:
+        return None
     product = page.product or {}
     title = product.get("designation") or re.split(r"\s*[|–]\s*", page.title, maxsplit=1)[0]
     match = _PACKAGED_TITLE.fullmatch(title.strip())

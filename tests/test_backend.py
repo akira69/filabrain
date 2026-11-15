@@ -2022,7 +2022,8 @@ async def test_general_lookup_finds_sku_and_related_color(
             }) + "</script>"
         )
         scope = f"{designation} {color} PETG {diameter} mm SKU: {sku} {text}"
-        return Evidence(url, designation, scope, parser.product_for_url(url), scopes=(scope,))
+        product, _ = parser.product_for_url(url)
+        return Evidence(url, designation, scope, product, scopes=(scope,))
 
     designation = "PETG Ocean Blue 1.75 mm" if saved_link else "PETG Ocean Blue"
     product_title = "PETG Ocean Blue 1.75 mm Refill" if manufacturer_sku else designation
@@ -2095,17 +2096,23 @@ async def test_imported_part_number_does_not_override_product_line(imported_fiel
     assert not p._supplier_scopes(identity, page, {imported_field: "ABC12345"})
 
 
-@pytest.mark.parametrize("second_url, expected_sku", [
-    ("/products/ocean-blue?size=285", "OCEAN-175"),
-    ("/products/ocean-blue?size=175", None),
-    (None, "OCEAN-175"),
+@pytest.mark.parametrize("first_query, second_query, requested_query, expected_sku", [
+    ("size=175", "size=285", "size=175", "OCEAN-175"),
+    ("size=175", "size=175", "size=175", None),
+    ("size=175", None, "size=175", "OCEAN-175"),
+    ("size=175&color=blue", "color=blue&size=285", "color=blue&size=175", "OCEAN-175"),
+    ("size=175&size=285", "size=285&size=175", "size=175&size=285", "OCEAN-175"),
 ])
-async def test_supplier_selects_only_the_explicit_variant_url(monkeypatch, second_url, expected_sku):
+async def test_supplier_selects_only_the_explicit_variant_url(
+    monkeypatch, first_query, second_query, requested_query, expected_sku,
+):
     from filabrain import sources
 
-    url = "https://maker.example/products/ocean-blue?size=175&utm_source=test"
+    path = "/products/ocean-blue"
+    url = f"https://maker.example{path}?{requested_query}&utm_source=test"
     variant = {"@type": "Product", "name": "Ocean Blue 1.75 mm", "sku": "OCEAN-175",
-               "url": "/products/ocean-blue?size=175", "color": "Ocean Blue", "material": "PETG"}
+               "url": f"{path}?{first_query}", "color": "Ocean Blue", "material": "PETG"}
+    second_url = f"{path}?{second_query}" if second_query else None
     second = {"@type": "Product", "name": "Ocean Blue 2.85 mm", "sku": "OCEAN-285", "url": second_url}
     markup = '<script type="application/ld+json">' + json.dumps({
         "@type": "ProductGroup", "productGroupID": "OCEAN-PETG", "hasVariant": [variant, second],
@@ -2168,15 +2175,25 @@ async def test_supplier_does_not_substitute_named_product_for_unnamed_variant(mo
     assert sources._fetch_supplier(f"https://maker.example{path}?size=285").product is None
 
 
-@pytest.mark.parametrize("selector", ["#size-", "?size="])
-async def test_pasted_link_does_not_propose_a_different_explicit_variant(installed, monkeypatch, selector):
+@pytest.mark.parametrize(("selector", "paramount"), [("#size-", False), ("?size=", False), ("?size=", True)])
+async def test_pasted_link_does_not_propose_a_different_explicit_variant(installed, monkeypatch, selector, paramount):
     from filabrain import proposals, sources
-    path = "/products/ocean-blue"
-    markup = '<script type="application/ld+json">' + json.dumps({
+
+    if paramount:
+        site = "https://www.paramount-3d.com"
+        path = "/product-page/petg-ocean-blue"
+        brand = "Paramount 3D"
+        title = "PETG (Ocean Blue) 1.75mm 1kg Filament [OCEAN-175]"
+    else:
+        site = "https://maker.example"
+        path = "/products/ocean-blue"
+        brand = "Fixture Brand"
+        title = "Ocean Blue 1.75 mm"
+    markup = f'<title>{title}</title><script type="application/ld+json">' + json.dumps({
         "@type": "ProductGroup", "hasVariant": [{
             "@type": "Product", "url": f"{path}{selector}175",
-            "name": "Ocean Blue 1.75 mm", "sku": "OCEAN-175",
-            "brand": {"name": "Fixture Brand"}, "material": "PETG", "color": "Ocean Blue",
+            "name": title, "sku": "OCEAN-175",
+            "brand": {"name": brand}, "material": "PETG", "color": "Ocean Blue",
         }],
     }) + "</script>"
     monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
@@ -2188,35 +2205,43 @@ async def test_pasted_link_does_not_propose_a_different_explicit_variant(install
     async def ofd(_):
         return [], ""
 
+    async def paramount_urls():
+        return ()
+
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "paramount_product_urls", paramount_urls)
     monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
     response = await installed.post(f"{BASE}/proposals", json={
-        "mode": "create", "product_url": f"https://maker.example{path}{selector}285",
+        "mode": "create", "product_url": f"{site}{path}{selector}285",
     })
     assert response.status_code == 200
     assert response.json()["suggestions"] == []
 
     matching = await installed.post(f"{BASE}/proposals", json={
-        "mode": "create", "product_url": f"https://maker.example{path}{selector}175",
+        "mode": "create", "product_url": f"{site}{path}{selector}175",
     })
     assert matching.status_code == 200
     suggestions = {entry["field"]: entry["value"] for entry in matching.json()["suggestions"]}
-    assert suggestions["manufacturer_sku"] == "OCEAN-175"
+    assert suggestions["manufacturer_sku"].casefold() == "ocean-175"
 
 
-async def test_ral_on_another_verified_page_does_not_hide_pantone(installed, db_session, monkeypatch):
+@pytest.mark.parametrize("ral_known", [True, False])
+async def test_lookup_finds_both_color_standards_in_crowded_sitemap(installed, db_session, monkeypatch, ral_known):
     from filabrain import proposals
     from filabrain.sources import Evidence
 
     site = "https://filament-maker.example"
     saved = f"{site}/shop/petg-ocean-blue-175"
-    pasted = f"{site}/shop/petg-ocean-blue-ral-5015-175"
+    pasted = f"{site}/shop/petg-ocean-blue-{'ral-5015-' if ral_known else ''}175-store"
+    ral = f"{site}/shop/petg-ocean-blue-ral-5015"
     pantone = f"{site}/shop/petg-ocean-blue-pantone-7546-c-285mm"
 
     async def fetch(url, **_):
-        sku, diameter = ("OCEAN-285-X9", 2.85) if url == pantone else ("OCEAN-175-X9", 1.75)
+        if url not in (saved, pasted, ral, pantone):
+            raise ValueError("Not a product page")
+        sku, diameter = ("OCEAN-285-X9", 2.85) if url in (ral, pantone) else ("OCEAN-175-X9", 1.75)
         title = "PETG Ocean Blue"
         scope = f"{title} {diameter} mm SKU: {sku} Density 1.27 g/cm3"
         return Evidence(url, title, scope, {
@@ -2225,7 +2250,7 @@ async def test_ral_on_another_verified_page_does_not_hide_pantone(installed, db_
         }, scopes=(scope,))
 
     async def sitemap(_):
-        return [*(f"{site}/shop/petg-ocean-blue-ral-{code}" for code in (5012, 5013, 5015)), pantone]
+        return [ral, *(f"{site}/shop/petg-ocean-blue-ral-{code}" for code in (5012, 5013)), pantone]
 
     async def catalog(_):
         return [], "", True
@@ -2254,7 +2279,7 @@ async def test_ral_on_another_verified_page_does_not_hide_pantone(installed, db_
     assert response.status_code == 200
     colors = {issue["name"]: issue["url"] for issue in response.json()["issues"]
               if issue["code"] == "manufacturer_color_reference"}
-    assert colors == {"RAL 5015": pasted, "Pantone 7546 C": pantone}
+    assert colors == {"RAL 5015": pasted if ral_known else ral, "Pantone 7546 C": pantone}
 
 
 async def test_archived_supplier_keeps_original_variant_for_matching(monkeypatch):
