@@ -100,7 +100,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   const pair = element<HTMLButtonElement>('pair-client')
   const credentials = element('pair-credentials')
   const pairStatus = element('pair-status')
-  const manufacturer = form.elements.namedItem('manufacturer_id') as HTMLSelectElement
+  const manufacturer = element<HTMLInputElement>('draft-manufacturer')
+  const manufacturerOptions = element<HTMLDataListElement>('draft-manufacturer-options')
+  let manufacturers: { id: number; name: string }[] = []
   const palette = form.elements.namedItem('color_id') as HTMLSelectElement
   const buttons = [...form.querySelectorAll<HTMLButtonElement>('button[type=submit]')]
   const advanced = element<HTMLDetailsElement>('research-advanced-fields')
@@ -158,7 +160,13 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         notice.textContent = errorText(error)
       }
     }
-    pendingOptions = Promise.all([options('/api/v1/manufacturers', manufacturer), options('/api/v1/colors', palette)])
+    pendingOptions = Promise.all([
+      fetchAllPages<{ id: number; name: string }>('/api/v1/manufacturers').then(({ items }) => {
+        manufacturers = items
+        manufacturerOptions.append(...items.map(item => new Option(item.name)))
+      }).catch(showResearchError),
+      options('/api/v1/colors', palette),
+    ])
   }
 
   function localFields() {
@@ -168,7 +176,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       const value = String(formData.get(key) || '').trim()
       if (value) fields[key] = numericDraft.has(key) ? Number(value) : value
     }
-    if (fields.manufacturer_id) fields.manufacturer_name = manufacturer.selectedOptions[0].textContent
+    const name = manufacturer.value.trim()
+    const sameName = manufacturers.filter(item => item.name.toLowerCase() === name.toLowerCase())
+    const known = sameName.find(item => item.name === name) ?? (sameName.length === 1 ? sameName[0] : undefined)
+    if (known) fields.manufacturer_id = known.id
+    if (name) fields.manufacturer_name = known?.name || name
     return fields
   }
 
@@ -184,7 +196,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     : undefined
 
   async function target(): Promise<EditorContext> {
-    if (!editor) return { mode: 'create', filament_id: null, fields: localFields() }
+    if (!editor) {
+      await pendingOptions
+      return { mode: 'create', filament_id: null, fields: localFields() }
+    }
     const context = await hostRequest<EditorContext>('filaman:filament-context')
     if (!context.filament_id) return context
     await initialRecord
@@ -249,9 +264,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     const changes = document.createElement('span')
     for (const [field, { old, value }] of Object.entries(unit)) {
       const name = researchFieldLabel(field)
-      const select = field === 'manufacturer_id' ? manufacturer : field === 'color_id' ? palette : undefined
-      const display = select?.querySelector<HTMLOptionElement>(`option[value="${Number(value)}"]`)?.text
-        || (select && sources[0]?.evidence) || valueText(value)
+      const reference = field === 'manufacturer_id' ? manufacturers.find(item => item.id === value)?.name
+        : field === 'color_id' ? palette.querySelector<HTMLOptionElement>(`option[value="${Number(value)}"]`)?.text : undefined
+      const display = reference || (['manufacturer_id', 'color_id'].includes(field) && sources[0]?.evidence) || valueText(value)
       const previous = document.createElement('span')
       previous.className = 'research-note'
       previous.textContent = `${valueText(old)} → `
@@ -428,12 +443,17 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       notice.textContent = t('filaBrain.chatResearchStart')
       return
     }
+    if (action === 'fill' && chat.needsModelSelection) {
+      notice.textContent = t('filaBrain.chooseModel')
+      return
+    }
     showInChat()
     busy = true
     buttons.forEach(button => { button.disabled = true })
     updateSave()
     notice.textContent = ''
     conversation.hidden = false
+    if (action === 'fill') chat.preserveModel()
     if (!prompt) {
       optionsSummary.hidden = false
       searchOptions.open = false
@@ -448,7 +468,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
             product_url: productUrl || undefined,
             sku_hint: sku,
             guidance: prompt,
-            model_id: action === 'fill' ? chat.model : undefined,
+            ...(action === 'fill' ? chat.model : undefined),
           })
           if (revision !== formRevision) return { reply: t('filaBrain.identityChanged') }
           render(proposal, context)
@@ -555,8 +575,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         const field = form.elements.namedItem(key)
         if (field instanceof HTMLInputElement || field instanceof HTMLSelectElement) field.value = value
       }
+      if (!editor) manufacturer.value = String(draft.context.fields.manufacturer_name
+        || manufacturers.find(item => item.id === draft.context.fields.manufacturer_id)?.name || '')
       const context = await target()
       if (draft.context.mode !== context.mode || draft.context.filament_id !== context.filament_id ||
+          (!blank(draft.context.fields.manufacturer_id) && draft.context.fields.manufacturer_id !== context.fields.manufacturer_id) ||
           JSON.stringify(identity(draft.context.fields)) !== JSON.stringify(identity(context.fields))) {
         conversation.hidden = false
         notice.textContent = t('filaBrain.identityChanged')
@@ -626,7 +649,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         searchOptions.open = advanced.open = true
         throw new Error('Choose or enter a manufacturer, product name, material and diameter before saving.')
       }
-      if (![...manufacturer.options].some(item => Number(item.value) === data.manufacturer_id) ||
+      if (!manufacturers.some(item => item.id === data.manufacturer_id) ||
           data.color_id && ![...palette.options].some(item => Number(item.value) === data.color_id)) {
         throw new Error('Choose a manufacturer and palette color already available in FilaMan.')
       }
@@ -637,8 +660,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         const dt = document.createElement('dt')
         const dd = document.createElement('dd')
         dt.textContent = researchFieldLabel(field)
-        dd.textContent = (field === 'manufacturer_id' ? [...manufacturer.options] : field === 'color_id' ? [...palette.options] : [])
-          .find(item => Number(item.value) === value)?.text || valueText(value)
+        const reference = field === 'manufacturer_id' ? manufacturers.find(item => item.id === value)?.name
+          : field === 'color_id' ? [...palette.options].find(item => Number(item.value) === value)?.text : undefined
+        dd.textContent = reference || valueText(value)
         preview.append(dt, dd)
       }
       element('create-message').textContent = ''
@@ -715,9 +739,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     if (form.closest<HTMLElement>('[data-view]')?.hidden) return
     try {
       const current = await api.get<Status>(route + '/status', { cache: 'no-store' })
-      if ((status.chat_model ?? null) !== (current.chat_model ?? null)) {
-        status.chat_model = current.chat_model
-        document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: current.chat_model }))
+      if (status.chat_model !== current.chat_model || status.chat_endpoint_id !== current.chat_endpoint_id) {
+        document.dispatchEvent(new CustomEvent('filaman:model-change', {
+          detail: { chat_model: current.chat_model, chat_endpoint_id: current.chat_endpoint_id },
+        }))
       }
       status.mcp_enabled = current.mcp_enabled
       showPairing(current.mcp_enabled)

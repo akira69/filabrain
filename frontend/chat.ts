@@ -1,6 +1,6 @@
 import { api } from './shared/api'
 import { t } from './shared/i18n'
-import { mountModelPicker } from './shared/model-picker'
+import { mountModelPicker, type ModelSelection } from './shared/model-picker'
 import { identity, type ResearchDraft } from './research'
 
 const pageLabels = {
@@ -16,7 +16,7 @@ type Message = {
 }
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
-  researching?: true; model?: string; updatedAt?: number
+  researching?: true; model?: string | ModelSelection; updatedAt?: number
 }
 type Research = {
   start(): void
@@ -26,7 +26,8 @@ type Research = {
   followUp(prompt: string): Promise<void>
 }
 
-export function mountChat(model?: string | null, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined) {
+export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined) {
+  let model = statusModel.chat_model
   const form = document.querySelector<HTMLFormElement>('[data-chat-form]')!
   const input = form.querySelector('textarea')!
   const submit = form.querySelector<HTMLButtonElement>('[type=submit]')!
@@ -53,7 +54,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   let research: Research | undefined
   let activeAnswer: HTMLElement | undefined
   let forkNextResearchTurn = false
-  const modelPicker = mountModelPicker(form, model, openSettings)
+  const modelPicker = mountModelPicker(form, model, openSettings, statusModel.chat_endpoint_id, updateControls)
   const picker = form.querySelector<HTMLElement>('.chat-model-picker')!
   status.removeAttribute('data-i18n')
   status.textContent = ''
@@ -62,7 +63,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   function scrollToEnd() { transcript.scrollTop = transcript.scrollHeight }
 
   function updateControls() {
-    form.hidden = (!researching && !model) || (editorScope !== undefined && !form.contains(picker))
+    form.hidden = (!researching && !modelPicker.hasOptions) || (editorScope !== undefined && !form.contains(picker))
     input.disabled = researching && !current.messages.length && !busyResearch
     input.maxLength = researching ? 400 : 2000
     input.placeholder = t(researching ? 'filaBrain.followUpHint' : 'filaBrain.chatPlaceholder')
@@ -78,7 +79,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     newChat.disabled = busyResearch || staging || !researching && !request && !current.messages.length && !input.value
     for (const button of historyList.querySelectorAll('button')) button.disabled = busyResearch || staging
     prompts.hidden = researching || form.hidden || !!request || current.messages.length > 0
-    setup.hidden = researching || !!model || current.messages.length > 0
+    setup.hidden = researching || modelPicker.hasOptions || current.messages.length > 0
     researchInput.hidden = researchResults.hidden = !researching
   }
 
@@ -149,7 +150,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
           lastResult = current.messages.length - 1
           current.messages[lastResult] = { ...current.messages[lastResult], proposal: selected.research.proposal }
         }
-        modelPicker.reset(selected.model)
+        modelPicker.reset(selected.model, true)
         busyResearch = true
         updateControls()
         try {
@@ -341,7 +342,12 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
       catch { status.textContent = t('filaBrain.failed') }
       return
     }
+    if (!modelPicker.selected) {
+      status.textContent = t('filaBrain.chooseModel')
+      return
+    }
     const question: Message = { role: 'user', content }
+    modelPicker.preserve(modelPicker.selected)
     const bubble = append(question)
     const controller = request = new AbortController()
     input.value = ''
@@ -350,7 +356,7 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
     try {
       const { reply, action } = await api.post<{ reply: string; action: Action | null }>('/filabrain/chat', {
         messages: [...current.messages.slice(-10), question].map(({ role, content }) => ({ role, content })),
-        model_id: modelPicker.selected,
+        ...modelPicker.selected,
       }, { signal: controller.signal })
       if (request !== controller) return
       const answer: Message = { role: 'assistant', content: reply, action: action ?? undefined }
@@ -373,8 +379,9 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   })
 
   document.addEventListener('filaman:model-change', event => {
-    model = (event as CustomEvent<string>).detail
-    void modelPicker.setDefault(model)
+    const detail = (event as CustomEvent<typeof statusModel>).detail
+    model = detail.chat_model
+    void modelPicker.setDefault(model, detail.chat_endpoint_id)
     updateControls()
   })
   function startResearch() {
@@ -392,6 +399,8 @@ export function mountChat(model?: string | null, openSettings?: () => void, edit
   updateControls()
   return {
     get model() { return modelPicker.selected },
+    get needsModelSelection() { return modelPicker.needsSelection },
+    preserveModel() { modelPicker.preserve(modelPicker.selected) },
     picker,
     startResearch,
     get draftId() { return draftId() },

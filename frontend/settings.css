@@ -1,4 +1,11 @@
 .research-clear-key { display: flex; align-items: center; gap: .4rem; }
+#research-endpoint-fields { min-width: 0; border: 0; padding: 0; margin: 0; }
+#research-model-visibility > summary { cursor: pointer; }
+#research-visible-models { max-height: 15rem; overflow: auto; margin-block: .4rem; }
+#research-visible-models label { display: flex; align-items: center; gap: .55rem; min-height: 2.25rem; overflow-wrap: anywhere; }
+#research-visible-models input { flex: none; }
+#research-add-endpoint { min-height: 44px; }
+#research-add-endpoint[aria-disabled="true"] { opacity: .55; cursor: default; }
   .research-model-picker { display: grid; gap: .4rem; }
   .research-model-picker > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8.5rem, max-content); gap: .5rem; }
   .research-model-picker .fm-btn { min-height: 2.5rem; }

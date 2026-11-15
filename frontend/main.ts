@@ -3,13 +3,14 @@ import { mountDocs } from './docs'
 import { mountSettings } from './settings'
 import { mountResearch, type EditorContext, type SelectionContext } from './research'
 import { ApiError, api } from './shared/api'
-import { batchHref, createResearchBatch, mountResearchBatches, type BatchMode, type ExpectedFilament } from './shared/filabrain-batches'
+import { batchHref, createResearchBatch, listResearchRuns, mountResearchBatches, type BatchMode, type ExpectedFilament } from './shared/filabrain-batches'
 import { initI18n, t } from './shared/i18n'
 
 export type Status = {
   enabled: boolean
   can_chat: boolean
   chat_model?: string | null
+  chat_endpoint_id?: string | null
   can_create: boolean
   can_update: boolean
   can_update_manufacturer?: boolean
@@ -63,7 +64,7 @@ function mountLibrary(context?: SelectionContext) {
   let loadFailed = false
 
   function updateSelection() {
-    element('library-selected').textContent = `${selected.size} of 50 selected`
+    element('library-selected').textContent = t('filaBrain.librarySelected', { count: selected.size })
     submit.disabled = busy || !selected.size || selected.size > 50 || loadFailed ||
       (verifiesSelection && (expectedFilaments.size !== selected.size || [...selected].some(id => !expectedFilaments.has(id))))
     clearSelection.hidden = !!context || !selected.size
@@ -150,16 +151,60 @@ function mountLibrary(context?: SelectionContext) {
       updateSelection()
     })
     message.textContent = 'Loading filaments…'
+    const libraryToolbar = picker.parentElement!.querySelector<HTMLElement>('.library-toolbar')!
+    const outsidePicker = [element('plugin-header'), libraryToolbar, element('filabrain-docs')]
+    function setColorOverlay(open: boolean) {
+      picker.toggleAttribute('data-color-overlay', open)
+      for (const node of outsidePicker) node.inert = open
+    }
+    let colorObserver: MutationObserver | undefined
     picker.addEventListener('load', () => {
+      colorObserver?.disconnect()
+      setColorOverlay(false)
       if (picker.contentDocument?.querySelector('[data-filament-picker="1"]')) {
         message.textContent = ''
+        const doc = picker.contentDocument
+        const count = doc.getElementById('picker-selection-count')
+        if (count) count.hidden = true
         picker.hidden = false
+        const pickerPage = doc.getElementById('fm-page')
+        const colorTrigger = () => doc.querySelector<HTMLButtonElement>('th.col-colors .fm-header-filter-trigger')
+        function closeColorOverlay() {
+          const trigger = colorTrigger()
+          if (trigger?.getAttribute('aria-expanded') === 'true') trigger.click()
+        }
+        colorObserver = new MutationObserver(changes => {
+          if (changes.some(change => (change.target as Element).matches('.fm-header-filter-panel-color'))) {
+            const panel = doc.querySelector('.fm-header-filter-panel-color.open')
+            if (panel && !panel.querySelector('[data-picker-close-colors]')) {
+              const close = doc.createElement('button')
+              close.type = 'button'
+              close.className = 'fm-btn fm-btn-outline fm-header-filter-action'
+              close.textContent = t('common.close')
+              close.dataset.pickerCloseColors = ''
+              close.style.margin = '0 auto 6px 0'
+              close.style.display = 'flex'
+              close.addEventListener('click', closeColorOverlay)
+              panel.prepend(close)
+            }
+            const wasOpen = picker.hasAttribute('data-color-overlay')
+            setColorOverlay(!!panel)
+            if (pickerPage) pickerPage.inert = !!panel
+            if (!panel && wasOpen) colorTrigger()?.focus({ preventScroll: true })
+          }
+        })
+        colorObserver.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ['class'] })
+        doc.addEventListener('keydown', event => {
+          if (event.key === 'Escape' && picker.hasAttribute('data-color-overlay')) {
+            closeColorOverlay()
+          }
+        })
       } else {
         picker.remove()
         element('library-fallback').hidden = false
         void load()
       }
-    }, { once: true })
+    })
     picker.src = '/filament-picker/'
   }
 
@@ -223,7 +268,7 @@ async function main() {
       status.mcp_enabled = (event as CustomEvent<boolean>).detail
     })
     document.addEventListener('filaman:model-change', event => {
-      status.chat_model = (event as CustomEvent<string>).detail || null
+      Object.assign(status, (event as CustomEvent<Pick<Status, 'chat_model' | 'chat_endpoint_id'>>).detail)
     })
     if (!status.enabled) {
       message.textContent = 'FilaBrain is disabled.'
@@ -264,7 +309,7 @@ async function main() {
           showChat()
           settingsButton.focus()
         })
-        const chat = mountChat(status.chat_model, status.can_configure ? openEditorSettings : undefined,
+        const chat = mountChat(status, status.can_configure ? openEditorSettings : undefined,
           context.filament_id ? 'editor:' + context.filament_id : '')
         mountResearch(status, chat, showChat, context)
       } else if (hostMode === 'selection' && context.mode === 'selection' && status.can_update) {
@@ -275,6 +320,19 @@ async function main() {
       message.textContent = ''
       return
     }
+    const header = element('plugin-header')
+    const nav = header.querySelector('nav')!
+    const utilities = header.querySelector('.header-utilities')!
+    const stackedHeader = matchMedia('(max-width: 1120px)')
+    function syncHeaderOrder() {
+      const focused = document.activeElement
+      if (stackedHeader.matches) nav.before(utilities)
+      else nav.after(utilities)
+      if (focused instanceof HTMLElement && utilities.contains(focused)) focused.focus({ preventScroll: true })
+    }
+    if (stackedHeader.matches) syncHeaderOrder()
+    stackedHeader.addEventListener('change', syncHeaderOrder)
+
     let chat: ReturnType<typeof mountChat> | undefined
     let startResearch: (() => void) | undefined
     let draftOpen = false
@@ -283,7 +341,7 @@ async function main() {
     function openConversation() {
       const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
       view.hidden = false
-      chat ??= mountChat(status.chat_model, status.can_configure ? openSettings : undefined, undefined, !status.can_chat)
+      chat ??= mountChat(status, status.can_configure ? openSettings : undefined, undefined, !status.can_chat)
       if (status.can_create && !startResearch) {
         startResearch = mountResearch(status, chat, () => setGuide('new'))
       }
@@ -322,13 +380,18 @@ async function main() {
     }
     function openSettings() {
       show('settings')
-      element('filabrain-settings').querySelector<HTMLInputElement>('[name="model_url"]')!.focus()
+      const form = element('filabrain-settings')
+      const url = form.querySelector<HTMLInputElement>('[name="model_url"]')!
+      if (url.matches(':disabled')) form.querySelector<HTMLButtonElement>('#research-add-endpoint')!.focus()
+      else url.focus()
     }
     for (const button of buttons) {
       const tab = button.dataset.tab!
-      button.hidden = tab === 'settings' ? !canOpenSettings() : !mount[tab]
+      button.hidden = tab === 'settings' ? !canOpenSettings()
+        : !mount[tab] || (tab === 'batches' && params.get('tab') !== 'batches')
       button.addEventListener('click', () => show(tab))
     }
+    nav.hidden = !nav.querySelector('button:not([hidden])')
     const available = Object.keys(mount).find(tab => tab === 'settings' ? canOpenSettings() : mount[tab])
     if (!available) {
       message.textContent = 'You do not have permission to use FilaBrain.'
@@ -348,6 +411,14 @@ async function main() {
     })
     const tab = params.get('tab') || available
     show(Object.hasOwn(mount, tab) && (tab === 'settings' ? canOpenSettings() : mount[tab]) ? tab : available)
+    if (mount.batches && tab !== 'batches') {
+      const runsButton = nav.querySelector<HTMLButtonElement>('[data-tab="batches"]')!
+      function refreshRuns() {
+        void listResearchRuns().then(runs => { runsButton.hidden = runs.length === 0 }, () => {})
+      }
+      refreshRuns()
+      window.addEventListener('pageshow', event => { if (event.persisted) refreshRuns() })
+    }
   } catch (error) {
     message.textContent = errorText(error)
   }

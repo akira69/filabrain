@@ -41,7 +41,13 @@ async def installed(auth_client, db_session, monkeypatch):
     monkeypatch.setattr(app.router, "lifespan_context", app.router.lifespan_context)
     monkeypatch.setattr(app.state, "plugin_mcp_tools", {}, raising=False)
     assert mount_plugin_router_on_app(app, plugin.plugin_key)
+    from filabrain import proposals
     from filabrain.db import Base as PluginBase
+
+    async def empty_sitemap(_url):
+        return ()
+
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", empty_sitemap)
 
     try:
         yield browser
@@ -1056,7 +1062,7 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     monkeypatch.setattr(settings, "model_ids", models)
     monkeypatch.setattr(research, "request_completion", complete)
     response = await installed.get(f"{BASE}/models")
-    assert response.json() == {"models": ["fixture:alternate"]}
+    assert response.json()["models"] == ["fixture:default", "fixture:alternate"]
     chat = {"messages": [{"role": "user", "content": "Which filament is easier to print?"}]}
     response = await installed.post(f"{BASE}/chat", json=chat | {"model_id": "fixture:alternate"})
     assert response.status_code == 200
@@ -1065,6 +1071,120 @@ async def test_conversation_model_is_catalog_scoped(installed, monkeypatch):
     assert (await installed.post(f"{BASE}/chat", json=chat)).status_code == 200
     assert calls == ["fixture:alternate", "fixture:default"]
     assert (await installed.get(f"{BASE}/settings")).json()["model_id"] == "fixture:default"
+
+
+async def test_named_model_endpoints_preserve_legacy_key_and_route_by_endpoint(installed, db_session, monkeypatch):
+    from filabrain import proposals, research, settings
+    from filabrain.db import FilamentResearchSettings
+
+    await installed.get(f"{BASE}/settings")
+    row = FilamentResearchSettings(id=1, config={
+        "model_url": "http://local-model:11434/v1", "model_id": "shared",
+        "encrypted_key": "local-encrypted",
+    })
+    db_session.add(row)
+    await db_session.commit()
+    monkeypatch.setattr(settings, "decrypt_secret", lambda key: key.removesuffix("-encrypted"))
+    monkeypatch.setattr(settings, "encrypt_secret", lambda key: key + "-encrypted")
+    monkeypatch.setattr(settings.settings, "oidc_enc_key", "configured")
+    route = f"{BASE}/settings"
+    migrated, = (await installed.get(route)).json()["model_endpoints"]
+    assert migrated["model_id"] == "shared" and migrated["has_key"]
+    assert "encrypted_key" not in migrated
+    response = await installed.put(route, json={
+        "default_endpoint_id": migrated["id"],
+        "model_endpoints": [migrated | {"name": "Local", "models": ["shared"]}, {
+            "id": "remote", "name": "Remote", "model_url": "https://other.model.test/v1",
+            "model_id": "shared", "models": ["shared", "hidden"], "hidden_models": ["hidden"],
+            "api_key": "remote",
+        }],
+    })
+    assert response.status_code == 200, response.text
+    assert (await installed.put(route, json={"supplier_download_mib": 12})).status_code == 200
+    assert "encrypted_key" not in (await installed.get(route)).text
+
+    async def complete(url, model, key, _messages, **_options):
+        return f"{url} {model} {key}"
+
+    monkeypatch.setattr(research, "request_completion", complete)
+    catalog = (await installed.get(f"{BASE}/models")).json()
+    assert [(group["name"], group["models"]) for group in catalog["groups"]] == [
+        ("Local", ["shared"]), ("Remote", ["shared"]),
+    ]
+    assert catalog["default_endpoint_id"] == migrated["id"]
+    chat = {"messages": [{"role": "user", "content": "Which filament is easier to print?"}]}
+    base = (await installed.post(f"{BASE}/chat", json=chat)).json()
+    other = (await installed.post(f"{BASE}/chat", json=chat | {"endpoint_id": "remote", "model_id": "shared"})).json()
+    assert base["reply"] == "http://local-model:11434/v1 shared local"
+    assert other["reply"] == "https://other.model.test/v1 shared remote"
+    for selection in [{"endpoint_id": "gone", "model_id": "shared"}, {"endpoint_id": "remote", "model_id": "hidden"},
+                      {"endpoint_id": "remote"}]:
+        assert (await installed.post(f"{BASE}/chat", json=chat | selection)).status_code == 422
+
+    url = "https://maker.example/products/pla"
+    calls = []
+
+    async def unavailable_catalog(_identity):
+        return [], "", False
+
+    async def fetch(link, **_):
+        return proposals.Evidence(link, "Fixture PLA", "Fixture PLA Density: 1.24 g/cm³")
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    async def extract(url, model, key, *_args, **_kwargs):
+        calls.append((url, model, key))
+        return [], []
+
+    monkeypatch.setattr(proposals, "catalog_candidates", unavailable_catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "_supplier_scopes", lambda identity, page, snapshot=None: [page] if page.url == url else [])
+    monkeypatch.setattr(proposals, "request_extraction", extract)
+    db_session.add(Manufacturer(name="Fixture Brand", url="https://maker.example"))
+    await db_session.commit()
+    draft = {"mode": "create", "product_url": url, "identity": {"manufacturer": "Fixture Brand", "designation": "Fixture PLA"}}
+    path = f"{BASE}/proposals"
+    assert (await installed.post(path, json=draft | {"endpoint_id": "remote", "model_id": "shared"})).is_success
+    assert (await installed.post(path, json=draft)).is_success
+    assert calls == [("https://other.model.test/v1", "shared", "remote"), ("http://local-model:11434/v1", "shared", "local")]
+
+    saved = (await installed.get(route)).json()["model_endpoints"]
+    revision = (await installed.get(route)).json()["model_revision"]
+    saved[1]["model_url"] = "https://replacement.model.test/v1"
+    payload = {"default_endpoint_id": "remote", "model_endpoints": saved, "model_revision": revision}
+    response = await installed.put(route, json=payload)
+    assert response.is_success and not response.json()["model_endpoints"][1]["has_key"]
+    assert (await installed.put(route, json=payload)).status_code == 409
+    await db_session.rollback()
+    assert (await installed.put(route, json={"model_url": "https://model.test", "model_id": "shared"})).status_code == 422
+    await db_session.rollback()
+    replacement = (await installed.post(f"{BASE}/chat", json=chat)).json()
+    assert replacement["reply"] == "https://replacement.model.test/v1 shared"
+
+
+async def test_deployment_model_keeps_following_environment_after_endpoint_migration(installed, monkeypatch):
+    monkeypatch.setenv("FILABRAIN_MODEL_URL", "https://local.model.test/v1")
+    monkeypatch.setenv("FILABRAIN_MODEL_ID", "local-one")
+    monkeypatch.setenv("FILABRAIN_API_KEY", "fixture")
+    route = f"{BASE}/settings"
+    before = (await installed.get(route)).json()
+    endpoint, = before["model_endpoints"]
+    assert endpoint["has_key"]
+    assert (await installed.put(route, json={"default_endpoint_id": endpoint["id"],
+                                           "model_endpoints": [endpoint | {"name": "Local"}]})).is_success
+    monkeypatch.setenv("FILABRAIN_MODEL_URL", "https://local-two.model.test/v1")
+    monkeypatch.setenv("FILABRAIN_MODEL_ID", "local-two")
+    after = (await installed.get(route)).json()
+    assert after["model_url"] == "https://local-two.model.test/v1"
+    assert after["model_id"] == "local-two"
+    assert after["model_endpoints"][0]["name"] == "Local"
+    assert after["has_key"]
+    monkeypatch.delenv("FILABRAIN_MODEL_URL")
+    catalog = (await installed.get(f"{BASE}/models")).json()
+    assert catalog["default_endpoint_id"] == endpoint["id"]
+    assert catalog["default_model_id"] is None
 
 
 @pytest.mark.parametrize(("upstream_response", "expected"), [
@@ -1577,7 +1697,7 @@ async def test_manufacturer_product_from_its_own_catalog(
     else:
         reference = next(issue for issue in data["issues"] if issue["code"] == "manufacturer_color_reference")
         assert reference["name"] == "Pantone 425C"
-        assert suggestions["manufacturer_color_name"]["value"] == "Pantone 425C"
+        assert suggestions["manufacturer_color_name"]["value"] == "Graphite Gray"
         assert suggestions["manufacturer_color_name"]["sources"][0]["url"] == product_url
     if label.startswith("RAL Color:"):
         reference = next(issue for issue in data["issues"] if issue["code"] == "manufacturer_color_reference")
@@ -1598,12 +1718,12 @@ async def test_manufacturer_product_from_its_own_catalog(
     )
 
 
-@pytest.mark.parametrize(("label", "expected_color"), [
+@pytest.mark.parametrize(("label", "expected_reference"), [
     ("RAL Color: 9010 Pure White", "RAL 9010 Pure White"),
     ("PANTONE Color: 425C", "Pantone 425C"),
 ])
 async def test_paramount_pasted_url_proposes_identity_and_published_specs(
-    installed, db_session, monkeypatch, label, expected_color,
+    installed, db_session, monkeypatch, label, expected_reference,
 ):
     from filabrain import proposals
     from filabrain.sources import Evidence
@@ -1652,7 +1772,9 @@ async def test_paramount_pasted_url_proposes_identity_and_published_specs(
     assert values["manufacturer_id"] == maker.id
     assert values["designation"] == "PLA (White)"
     assert values["material_type"] == "PLA"
-    assert values["manufacturer_color_name"] == expected_color
+    assert values["manufacturer_color_name"] == "White"
+    assert any(issue["code"] == "manufacturer_color_reference" and issue["name"] == expected_reference
+               for issue in data["issues"])
     assert values["manufacturer_sku"] == "852297007008"
     assert values["shop_url"] == url
     assert values["spool_width_mm"] == 57.15
@@ -1833,3 +1955,562 @@ async def test_catalog_matches_explicit_pla_plus_version_color_and_package(monke
     )]
     assert [item["id"] for item in matches] == ["exact"]
     assert proposals.catalog_values(matches[0])["density_g_cm3"] == 1.21
+
+
+@pytest.mark.parametrize("apply_identity", [False, True])
+async def test_color_standard_preview_and_apply(installed, db_session, monkeypatch, apply_identity):
+    from app.models import Color, FilamentColor
+    from filabrain import batch_api, color_standards
+    from filabrain.db import FilamentResearchBatchItem
+
+    async def ral_page(url):
+        assert url == 'https://www.ral-farben.de/en/all-ral-colours'
+        return b'<a href="/en/colour/ral-classic/ral-3020/9143" style="background-color:#AB1519"><span>RAL</span><span class="number">3020</span><div class="subtext">Verkehrsrot<br/>Traffic red</div></a>'
+
+    monkeypatch.setattr(color_standards, 'read_asset', ral_page)
+    monkeypatch.setattr(batch_api, 'start_worker', lambda _app: None)
+    maker = Manufacturer(name='Swatch Fixture')
+    saved = Color(name='Enzo Red', hex_code='#B81D13')
+    db_session.add_all([maker, saved])
+    await db_session.flush()
+    filament = Filament(manufacturer_id=maker.id, designation='Fixture PETG', material_type='PETG',
+                        manufacturer_color_name=None if apply_identity else 'Enzo Red',
+                        diameter_mm=1.75, color_mode='single')
+    db_session.add(filament)
+    await db_session.flush()
+    assignment = FilamentColor(filament_id=filament.id, color_id=saved.id, position=1)
+    db_session.add(assignment)
+    await db_session.commit()
+    response = await installed.post(f'{BASE}/batches', json={'filament_ids': [filament.id], 'mode': 'fill'})
+    assert response.status_code == 200
+    run = response.json()
+    item = await db_session.get(FilamentResearchBatchItem, run['items'][0]['id'])
+    item.status = 'ready'
+    item.issues = [{'code': 'manufacturer_color_reference', 'name': 'RAL3020 Traffic red',
+                    'url': 'https://fixture.example/products/red'}]
+    if apply_identity:
+        item.proposals = [{
+            'id': 'identity',
+            'fields': {
+                'manufacturer_color_name': {'old': None, 'value': 'Enzo Red'},
+                'manufacturer_sku': {'old': None, 'value': 'PETG-ENZO'},
+            },
+        }]
+    await db_session.commit()
+    batch_path = f"{BASE}/batches/{run['id']}"
+    path = f"{batch_path}/items/{item.id}/swatches"
+    if apply_identity:
+        selection = {
+            'item_id': item.id, 'revision': item.revision, 'decision_revision': item.decision_revision,
+            'approved_ids': ['identity'],
+        }
+        approved = await installed.post(f'{batch_path}/decisions', json={
+            'items': [selection | {'decision': 'approved'}],
+        })
+        assert approved.status_code == 200, approved.text
+        selection['decision_revision'] = approved.json()['items'][0]['decision_revision']
+        applied = await installed.post(f'{batch_path}/apply', json={'items': [selection]})
+        assert applied.status_code == 200, applied.text
+        assert applied.json()['results'][0]['status'] == 'applied'
+    else:
+        filament.manufacturer_sku = 'UNRELATED-VARIANT'
+        await db_session.commit()
+        assert (await installed.get(path)).status_code == 409
+        filament.manufacturer_sku = None
+        await db_session.commit()
+    preview = await installed.get(path)
+    assert preview.status_code == 200
+    review = preview.json()
+    assert review['current'][0]['hex_code'] == '#B81D13'
+    reference = review['references'][0]
+    assert (reference['code'], reference['hex_code'], reference['name']) == ('RAL 3020', '#AB1519', 'Traffic red')
+    assert (await db_session.get(FilamentColor, assignment.id)).color_id == saved.id
+    request = {'code': reference['code'], 'token': reference['token']}
+    kept = await installed.post(path, json=request | {'action': 'keep'})
+    assert kept.status_code == 200
+    old = await installed.post(path, json=request | {'action': 'create'})
+    assert old.status_code == 409
+    request['token'] = (await installed.get(path)).json()['references'][0]['token']
+    applied = await installed.post(path, json=request | {'action': 'create'})
+    assert applied.status_code == 200
+    await db_session.refresh(assignment)
+    await db_session.refresh(filament)
+    assert filament.manufacturer_color_name == 'Enzo Red'
+    assert filament.custom_fields['filabrain_color_references'][0]['code'] == 'RAL 3020'
+    color = await db_session.get(Color, assignment.color_id)
+    assert color.hex_code == '#AB1519'
+    await db_session.refresh(saved)
+    assert saved.hex_code == '#B81D13'
+
+    matching = Color(name='Previously saved red', hex_code='#AB1519')
+    db_session.add(matching)
+    await db_session.commit()
+    updated = (await installed.get(path)).json()['references'][0]
+    assert [(option['id'], option['name']) for option in updated['matches']] == [(matching.id, matching.name)]
+    renamed = await installed.post(path, json={
+        'code': updated['code'], 'token': updated['token'], 'action': 'reuse', 'color_id': matching.id,
+        'color_name': 'The color had a different name when I previewed it',
+    })
+    assert renamed.status_code == 409
+    reused = await installed.post(path, json={
+        'code': updated['code'], 'token': updated['token'], 'action': 'reuse', 'color_id': matching.id,
+        'color_name': matching.name,
+    })
+    assert reused.status_code == 200
+    await db_session.refresh(assignment)
+    assert assignment.color_id == matching.id
+
+    filament.manufacturer_color_name = 'New green variant'
+    await db_session.commit()
+    assert (await installed.get(path)).status_code == 409
+
+
+@pytest.mark.parametrize("unresolved_sibling", [False, True])
+async def test_paramount_uses_matched_color_family_url_only(installed, db_session, monkeypatch, unresolved_sibling):
+    from filabrain import proposals
+    from filabrain.sources import Evidence
+
+    site = "https://www.paramount-3d.com"
+    primary = site + "/product-page/pla-military-green-1-75mm-1kg-filament-ogrl60037764c"
+    sibling = site + "/product-page/pla-pantone-military-green-7764c-3-00mm-1kg-filament-ogrl60037764c"
+    if unresolved_sibling:
+        sibling += "?size=175"
+    other = site + "/product-page/pla-pantone-military-khaki-7530c-3-00mm-1kg-filament-gbrl10197530c"
+    titles = {
+        primary: "PLA (Military Green) 1.75mm 1kg Filament [OGRL60037764C]",
+        sibling: "PLA (Military Green) 3.00mm 1kg Filament [OGRL60037764C.3]",
+        other: "PLA (Military Khaki) 3.00mm 1kg Filament [GBRL10197530C.3]",
+    }
+
+    async def fetch(url, **_):
+        name = titles[url]
+        scopes = (name,) if url == primary else (name, 'Bed / Print Temperature: 1-2 C / 3-4 C')
+        unresolved = unresolved_sibling and url == sibling
+        product = None if unresolved else {"designation": name}
+        return Evidence(url, name, name, product, scopes=scopes, selected_variant_unresolved=unresolved)
+
+    async def sitemap():
+        return tuple(titles)
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "paramount_product_urls", sitemap)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    manufacturer = Manufacturer(name="Paramount 3D", url=site)
+    db_session.add(manufacturer)
+    await db_session.flush()
+    filament = Filament(manufacturer_id=manufacturer.id, designation="PLA Military Green",
+                        material_type="PLA", diameter_mm=1.75, manufacturer_color_name="535435",
+                        shop_url="OGRL60037764C")
+    db_session.add(filament)
+    await db_session.commit()
+    result = (await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})).json()
+    refs = [issue for issue in result["issues"] if issue["code"] == "manufacturer_color_reference"]
+    expected = [] if unresolved_sibling else [{
+        "code": "manufacturer_color_reference", "name": "Pantone 7764 C", "url": sibling, "from_product_url": True,
+    }]
+    assert refs == expected
+    assert not {"bed_temp_range_c", "extruder_temp_range_c"} & {entry["field"] for entry in result["suggestions"]}
+
+
+async def test_pantone_preview_binds_chip_to_requested_code(monkeypatch):
+    import io
+    from PIL import Image
+    from filabrain import color_standards as colors
+
+    asset = colors.PANTONE_ASSETS + "pantone-color-chip-7546-c.webp"
+    image = io.BytesIO()
+    Image.new("RGB", (16, 16), (36, 55, 70)).save(image, "WEBP", lossless=True)
+
+    async def fetch(url):
+        if url == asset:
+            return image.getvalue()
+        assert url == colors.PANTONE_PAGE + "7546-c"
+        return f'<img alt="PANTONE 7546 CP Incorrect Chip" src="{asset}-other"><img src="{asset}">'.encode()
+
+    monkeypatch.setattr(colors, "read_asset", fetch)
+    assert (await colors.resolve_preview("Pantone 7546 C"))["hex_code"] is None
+
+    async def corrected(url):
+        if url == asset:
+            return image.getvalue()
+        return f'<img alt="PANTONE 7546 C Chip" src="{asset}">'.encode()
+
+    monkeypatch.setattr(colors, "read_asset", corrected)
+    result = await colors.resolve_preview("Pantone 7546 C")
+    assert result["hex_code"] == "#243746"
+
+
+@pytest.mark.parametrize(("saved_link", "crowded_sitemap"), [(False, False), (False, True), (True, False)])
+@pytest.mark.parametrize("manufacturer_sku", [None, "OCEAN-175-X9"])
+async def test_general_lookup_finds_sku_and_related_color(
+    installed, db_session, monkeypatch, manufacturer_sku, saved_link, crowded_sitemap,
+):
+    from filabrain import proposals
+    from filabrain.sources import Evidence, _ProductPage
+
+    site = "https://filament-maker.example"
+    product_url = f"{site}/shop/ocean-175-x9" + ("#variant-ocean" if saved_link else "")
+    related_url = f"{site}/shop/petg-ocean-blue-ral-5015-285mm"
+    different_color_url = f"{site}/shop/petg-ocean-blue-ral-3020-285mm"
+    reseller_url = "https://reseller.example/shop/ocean-175-x9"
+    fetched = []
+
+    def product_page(url, sku, color, diameter, designation, text):
+        parser = _ProductPage()
+        parser.feed(
+            '<script type="application/ld+json">' + json.dumps({
+                "@type": "Product", "name": designation, "sku": sku, "color": color, "material": "PETG",
+                "isVariantOf": {"@type": "ProductGroup", "productGroupID": "ocean-petg"},
+            }) + "</script>"
+        )
+        scope = f"{designation} {color} PETG {diameter} mm SKU: {sku} {text}"
+        product, _ = parser.product_for_url(url)
+        return Evidence(url, designation, scope, product, scopes=(scope,))
+
+    designation = "PETG Ocean Blue 1.75 mm" if saved_link else "PETG Ocean Blue"
+    product_title = "PETG Ocean Blue 1.75 mm Refill" if manufacturer_sku else designation
+    pages = {
+        product_url: product_page(product_url, "OCEAN-175-X9", "Ocean Blue", 1.75, product_title, "density 1.27 g/cm3"),
+        related_url: product_page(related_url, "OCEAN-285-X9", "Ocean Blue", 2.85, "PETG Ocean Blue 2.85mm", "density 9 g/cm3"),
+        different_color_url: product_page(different_color_url, "RED-285-X9", "Red", 2.85, "PETG Red 2.85mm", "density 8 g/cm3"),
+    }
+
+    async def fetch(url, **_):
+        fetched.append(url)
+        if url not in pages:
+            raise ValueError("Not a product page")
+        return pages[url]
+
+    async def sitemap(origin):
+        assert origin.rstrip("/") == site
+        urls = [different_color_url, reseller_url, related_url, product_url]
+        if crowded_sitemap:
+            urls.extend([f"{site}/shop/petg-ocean-blue-lite", f"{site}/shop/petg-ocean-blue-refill"])
+        return urls
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Filament Maker", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation=designation, material_type="PETG", diameter_mm=1.75,
+        manufacturer_color_name="3172AD" if manufacturer_sku else "Ocean Blue",
+        manufacturer_sku=manufacturer_sku, custom_fields={"article_number": "OCEAN-175-X9"} if manufacturer_sku is None else None,
+        shop_url=product_url if saved_link else None,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.status_code == 200
+    data = response.json()
+    assert product_url in fetched and related_url in fetched and reseller_url not in fetched
+    suggestions = {entry["field"]: entry for entry in data["suggestions"]}
+    if saved_link:
+        assert "shop_url" not in suggestions
+    else:
+        assert suggestions["shop_url"]["value"] == product_url
+    assert {issue["name"]: issue["url"] for issue in data["issues"]
+            if issue["code"] == "manufacturer_color_reference"} == {"RAL 5015": related_url}
+    assert all(source["url"] != related_url for entry in data["suggestions"] for source in entry["sources"])
+
+
+@pytest.mark.parametrize("imported_field", ["imported_article_number", "shop_url"])
+async def test_imported_part_number_does_not_override_product_line(imported_field):
+    from filabrain import proposals as p
+    from filabrain.sources import Evidence
+
+    identity = p.Identity(manufacturer="Example Filaments", designation="PLA Tough (Black)", material="PLA",
+                          material_subgroup="Tough", color="Black", diameter_mm=1.75)
+    heading = "PLA (Black) 1.75mm 1kg Filament [ABC12345]"
+    page = Evidence("https://maker.example/pla-black", heading, heading,
+                    {"designation": heading, "manufacturer": identity.manufacturer}, manufacturer_page=True)
+    assert not p._supplier_scopes(identity, page, {imported_field: "ABC12345"})
+
+
+@pytest.mark.parametrize("first_query, second_query, requested_query, expected_sku", [
+    ("size=175", "size=285", "size=175", "OCEAN-175"),
+    ("size=175", "size=175", "size=175", None),
+    ("size=175", None, "size=175", "OCEAN-175"),
+    ("size=175&color=blue", "color=blue&size=285", "color=blue&size=175", "OCEAN-175"),
+    ("size=175&size=285", "size=285&size=175", "size=175&size=285", "OCEAN-175"),
+])
+async def test_supplier_selects_only_the_explicit_variant_url(
+    monkeypatch, first_query, second_query, requested_query, expected_sku,
+):
+    from filabrain import sources
+
+    path = "/products/ocean-blue"
+    url = f"https://maker.example{path}?{requested_query}&utm_source=test"
+    variant = {"@type": "Product", "name": "Ocean Blue 1.75 mm", "sku": "OCEAN-175",
+               "url": f"{path}?{first_query}", "color": "Ocean Blue", "material": "PETG"}
+    second_url = f"{path}?{second_query}" if second_query else None
+    second = {"@type": "Product", "name": "Ocean Blue 2.85 mm", "sku": "OCEAN-285", "url": second_url}
+    markup = '<script type="application/ld+json">' + json.dumps({
+        "@type": "ProductGroup", "productGroupID": "OCEAN-PETG", "hasVariant": [variant, second],
+    }) + "</script>"
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **__: (200, "", "text/html", markup.encode()))
+    product = sources._fetch_supplier(url).product
+    if expected_sku is None:
+        assert product is None
+    else:
+        assert product["sku"] == expected_sku
+        assert product["product_group_id"] == "OCEAN-PETG"
+
+
+@pytest.mark.parametrize(("offer_list", "size_selector"), [(False, "?size="), (True, "#size-")])
+async def test_supplier_matches_offer_url_when_product_url_is_shared(monkeypatch, offer_list, size_selector):
+    from filabrain import sources
+
+    path = "/products/ocean-blue"
+    variants = []
+    for size in (175, 285):
+        offer = {"@type": "Offer", "url": f"{path}{size_selector}{size}"}
+        variants.append({
+            "@type": "Product", "name": f"Ocean Blue {size}", "sku": f"OCEAN-{size}",
+            "url": path, "offers": [offer] if offer_list else offer,
+        })
+    markup = '<script type="application/ld+json">' + json.dumps({
+        "@type": "ProductGroup", "hasVariant": variants,
+    }) + "</script>"
+
+    def fetch(url, *_, **__):
+        if url.path == "/old-ocean-blue":
+            return 301, path, "", b""
+        return 200, "", "text/html", markup.encode()
+
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
+    monkeypatch.setattr(sources, "_get_pinned", fetch)
+    assert sources._fetch_supplier(f"https://maker.example{path}{size_selector}175").product == {
+        "designation": "Ocean Blue 175", "sku": "OCEAN-175",
+    }
+    assert sources._fetch_supplier(f"https://maker.example{path}").product is None
+    if size_selector == "#size-":
+        assert sources._fetch_supplier("https://maker.example/old-ocean-blue#size-285").product == {
+            "designation": "Ocean Blue 285", "sku": "OCEAN-285",
+        }
+
+
+async def test_supplier_does_not_substitute_named_product_for_unnamed_variant(monkeypatch):
+    from filabrain import sources
+
+    path = "/products/ocean-blue"
+    markup = '<script type="application/ld+json">' + json.dumps({
+        "@type": "ProductGroup", "hasVariant": [
+            {"@type": "Product", "name": "Ocean Blue 175", "sku": "OCEAN-175", "url": f"{path}?size=175"},
+            {"@type": "Product", "sku": "OCEAN-285", "url": f"{path}?size=285"},
+        ],
+    }) + "</script>"
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **__: (200, "", "text/html", markup.encode()))
+    assert sources._fetch_supplier(f"https://maker.example{path}?size=285").product is None
+
+
+@pytest.mark.parametrize(("selector", "paramount"), [("#size-", False), ("?size=", False), ("?size=", True)])
+async def test_pasted_link_uses_only_the_verified_variant(installed, db_session, monkeypatch, selector, paramount):
+    from filabrain import proposals, sources
+
+    if paramount:
+        site = "https://www.paramount-3d.com"
+        path = "/product-page/petg-ocean-blue"
+        brand = "Paramount 3D"
+        title = "PETG (Ocean Blue) 1.75mm 1kg Filament [OCEAN-175]"
+    else:
+        site = "https://maker.example"
+        path = "/products/ocean-blue-ral-5015"
+        brand = "Fixture Brand"
+        title = "Ocean Blue 1.75 mm"
+    markup = f'<title>{title}</title><script type="application/ld+json">' + json.dumps({
+        "@type": "ProductGroup", "hasVariant": [{
+            "@type": "Product", "url": f"{path}{selector}175",
+            "name": title, "sku": "OCEAN-175",
+            "brand": {"name": brand}, "material": "PETG", "color": "Ocean Blue",
+        }],
+    }) + f"</script><main><p>{title} PETG Ocean Blue 1.75 mm SKU: OCEAN-175</p></main>"
+
+    def fetch(requested, *_, **__):
+        if requested.path != path:
+            return 404, "", "text/html", b""
+        return 200, "", "text/html", markup.encode()
+
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
+    monkeypatch.setattr(sources, "_get_pinned", fetch)
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    async def paramount_urls():
+        return ()
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "paramount_product_urls", paramount_urls)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    db_session.add(Manufacturer(name=brand, url=site))
+    await db_session.commit()
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "product_url": f"{site}{path}{selector}285",
+    })
+    assert response.status_code == 200
+    assert response.json()["suggestions"] == []
+
+    verified_url = f"{site}{path}{selector}175"
+    matching = await installed.post(f"{BASE}/proposals", json={"mode": "create", "product_url": verified_url})
+    assert matching.status_code == 200
+    suggestions = {entry["field"]: entry["value"] for entry in matching.json()["suggestions"]}
+    assert suggestions["manufacturer_sku"].casefold() == "ocean-175"
+    assert suggestions["shop_url"] == verified_url
+    if not paramount:
+        assert any(issue["code"] == "manufacturer_color_reference" and issue["name"] == "RAL 5015"
+                   for issue in matching.json()["issues"])
+
+
+async def test_edit_does_not_propose_a_link_with_an_unresolved_variant(installed, db_session, monkeypatch):
+    from filabrain import proposals
+    from filabrain.sources import Evidence
+
+    site = "https://filament-maker.example"
+    url = f"{site}/products/ocean-blue?size=285"
+    title = "PETG Ocean Blue"
+    scope = f"{title} 1.75 mm SKU: OCEAN-175"
+
+    async def fetch(requested, **_):
+        if requested != url:
+            raise ValueError("Not a product page")
+        return Evidence(url, title, scope, scopes=(scope,), selected_variant_unresolved=True)
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Filament Maker", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation=title, material_type="PETG",
+        diameter_mm=1.75, manufacturer_color_name="Ocean Blue", manufacturer_sku="OCEAN-175",
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "edit", "filament_id": filament.id, "product_url": url,
+    })
+    assert response.status_code == 200
+    assert "shop_url" not in {entry["field"] for entry in response.json()["suggestions"]}
+
+
+@pytest.mark.parametrize("ral_known", [True, False])
+async def test_lookup_finds_both_color_standards_in_crowded_sitemap(installed, db_session, monkeypatch, ral_known):
+    from filabrain import proposals
+    from filabrain.sources import Evidence
+
+    site = "https://filament-maker.example"
+    saved = f"{site}/shop/petg-ocean-blue-175"
+    pasted = f"{site}/shop/petg-ocean-blue-{'ral-5015-' if ral_known else ''}175-store"
+    ral = f"{site}/shop/petg-ocean-blue-ral-5015"
+    pantone = f"{site}/shop/petg-ocean-blue-pantone-7546-c-285mm"
+
+    async def fetch(url, **_):
+        if url not in (saved, pasted, ral, pantone):
+            raise ValueError("Not a product page")
+        sku, diameter = ("OCEAN-285-X9", 2.85) if url in (ral, pantone) else ("OCEAN-175-X9", 1.75)
+        title = "PETG Ocean Blue"
+        scope = f"{title} {diameter} mm SKU: {sku} Density 1.27 g/cm3"
+        return Evidence(url, title, scope, {
+            "designation": title, "sku": sku, "color": "Ocean Blue", "material": "PETG",
+            "product_group_id": "ocean-petg",
+        }, scopes=(scope,))
+
+    async def sitemap(_):
+        return [ral, *(f"{site}/shop/petg-ocean-blue-ral-{code}" for code in (5012, 5013)), pantone]
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Filament Maker", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation="PETG Ocean Blue", material_type="PETG", diameter_mm=1.75,
+        manufacturer_color_name="Ocean Blue", manufacturer_sku="OCEAN-175-X9", shop_url=saved,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "edit", "filament_id": filament.id, "product_url": pasted,
+    })
+    assert response.status_code == 200
+    colors = {issue["name"]: issue["url"] for issue in response.json()["issues"]
+              if issue["code"] == "manufacturer_color_reference"}
+    assert colors == {"RAL 5015": pasted if ral_known else ral, "Pantone 7546 C": pantone}
+
+
+async def test_archived_supplier_keeps_original_variant_for_matching(monkeypatch):
+    from filabrain import sources
+
+    page = "https://maker.example/products/ocean-blue"
+    original = f"{page}#size-285"
+    timestamp = "20260912080000"
+    snapshot = f"https://web.archive.org/web/{timestamp}/{page}"
+    markup = '<script type="application/ld+json">' + json.dumps({
+        "@type": "ProductGroup", "hasVariant": [
+            {"@type": "Product", "name": "Ocean Blue 175", "sku": "OCEAN-175", "url": "#size-175"},
+            {"@type": "Product", "name": "Ocean Blue 285", "sku": "OCEAN-285", "url": f"{page}#size-285"},
+        ],
+    }) + "</script>"
+
+    def availability(request):
+        assert request.url.params["url"] == page
+        return Response(200, json={"archived_snapshots": {"closest": {
+            "available": True, "status": "200", "timestamp": timestamp, "url": snapshot,
+        }}})
+
+    monkeypatch.setattr(sources.httpx, "AsyncClient", lambda **kw: AsyncClient(
+        transport=MockTransport(availability), **kw,
+    ))
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **__: (200, "", "text/html", markup.encode()))
+    evidence = await sources.fetch_archived_supplier(original)
+    assert evidence.product == {"designation": "Ocean Blue 285", "sku": "OCEAN-285"}
+    assert evidence.url == f"{snapshot}#size-285"
+    assert evidence.archived_at == "2026-09-12"

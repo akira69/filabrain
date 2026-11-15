@@ -12,14 +12,20 @@ const filament = {
   material_type: 'PLA', diameter_mm: 1.75, color_mode: 'single',
 }
 const evidence = [{ title: 'Fixture catalog', url: 'https://manufacturer.test/pla', evidence: '1.24 g/cm³' }]
+const batchSource = { title: 'Fixture catalog | Fixture Brand', url: 'https://manufacturer.test/pla', quote: 'Fixture catalog' }
 const fixtureBatch = {
   id: 'fixture-batch', mode: 'fill', status: 'active', total: 1,
   created_at: '2026-01-01T00:00:00Z', finished_at: null,
   items: [{ id: 12, filament_id: 10, live_filament_id: 10, status: 'ready', decision: 'pending',
-    revision: 1, decision_revision: 0, identity: { designation: 'Fixture PLA' }, issues: [],
+    revision: 1, decision_revision: 0, identity: { designation: 'Fixture PLA' },
+    issues: [
+      { code: 'manufacturer_page', name: batchSource.title, url: batchSource.url },
+      { code: 'possible_match', name: 'Other PLA', url: 'https://manufacturer.test/other', source: 'Web search' },
+      { code: 'possible_match', name: 'Other PLA', url: 'https://manufacturer.test/other', source: 'Web search' },
+    ],
     approved_ids: [], changed_fields: [], applied_at: null,
     proposals: [{ id: 'density', fields: { density_g_cm3: { old: null, value: 1.24 } },
-      sources: [], reason: 'Confirmed density', group_key: null }],
+      sources: [batchSource, batchSource], reason: 'Confirmed density', group_key: null }],
   }],
 }
 
@@ -35,7 +41,10 @@ try {
   let supplierSites = []
   let savedManufacturerWebsite
   let chatModelId = 'fixture:default'
+  let endpoints = []
+  let defaultEndpoint = null
   let canConfigure = true
+  let canUseFilaments = true
   let modelsUnavailable = false
   let hostPicker = false
   let account = 7
@@ -44,6 +53,7 @@ try {
   let pairedProposal = null
   let heldModelList
   let staleBatchOnce = false
+  let hasResearchRun = false
   let libraryReads = 0
   let editorRecordToken = 'c'.repeat(32)
   let hostEditorToken
@@ -105,8 +115,8 @@ try {
         })
       </script>` })
     if (path.endsWith('/me')) return route.fulfill({ json: { id: account } })
-    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, chat_model: chatModelId,
-      can_create: true, can_update: true, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
+    if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: canUseFilaments, chat_model: chatModelId, chat_endpoint_id: chatModelId ? defaultEndpoint : null,
+      can_create: canUseFilaments, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
     if (path.endsWith('/filaments/10/research-record')) return recordUnavailable
       ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { record_token: editorRecordToken } })
@@ -114,26 +124,46 @@ try {
       savedManufacturerWebsite = req.postDataJSON()
       return route.fulfill({ status: 204 })
     }
-    if (path.endsWith('/settings/models') && heldModelList) await heldModelList
+    if (path.endsWith('/settings/models')) {
+      if (heldModelList) await heldModelList
+      const { model_url } = req.postDataJSON()
+      if (model_url.includes('offline')) return route.fulfill({ status: 502, json: { detail: 'Could not load models from this server.' } })
+      return route.fulfill({ json: { models: model_url.includes('remote')
+        ? ['fixture:alternate', 'fixture:hidden'] : ['fixture:default', 'fixture:alternate'] } })
+    }
     if (path.endsWith('/models')) return modelsUnavailable
       ? route.fulfill({ status: 502, json: {} })
-      : route.fulfill({ json: { models: ['fixture:default', 'fixture:alternate'] } })
+      : route.fulfill({ json: {
+        default_endpoint_id: defaultEndpoint || 'default',
+        default_model_id: chatModelId,
+        groups: (endpoints.length ? endpoints : [{ id: 'default', name: 'Default endpoint', models: null, hidden_models: [] }])
+          .map(({ id, name, models, hidden_models, model_id }) => ({ id, name, models: [...new Set([
+            ...(model_id ? [model_id] : []), ...(models?.length ? models : id === defaultEndpoint || id === 'default'
+              ? ['fixture:default', 'fixture:alternate'] : []),
+          ])].filter(model => !hidden_models.includes(model)) })),
+      } })
     if (path.endsWith('/chat')) {
       assert.equal(req.postDataJSON().messages[0].content, 'Compare these materials')
-      if (chatRequests++ === 0) assert.equal(req.postDataJSON().model_id, 'fixture:alternate')
+      if (chatRequests++ === 0) {
+        assert.equal(req.postDataJSON().model_id, 'fixture:alternate')
+        assert.equal(req.postDataJSON().endpoint_id, defaultEndpoint)
+      }
       else assert.deepEqual(req.postDataJSON().messages.map(message => message.role), ['user', 'assistant', 'user'])
       return route.fulfill({ json: { reply: 'PLA is easier to print.', action: null } })
     }
     if (path.endsWith('/proposals')) {
       proposalRequests++
       const target = req.postDataJSON()
-      if (target.filament_id === 10 && target.action === 'fill') assert.equal(target.model_id, 'fixture:alternate')
+      if (chatModelId && target.filament_id === 10 && target.action === 'fill') {
+        assert.equal(target.model_id, 'fixture:alternate')
+        assert.equal(target.endpoint_id, endpoints.find(endpoint => endpoint.name === 'Remote models')?.id || defaultEndpoint)
+      }
       if (target.product_url) assert.equal(target.product_url, evidence[0].url)
       if (target.guidance === 'Continue in stale tab') return route.fulfill({
         status: 502, json: { detail: 'Source unavailable' },
       })
       if (target.guidance && target.mode === 'create') assert.equal(target.guidance, 'Look for a datasheet')
-      if (target.guidance && target.mode === 'edit') {
+      if (chatModelId && target.guidance && target.mode === 'edit') {
         assert.equal(target.action, 'standardize')
         assert.equal(target.filament_id, 10)
         if (target.guidance === 'Check an unavailable source') return route.fulfill({
@@ -173,7 +203,9 @@ try {
       return route.fulfill({ json: { ok: true } })
     }
     if (path.endsWith('/settings/test')) {
-      assert.deepEqual(req.postDataJSON(), {
+      const { endpoint_id, ...credentials } = req.postDataJSON()
+      assert.equal(endpoint_id, defaultEndpoint)
+      assert.deepEqual(credentials, {
         model_url: 'http://ollama:11434', model_id: 'fixture:default', api_key: 'fixture-key', clear_key: false,
       })
       return route.fulfill({ json: { ok: true } })
@@ -192,10 +224,15 @@ try {
         searchUrl = settings.search_url
         supplierDownloadMiB = settings.supplier_download_mib
         supplierSites = settings.supplier_sites ?? supplierSites
-        if (settings.model_id) chatModelId = settings.model_id
+        if (settings.model_endpoints) {
+          endpoints = settings.model_endpoints.map(({ api_key, clear_key, ...endpoint }) => ({ ...endpoint, has_key: !!api_key && !clear_key }))
+          defaultEndpoint = settings.default_endpoint_id
+        }
+        if (settings.model_id || defaultEndpoint) chatModelId = settings.model_id || endpoints.find(endpoint => endpoint.id === defaultEndpoint).model_id
       }
       return route.fulfill({ json: {
-        model_url: settings?.model_url || '', model_id: settings?.model_id || '',
+        model_url: endpoints.find(endpoint => endpoint.id === defaultEndpoint)?.model_url || '', model_id: chatModelId,
+        model_endpoints: endpoints, default_endpoint_id: defaultEndpoint,
         search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
         supplier_sites: supplierSites, supplier_download_mib: supplierDownloadMiB,
       } })
@@ -227,6 +264,7 @@ try {
         staleBatchOnce = false
         return route.fulfill({ status: 409, json: { detail: { code: 'filament_selection_changed', message: 'Stale selection' } } })
       }
+      hasResearchRun = true
       return route.fulfill({ json: fixtureBatch })
     }
     if (path.endsWith('/batches/fixture-batch')) return route.fulfill({ json: fixtureBatch })
@@ -241,7 +279,7 @@ try {
       Object.assign(fixtureBatch.items[0], { status: 'applied', applied_at: '2026-01-01T00:00:00Z' })
       return route.fulfill({ json: { batch: fixtureBatch, results: [{ item_id: 12, status: 'applied', changed_fields: [] }] } })
     }
-    if (path.endsWith('/batches')) return route.fulfill({ json: [] })
+    if (path.endsWith('/batches')) return route.fulfill({ json: hasResearchRun ? [fixtureBatch] : [] })
     return route.fulfill({ status: 404, json: {} })
   })
 
@@ -253,7 +291,7 @@ try {
   assert.equal(await page.getByRole('textbox', { name: 'Your question' }).isVisible(), false)
   await setupModel.click()
   const modelUrl = page.getByRole('textbox', { name: 'Model server URL' })
-  assert.equal(await modelUrl.evaluate(el => document.activeElement === el), true)
+  await page.waitForFunction(() => document.activeElement === document.querySelector('[name="model_url"]'))
   await modelUrl.fill('http://ollama:11434')
   const modelId = page.getByRole('textbox', { name: 'Model ID', exact: true })
   assert.equal(await modelId.isVisible(), false)
@@ -285,7 +323,7 @@ try {
   assert.equal(await warning.evaluate(el => getComputedStyle(el).color), 'rgb(255, 211, 107)')
   assert.equal(await warning.getAttribute('href'), '?tab=settings')
   await warning.press('Enter')
-  assert.equal(await modelUrl.evaluate(el => el === document.activeElement), true)
+  await page.waitForFunction(() => document.activeElement === document.querySelector('[name="model_url"]'))
 
   canConfigure = false
   await page.reload()
@@ -308,7 +346,7 @@ try {
   assert.equal(await alternateModel.evaluate(el => el === document.activeElement), true)
   await alternateModel.press('Enter')
   await chatMenu.waitFor({ state: 'hidden' })
-  assert.match(await chatModel.innerText(), /fixture:alternate/)
+  assert.equal((await chatModel.innerText()).trim(), 'fixture:alternate')
   await page.getByRole('textbox', { name: 'Your question' }).fill('Compare these materials')
   await page.getByRole('button', { name: 'Send message' }).click()
   await page.getByText('PLA is easier to print.').waitFor()
@@ -326,6 +364,20 @@ try {
   const desktopComposer = await page.locator('[data-chat-form]').boundingBox()
   const desktopGuide = await guide.boundingBox()
   assert.ok(desktopComposer.y + desktopComposer.height <= desktopGuide.y + desktopGuide.height)
+  const checkGuideTypography = () => guide.evaluate(panel => {
+    const title = getComputedStyle(panel.querySelector('h2'))
+    const section = getComputedStyle(document.querySelector('.chat-header h2'))
+    const body = getComputedStyle(panel.querySelector('.docs-content'))
+    const hint = getComputedStyle(document.querySelector('.fm-field-hint'))
+    return { title: [title.fontFamily, title.fontSize, title.fontWeight],
+      section: [section.fontFamily, section.fontSize, section.fontWeight],
+      body: body.fontSize, hint: hint.fontSize, overflow: panel.scrollWidth > panel.clientWidth }
+  }).then(({ title, section, body, hint, overflow }) => {
+    assert.deepEqual(title, section, 'Guide title uses the shared section heading style')
+    assert.equal(body, hint, 'Guide body matches the FilaBrain secondary text size')
+    assert.equal(overflow, false)
+  })
+  await checkGuideTypography()
   const providerLink = guide.getByRole('link', { name: 'Ollama setup' })
   await providerLink.waitFor()
   const artBounds = await guide.getByRole('img').boundingBox()
@@ -336,6 +388,42 @@ try {
   assert.equal(await draft.inputValue(), 'Unsent follow-up')
   await page.getByText('PLA is easier to print.').waitFor()
 
+  const headerNav = page.locator('#plugin-header nav')
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 780 })
+    const tabs = await headerNav.getByRole('button').evaluateAll(buttons => buttons.map(button => {
+      const { top, right, height } = button.getBoundingClientRect()
+      return { top, right, height, name: button.innerText.trim(), icon: !!button.querySelector('svg') }
+    }))
+    assert.deepEqual(tabs.map(tab => tab.name), ['Chat', 'New', 'Library'])
+    assert.ok(tabs.every(tab => tab.top === tabs[0].top && tab.right < width && tab.height >= 44 && tab.icon))
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
+  }
+  const pluginHeader = page.locator('#plugin-header')
+  const headerSettings = pluginHeader.getByRole('button', { name: 'Model & MCP settings' })
+  const tabStops = [headerGuide, headerSettings, ...await headerNav.getByRole('button').all()]
+  for (const width of [390, 1120, 1121]) {
+    await page.setViewportSize({ width, height: 780 })
+    await pluginHeader.locator(width <= 1120 ? '.header-utilities + nav' : 'nav + .header-utilities').waitFor()
+    const order = width <= 1120 ? tabStops : [...tabStops.slice(2), ...tabStops.slice(0, 2)]
+    await order[0].focus()
+    for (const button of order.slice(1)) {
+      await page.keyboard.press('Tab')
+      assert.ok(await button.evaluate(el => el === document.activeElement), `header focus follows layout at ${width}px`)
+    }
+  }
+  await page.setViewportSize({ width: 320, height: 780 })
+  await pluginHeader.locator('.header-utilities + nav').waitFor()
+  assert.ok(await headerSettings.evaluate(el => el === document.activeElement), 'header focus survives resizing')
+  await page.evaluate(() => { document.documentElement.style.fontSize = '200%' })
+  assert.ok(await pluginHeader.evaluate(header => {
+    const title = header.querySelector('h1 span').getBoundingClientRect()
+    const utilities = header.querySelector('.header-utilities').getBoundingClientRect()
+    return title.right <= utilities.left || title.bottom <= utilities.top
+  }), 'the title and utility buttons have separate space with enlarged text')
+  assert.equal(await pluginHeader.evaluate(header => header.scrollWidth - header.clientWidth), 0)
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320)
+  await page.evaluate(() => { document.documentElement.style.removeProperty('font-size') })
   await page.setViewportSize({ width: 390, height: 780 })
   const composerBounds = await page.locator('[data-chat-form]').boundingBox()
   assert.ok(composerBounds.y + composerBounds.height <= 780, 'the mobile composer fits in the viewport')
@@ -345,6 +433,9 @@ try {
   assert.equal(await guide.evaluate(el => el.matches(':modal')), true)
   assert.equal((await guide.boundingBox()).width, 390)
   assert.equal((await guide.boundingBox()).height, 780)
+  await checkGuideTypography()
+  await page.setViewportSize({ width: 320, height: 780 })
+  await checkGuideTypography()
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.waitForFunction(() => document.querySelector('#filabrain-docs').matches('[open]:not(:modal)'))
   await guide.getByRole('button', { name: 'Close' }).click()
@@ -355,8 +446,8 @@ try {
   await page.getByRole('button', { name: 'New chat' }).click()
   assert.match(await chatModel.innerText(), /fixture:default/)
 
-  await page.getByRole('button', { name: 'Research new filament' }).click()
-  await page.getByLabel('Manufacturer', { exact: true }).selectOption('7')
+  await page.getByRole('button', { name: 'New filament', exact: true }).click()
+  await page.getByLabel('Manufacturer', { exact: true }).fill('Fixture Brand')
   await page.getByLabel('Product name', { exact: true }).fill('Fixture PLA')
   await page.locator('[data-view="chat"]:not([hidden]) #product-research').waitFor()
   const firstSearchPicker = page.locator('[data-chat-form] [data-model-trigger]')
@@ -434,7 +525,8 @@ try {
   await page.getByText('No saved conversations yet.').waitFor()
   account = 7
 
-  await page.getByRole('button', { name: 'Research library' }).click()
+  await page.getByRole('button', { name: 'Research library', exact: true }).click()
+  await page.locator('#library-hint').filter({ hasText: /up to 50 filaments.*Runs tab opens/ }).waitFor()
   const fallbackFilament = page.getByRole('checkbox', { name: /Fixture PLA/ })
   const clearSelection = page.getByRole('button', { name: 'Clear selection' })
   await fallbackFilament.check()
@@ -452,15 +544,32 @@ try {
   await fallbackFilament.check()
   await page.getByRole('button', { name: 'Start research' }).click()
   await page.getByText('Confirmed density').waitFor()
+  const runsTab = headerNav.getByRole('button', { name: 'Research runs', exact: true })
+  assert.equal(await runsTab.getAttribute('aria-current'), 'page')
   assert.equal(await page.getByRole('link', { name: /Back to Filaments/i }).count(), 0)
-  await page.locator('.fm-card.batch-toolbar').waitFor()
+  await page.locator('.batch-toolbar').waitFor()
+  assert.equal(await page.getByRole('heading', { name: 'Research runs', exact: true }).count(), 0)
+  const batchReview = page.locator('[data-batch-review]')
+  assert.equal(await batchReview.locator('.batch-review-fields').getByText('Density (g/cm³)', { exact: true }).count(), 1)
+  await batchReview.getByText('Sources (1)', { exact: true }).click()
+  assert.equal(await batchReview.getByRole('link', { name: batchSource.title }).count(), 1)
+  assert.equal(await batchReview.locator('blockquote').count(), 0)
+  assert.equal(await batchReview.getByText(/Possible match.*Other PLA/).isVisible(), false)
+  await batchReview.getByText('Search details (1)', { exact: true }).click()
+  assert.equal(await batchReview.getByText(/Possible match.*Other PLA/).count(), 1)
+  assert.equal(await batchReview.getByText(/Possible match.*Other PLA/).isVisible(), true)
   await page.getByRole('checkbox', { name: /Density/ }).check()
   await page.getByRole('button', { name: /Approve/ }).click()
   await page.getByRole('button', { name: 'Apply approved changes' }).click()
   await page.getByRole('dialog').getByRole('button', { name: /Apply/ }).click()
   await page.getByRole('heading', { name: 'Apply report' }).waitFor()
-  await page.getByRole('link', { name: 'All batches' }).click()
-  await page.getByRole('region', { name: 'Research batches' }).getByText('No research batches yet.').waitFor()
+  await page.getByRole('link', { name: 'All runs' }).click()
+  const batchOverview = page.getByRole('region', { name: 'Research runs' })
+  await batchOverview.getByRole('link', { name: 'Fill missing specs' }).waitFor()
+  assert.ok(await batchOverview.getByText(/Select filaments in Library and click Start research/).isVisible())
+  assert.ok(await batchOverview.getByText(/Apply report shows which changes were saved/).isVisible())
+  await page.goto(url)
+  await runsTab.waitFor()
 
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   const settingsTitle = page.getByRole('heading', { name: 'Model settings', exact: true })
@@ -475,7 +584,7 @@ try {
   assert.equal(formWithGuide.x, formBefore.x, 'the guide preserves the settings form position')
   assert.equal(formWithGuide.width, formBefore.width, 'the guide preserves the settings form width')
   await guide.getByText('External MCP', { exact: true }).waitFor()
-  await page.getByRole('button', { name: 'Research library' }).click()
+  await page.getByRole('button', { name: 'Research library', exact: true }).click()
   await guide.getByRole('heading', { name: 'Research library' }).waitFor()
   await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   const guideBounds = await guide.boundingBox()
@@ -490,10 +599,23 @@ try {
   assert.equal(await headerGuide.evaluate(button => button.closest('nav') === null), true)
   for (const width of [1440, 1024, 390]) {
     await page.setViewportSize({ width, height: 780 })
-    const guideButtonBounds = await headerGuide.boundingBox()
-    const firstTabBounds = await page.getByRole('button', { name: 'Chat', exact: true }).boundingBox()
-    assert.equal(guideButtonBounds.height, firstTabBounds.height)
-    assert.ok(Math.abs(guideButtonBounds.y - firstTabBounds.y) <= 1, `Guide aligns with the tabs at ${width}px`)
+    const [guideButtonBounds, settingsButtonBounds] = await pluginHeader.locator('.header-utilities button').evaluateAll(
+      buttons => buttons.map(button => button.getBoundingClientRect().toJSON()),
+    )
+    assert.equal(guideButtonBounds.height, settingsButtonBounds.height)
+    assert.ok(Math.abs(guideButtonBounds.y - settingsButtonBounds.y) <= 1)
+    for (const button of [headerGuide, page.locator('#plugin-header [data-tab="settings"]')]) {
+      const offset = await button.evaluate(el => {
+        const bounds = el.getBoundingClientRect()
+        const icon = el.querySelector('svg').getBoundingClientRect()
+        return Math.abs((icon.top + icon.bottom - bounds.top - bounds.bottom) / 2)
+      })
+      assert.ok(offset <= 1, 'header utility icon is vertically centered')
+    }
+    const labels = await headerNav.getByRole('button').evaluateAll(buttons => buttons.map(button => button.innerText.trim()))
+    assert.deepEqual(labels, width <= 800
+      ? ['Chat', 'New', 'Library', 'Runs']
+      : ['Chat', 'New filament', 'Research library', 'Research runs'])
   }
   await page.setViewportSize({ width: 1440, height: 780 })
   const guideClose = guide.getByRole('button', { name: 'Close' })
@@ -529,7 +651,7 @@ try {
   await searchField.fill('invalid-search-url')
   await searchPassed.waitFor({ state: 'hidden' })
   await modelUrl.fill('http://ollama:11434')
-  if (!await modelId.isVisible()) await page.locator('#filabrain-settings summary').click()
+  if (!await modelId.isVisible()) await page.locator('#filabrain-settings').getByText('Enter a model ID manually', { exact: true }).click()
   await modelId.fill('fixture:default')
   const modelKey = page.locator('#filabrain-settings input[name=api_key]')
   await modelKey.fill('fixture-key')
@@ -562,6 +684,55 @@ try {
   assert.equal(await searchField.inputValue(), searchUrl)
   assert.equal(await downloadLimit.inputValue(), '12')
   assert.equal(await supplier.isChecked(), true)
+  const endpointPicker = page.getByRole('combobox', { name: 'Model endpoint' })
+  const visibility = page.getByRole('region', { name: 'Model settings' }).getByText('Models shown in chat', { exact: true })
+  const desktopSize = page.viewportSize()
+  await page.setViewportSize({ width: 320, height: 760 })
+  await page.getByRole('button', { name: 'Add endpoint' }).click()
+  await page.getByRole('textbox', { name: 'Endpoint name' }).fill('Remote models')
+  await modelUrl.fill('https://offline.test/v1')
+  await loadModels.click()
+  await page.getByText('Could not load models from this server.').waitFor()
+  await modelUrl.fill('https://remote.test/v1')
+  await loadModels.click()
+  await page.getByLabel('Available models').selectOption('fixture:alternate')
+  await visibility.click()
+  await page.getByRole('checkbox', { name: 'fixture:hidden', exact: true }).uncheck()
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320)
+  await page.setViewportSize(desktopSize)
+  await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByText('Settings saved.').waitFor()
+  await page.reload()
+  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await endpointPicker.selectOption({ label: 'Remote models' })
+  await visibility.click()
+  assert.equal(await page.getByRole('checkbox', { name: 'fixture:hidden', exact: true }).isChecked(), false)
+  await page.getByRole('button', { name: 'Chat', exact: true }).click()
+  await chatModel.click()
+  const remoteGroup = chatMenu.getByRole('group', { name: 'Remote models' })
+  await remoteGroup.waitFor()
+  assert.equal(await remoteGroup.getByRole('menuitemradio', { name: 'fixture:hidden' }).count(), 0)
+  await remoteGroup.getByRole('menuitemradio', { name: 'fixture:alternate' }).click()
+  assert.equal((await chatModel.innerText()).trim(), 'fixture:alternate')
+  assert.match(await chatModel.getAttribute('aria-label'), /Remote models/)
+  await page.evaluate(() => {
+    const key = 'filabrain:chat:7'
+    const history = JSON.parse(localStorage.getItem(key) || '[]')
+    history.unshift({ id: 'legacy-chat', title: 'Conversation before model endpoints', messages: [
+      { role: 'user', content: 'A saved question' }, { role: 'assistant', content: 'A saved answer' },
+    ] })
+    localStorage.setItem(key, JSON.stringify(history))
+  })
+  const legacyChat = await context.newPage()
+  await legacyChat.goto(url)
+  await legacyChat.locator('[data-chat-history] summary').click()
+  await legacyChat.getByRole('button', { name: 'Conversation before model endpoints' }).click()
+  await legacyChat.getByRole('textbox', { name: 'Your question' }).fill('A follow-up')
+  await legacyChat.getByRole('button', { name: 'Send message' }).click()
+  await legacyChat.locator('[data-chat-status]').getByText('Choose a model').waitFor()
+  await legacyChat.close()
+  assert.equal(chatRequests, 2, 'legacy history cannot send to the new default before a model is chosen')
+  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
   await supplier.uncheck()
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('Settings saved.').waitFor()
@@ -603,7 +774,7 @@ try {
   await researchMenu.getByRole('menuitemradio', { name: 'fixture:default Default' }).press('Escape')
   await researchMenu.waitFor({ state: 'hidden' })
   await researchModel.click()
-  await researchMenu.getByRole('menuitemradio', { name: 'fixture:alternate' }).click()
+  await researchMenu.getByRole('group', { name: 'Remote models' }).getByRole('menuitemradio', { name: 'fixture:alternate' }).click()
   await researchMenu.waitFor({ state: 'hidden' })
   assert.equal(await frame.getByText('Advanced options', { exact: true }).count(), 0)
   assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).isVisible(), false)
@@ -666,6 +837,8 @@ try {
   await frame.getByRole('button', { name: 'Find specifications' }).click()
   const researchPage = frame.getByRole('button', { name: 'Research this page' })
   await researchPage.waitFor()
+  await frame.getByRole('button', { name: 'Send follow-up' }).waitFor()
+  await frame.locator('[data-chat-form] [name="message"]:not([readonly])').waitFor()
   assert.equal(await researchPage.locator('svg[aria-hidden=true]').count(), 1)
   recordUnavailable = true
   const requestsBeforeFailedClick = proposalRequests
@@ -814,7 +987,7 @@ try {
   await page.getByRole('link', { name: 'Open saved filament' }).waitFor()
   await page.locator('#research-options > summary').click()
   await page.getByLabel('Product name', { exact: true }).fill('Fixture PETG')
-  await page.getByLabel('Manufacturer', { exact: true }).selectOption('7')
+  await page.getByLabel('Manufacturer', { exact: true }).fill('Fixture Brand')
   if (!await page.getByLabel('Material', { exact: true }).isVisible()) {
     await page.locator('#research-advanced-fields > summary').click()
   }
@@ -863,6 +1036,56 @@ try {
     )
     assert.equal(await tab.getByRole('button', { name: 'Save new filament' }).count(), 0)
   }
+  await page.setViewportSize({ width: 320, height: 650 })
+  for (const [language, labels] of [
+    ['de', ['Chat', 'Neu', 'Bibliothek', 'Läufe']],
+    ['fr', ['Chat', 'Nouveau', 'Bibliothèque', 'Suivi']],
+  ]) {
+    await page.evaluate(value => localStorage.setItem('lang', value), language)
+    await page.goto(url)
+    await headerNav.getByRole('button').last().waitFor()
+    const tabs = await headerNav.getByRole('button').evaluateAll(buttons => buttons.map(button => [
+      button.innerText.trim(), button.getBoundingClientRect().top, button.getBoundingClientRect().right,
+    ]))
+    assert.deepEqual(tabs.map(([label]) => label), labels)
+    for (const label of labels) {
+      assert.equal(await headerNav.getByRole('button', { name: label, exact: true }).count(), 1,
+        'mobile tab accessible name matches its visible label')
+    }
+    assert.ok(tabs.every(([, top, right]) => top === tabs[0][1] && right < 320), language + ' mobile nav fits')
+  }
+  chatModelId = ''
+  editorMode = 'edit'
+  await page.setViewportSize({ width: 1280, height: 780 })
+  await page.evaluate(() => {
+    localStorage.setItem('lang', 'en')
+    localStorage.removeItem('filabrain:chat:7:editor:10')
+  })
+  await page.goto('https://fila.test/editor-fixture')
+  await frame.getByRole('button', { name: 'Find specifications' }).click()
+  await frame.getByRole('checkbox', { name: /Density/ }).waitFor()
+  const lookupsBeforeModelFreeReopen = proposalRequests
+  await page.reload()
+  await frame.locator('[data-chat-history] summary').click()
+  await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
+  await frame.getByRole('checkbox', { name: /Density/ }).waitFor()
+  assert.equal(proposalRequests, lookupsBeforeModelFreeReopen)
+  const guidance = 'Check the supplier specifications again'
+  const followUpResponse = page.waitForResponse(response => response.request().method() === 'POST' &&
+    response.url().endsWith('/proposals') && response.request().postDataJSON().guidance === guidance)
+  await followUp.fill(guidance)
+  await frame.getByRole('button', { name: 'Send follow-up' }).click()
+  const modelFreeResult = await followUpResponse
+  assert.ok(modelFreeResult.ok())
+  await modelFreeResult.finished()
+  const followUpPayload = modelFreeResult.request().postDataJSON()
+  assert.equal(followUpPayload.model_id, undefined)
+  assert.equal(followUpPayload.endpoint_id, undefined)
+
+  canUseFilaments = false
+  await page.goto(url)
+  await page.getByRole('region', { name: 'Model settings' }).waitFor()
+  assert.equal(await page.getByRole('navigation', { name: 'FilaBrain' }).count(), 0)
   console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
 } finally {
   await browser.close()
