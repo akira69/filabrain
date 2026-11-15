@@ -2,7 +2,7 @@ from datetime import datetime
 from weakref import WeakSet
 
 from app.api.deps import DBSession
-from app.models import Filament, User, UserSession
+from app.models import Filament, User
 from app.models.base import TZDateTime
 from sqlalchemy import JSON, Boolean, ForeignKey, String, text, true
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -17,6 +17,7 @@ class FilamentResearchSettings(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     config: Mapped[dict | None] = mapped_column(JSON)
+    # FilaBrain 0.1.18 expects this column when rolling back a fresh install.
     mcp_enabled: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
 
@@ -28,20 +29,6 @@ class FilamentResearchSave(Base):
     filament_id: Mapped[int | None] = mapped_column(
         ForeignKey(Filament.__table__.c.id, ondelete="SET NULL"), index=True
     )
-
-
-class FilamentResearchPairing(Base):
-    __tablename__ = "filabrain_pairings"
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    session_id: Mapped[int] = mapped_column(
-        ForeignKey(UserSession.__table__.c.id, ondelete="CASCADE"), index=True
-    )
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
-    expires_at: Mapped[datetime] = mapped_column(TZDateTime(), index=True)
-    target: Mapped[dict] = mapped_column(JSON)
-    candidate: Mapped[dict | None] = mapped_column(JSON)
-    proposal: Mapped[dict | None] = mapped_column(JSON)
 
 
 class FilamentResearchBatch(Base):

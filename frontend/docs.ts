@@ -5,7 +5,7 @@ export function mountDocs(editor: boolean) {
   // Keep room for the settings form (52rem), guide (19rem), and page gutters (3.5rem).
   const compactSettings = matchMedia('(width < 74.5rem)')
   const topics = panel.querySelectorAll<HTMLElement>('[data-guide-topic]')
-  const settings = panel.querySelectorAll<HTMLElement>('[data-guide-settings]')
+  const settings = panel.querySelector<HTMLElement>('[data-guide-settings]')!
   let opener: HTMLButtonElement | undefined
 
   function needsModal() {
@@ -49,8 +49,7 @@ export function mountDocs(editor: boolean) {
 
   return (topic: string) => {
     for (const section of topics) section.hidden = section.dataset.guideTopic !== topic
-    for (const section of settings) section.hidden = topic !== 'settings' &&
-      !(topic === 'chat' && section === settings[0])
+    settings.hidden = topic !== 'settings' && topic !== 'chat'
     panel.dataset.guideTopic = topic
     updateLayout()
     panel.scrollTop = 0
