@@ -154,7 +154,7 @@ try {
     if (path.endsWith('/proposals')) {
       proposalRequests++
       const target = req.postDataJSON()
-      if (target.filament_id === 10 && target.action === 'fill') {
+      if (chatModelId && target.filament_id === 10 && target.action === 'fill') {
         assert.equal(target.model_id, 'fixture:alternate')
         assert.equal(target.endpoint_id, endpoints.find(endpoint => endpoint.name === 'Remote models')?.id || defaultEndpoint)
       }
@@ -163,7 +163,7 @@ try {
         status: 502, json: { detail: 'Source unavailable' },
       })
       if (target.guidance && target.mode === 'create') assert.equal(target.guidance, 'Look for a datasheet')
-      if (target.guidance && target.mode === 'edit') {
+      if (chatModelId && target.guidance && target.mode === 'edit') {
         assert.equal(target.action, 'standardize')
         assert.equal(target.filament_id, 10)
         if (target.guidance === 'Check an unavailable source') return route.fulfill({
@@ -1054,8 +1054,35 @@ try {
     }
     assert.ok(tabs.every(([, top, right]) => top === tabs[0][1] && right < 320), language + ' mobile nav fits')
   }
+  chatModelId = ''
+  editorMode = 'edit'
+  await page.setViewportSize({ width: 1280, height: 780 })
+  await page.evaluate(() => {
+    localStorage.setItem('lang', 'en')
+    localStorage.removeItem('filabrain:chat:7:editor:10')
+  })
+  await page.goto('https://fila.test/editor-fixture')
+  await frame.getByRole('button', { name: 'Find specifications' }).click()
+  await frame.getByRole('checkbox', { name: /Density/ }).waitFor()
+  const lookupsBeforeModelFreeReopen = proposalRequests
+  await page.reload()
+  await frame.locator('[data-chat-history] summary').click()
+  await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
+  await frame.getByRole('checkbox', { name: /Density/ }).waitFor()
+  assert.equal(proposalRequests, lookupsBeforeModelFreeReopen)
+  const guidance = 'Check the supplier specifications again'
+  const followUpResponse = page.waitForResponse(response => response.request().method() === 'POST' &&
+    response.url().endsWith('/proposals') && response.request().postDataJSON().guidance === guidance)
+  await followUp.fill(guidance)
+  await frame.getByRole('button', { name: 'Send follow-up' }).click()
+  const modelFreeResult = await followUpResponse
+  assert.ok(modelFreeResult.ok())
+  await modelFreeResult.finished()
+  const followUpPayload = modelFreeResult.request().postDataJSON()
+  assert.equal(followUpPayload.model_id, undefined)
+  assert.equal(followUpPayload.endpoint_id, undefined)
+
   canUseFilaments = false
-  await page.evaluate(() => localStorage.setItem('lang', 'en'))
   await page.goto(url)
   await page.getByRole('region', { name: 'Model settings' }).waitFor()
   assert.equal(await page.getByRole('navigation', { name: 'FilaBrain' }).count(), 0)

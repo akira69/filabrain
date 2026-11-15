@@ -27,6 +27,8 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
   let needsSelection = false
   let groups: ModelGroup[] | undefined
   let defaultEndpoint = initialEndpoint ?? null
+  const hasModels = () => !!activeDefault || !!options.querySelector('button')
+  const shouldChooseModel = () => needsSelection && hasModels()
 
   menu.id = `${form.id || 'filabrain-chat'}-model-menu`
   trigger.setAttribute('popovertarget', menu.id)
@@ -34,7 +36,7 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
 
   function updateSelection() {
     const model = selected?.model_id || (!needsSelection && activeDefault)
-      || t(needsSelection ? 'filaBrain.chooseModel' : 'filaBrain.researchNoModel')
+      || t(shouldChooseModel() ? 'filaBrain.chooseModel' : 'filaBrain.researchNoModel')
     const endpoint = groups?.find(group => group.id === (selected?.endpoint_id ?? defaultEndpoint))
     const label = endpoint ? `${model} · ${endpoint.name}` : model
     name.textContent = model
@@ -178,8 +180,8 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
   void load(defaultModel, initialEndpoint)
   return {
     get selected() { return selected ?? (!needsSelection && activeDefault ? { model_id: activeDefault, endpoint_id: defaultEndpoint ?? undefined } : undefined) },
-    get needsSelection() { return needsSelection },
-    get hasOptions() { return !!activeDefault || !!options.querySelector('button') },
+    get needsSelection() { return shouldChooseModel() },
+    get hasOptions() { return hasModels() },
     reset,
     preserve(selection?: ModelSelection) { selected ??= selection },
     setDefault: load,
