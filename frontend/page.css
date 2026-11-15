@@ -43,22 +43,29 @@ main { max-width: 76rem; margin: auto; padding: clamp(.65rem, 2vw, 1.25rem); }
 #plugin-header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: "logo tabs guide";
-  align-items: start;
+  grid-template-areas: "logo tabs utilities";
+  align-items: center;
   gap: .5rem 1rem;
   margin-bottom: 1rem;
-}
-@media (max-width: 1120px) {
-  #plugin-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "logo logo" "tabs guide";
-  }
 }
 h1, h2, h3 { line-height: 1.2; }
 #plugin-header h1 { grid-area: logo; margin: 0; font: 700 clamp(1.5rem, 5vw, 2rem) var(--font-serif); }
 #plugin-header nav { grid-area: tabs; }
-#plugin-header .docs-trigger { grid-area: guide; }
-#plugin-header :is(nav button, .docs-trigger) { min-height: 2.5rem; font-size: .875rem; }
+.header-utilities { grid-area: utilities; display: flex; justify-content: flex-end; gap: .35rem; }
+#plugin-header button { min-height: 44px; font-size: .875rem; }
+.header-utilities button { display: inline-flex; align-items: center; justify-content: center; width: 44px; padding: 0; }
+.header-utilities .action-icon { margin: 0; }
+.header-utilities .docs-trigger span, .tab-label-short { display: none; }
+@media (max-width: 1120px) {
+  #plugin-header {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  #plugin-header h1 { max-width: 100%; gap: min(.7rem, 12px); overflow-wrap: anywhere; }
+  #plugin-header .filabrain-mark { width: min(2.5rem, 44px); height: auto; }
+  #plugin-header nav { flex-basis: 100%; }
+  .header-utilities { margin-inline-start: auto; }
+}
 .filabrain-heading { display: flex; align-items: center; gap: .7rem; }
 .filabrain-mark { width: 2.5rem; height: 2.5rem; flex: none; }
 .filabrain-heading h2 { margin: 0; }
@@ -72,6 +79,15 @@ h1, h2, h3 { line-height: 1.2; }
   display: inline-flex; align-items: center; background: var(--bg-elevated);
   padding-inline: .55rem; font-size: .875rem;
 }
+@media (max-width: 800px) {
+  #plugin-header { margin-bottom: .65rem; }
+  #plugin-header nav { gap: .1875rem; }
+  #plugin-header nav button { flex: 1 0 auto; justify-content: center; min-width: 44px; padding-inline: .1875rem; font-size: .8125rem; }
+  #plugin-header nav .action-icon { width: 13px; height: 13px; margin-inline-end: .125rem; }
+  .tab-label-wide { display: none; }
+  .tab-label-short { display: inline; }
+}
+
 .fm-section-header {
   display: flex; align-items: center; justify-content: space-between; gap: .65rem;
   padding: .65rem 1rem; background: var(--bg-soft); border-bottom: 1px solid var(--border);
@@ -81,7 +97,7 @@ h1, h2, h3 { line-height: 1.2; }
 .fm-section-body { display: grid; gap: .75rem; min-width: 0; padding: 1rem; }
 .fm-section-body > :is(p, #library-research) { margin: 0; }
 .action-icon { flex: none; margin-inline-end: .35rem; }
-#plugin-header nav button[aria-current] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
+#plugin-header button[aria-current] { color: var(--accent-text); background: var(--accent); border-color: var(--accent); }
 a { color: var(--accent); }
 button, input, textarea, select { font: inherit; color: inherit; }
 button, .fm-btn { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .45rem .75rem; background: var(--bg-elevated); color: var(--text); cursor: pointer; }
@@ -119,10 +135,46 @@ dialog::backdrop { background: #0008; }
 dialog dl { display: grid; grid-template-columns: 1fr 1fr; gap: .35rem; }
 dialog dd { margin: 0; overflow-wrap: anywhere; }
 .fm-modal-actions { display: flex; justify-content: end; gap: .5rem; padding-block-start: .75rem; }
-#library-picker { display: block; width: 100%; height: clamp(16rem, 50dvh, 36rem); border: 0; }
-#library-research { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; margin-block-start: .75rem; }
+.research-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+main:has(> [data-view="library"]:not([hidden]) #library-picker:not([hidden])) {
+  min-height: 100dvh; padding-bottom: .5rem;
+}
+[data-view="library"]:has(#library-picker:not([hidden])) .fm-section {
+  min-height: 0; display: flex; flex-direction: column;
+}
+@media (min-height: 460px) {
+  main:has(> [data-view="library"]:not([hidden]) #library-picker:not([hidden])):not(:has(> .docs-panel[open]:not(:modal))) {
+    display: flex; flex-direction: column; height: 100dvh;
+  }
+  [data-view="library"]:has(#library-picker:not([hidden])) { flex: 1; display: flex; min-height: min-content; }
+  [data-view="library"]:has(#library-picker:not([hidden])) .fm-section { flex: 1; min-width: 0; }
+  [data-view="library"]:has(#library-picker:not([hidden])) .fm-section-body {
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
+  }
+}
+[data-view="library"] .fm-section-body { padding: .5rem .65rem; gap: .4rem; }
+.library-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .35rem .75rem; }
+.library-toolbar p { margin: 0; }
+#library-picker { display: block; width: 100%; flex: 1; height: 16rem; min-height: 16rem; border: 0; }
+#library-picker[data-color-overlay] {
+  position: fixed; inset: 0; width: 100%; height: 100dvh; min-height: 0; z-index: 3; background: var(--bg);
+}
+#library-research, .library-mode {
+  display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .65rem; margin: 0; font-size: .8125rem;
+}
+@media (max-width: 40rem) {
+  #library-research { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
+  .library-mode { grid-column: 1 / -1; }
+}
+.library-mode { padding: 0; border: 0; min-width: 0; }
+.library-mode label { display: flex; align-items: center; gap: .25rem; min-height: 2.25rem; }
+.library-mode input { margin: 0; width: auto; height: auto; accent-color: var(--accent); }
+#library-research button { min-height: 2.25rem; padding: .3rem .6rem; }
 #library-selected { align-self: center; margin: 0; }
 #library-status { width: 100%; margin: 0; }
+@media (pointer: coarse) {
+  .library-mode label, #library-research button { min-height: 44px; }
+}
 #library-records, #research-results { margin-block: .8rem; }
 #library-records label, .proposal-row > label { display: flex; align-items: baseline; gap: .5rem; padding: .35rem 0; }
 .proposal-row { margin: .7rem 0; border-top: 1px solid var(--border); padding: .65rem 0; overflow-wrap: anywhere; }

@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, replace
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import quote, unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import SplitResult, quote, unquote, urldefrag, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -94,7 +94,14 @@ def supplier_page_url(url: str) -> str:
         part for part in parsed.query.split("&")
         if not part.lower().startswith(("utm_", "_pos=", "_sid=", "_ss="))
     )
-    return urlunsplit(parsed._replace(query=query, fragment=""))
+    return urlunsplit(parsed._replace(query=query))
+
+
+def _variant_url_key(url: str) -> SplitResult:
+    parsed = urlsplit(supplier_page_url(url))
+    # Keep repeated values in order and leave the actual request URL untouched.
+    query = "&".join(sorted(parsed.query.split("&"), key=lambda part: part.partition("=")[0]))
+    return parsed._replace(query=query)
 
 
 @dataclass(frozen=True)
@@ -111,6 +118,7 @@ class Evidence:
     datasheets: tuple[str, ...] = ()
     origin: str = ""
     archived_at: str = ""
+    selected_variant_unresolved: bool = False
 
 
 class _ProductPage(HTMLParser):
@@ -251,7 +259,7 @@ class _ProductPage(HTMLParser):
         super().close()
         self._finish_section()
 
-    def _add_products(self, value):
+    def _add_products(self, value, group_id=None):
         rows = value if isinstance(value, list) else [value]
         for row in rows:
             if not isinstance(row, dict):
@@ -263,8 +271,12 @@ class _ProductPage(HTMLParser):
                 image = row.get("image")
                 if isinstance(image, list):
                     image = next((item for item in image if isinstance(item, str)), None)
+                parent = row.get("isVariantOf")
                 product = {
                     "manufacturer": brand,
+                    "product_group_id": row.get("inProductGroupWithID") or (
+                        parent.get("productGroupID") if isinstance(parent, dict) else None
+                    ) or group_id,
                     "designation": row.get("name"),
                     "sku": row.get("sku"),
                     "color": row.get("color"),
@@ -280,10 +292,44 @@ class _ProductPage(HTMLParser):
                 )
                 if isinstance(image, str) and len(image) <= 500:
                     self.products[-1]["image_url"] = image
+                offers = row.get("offers")
+                offers = offers if isinstance(offers, list) else [offers]
+                links = [row.get("url"), *(offer.get("url") for offer in offers if isinstance(offer, dict))]
+                self.products[-1]["variant_urls"] = tuple(
+                    link.strip() for link in links if isinstance(link, str) and len(link) <= 500 and link.strip()
+                )
             if isinstance(row.get("@graph"), list):
                 self._add_products(row["@graph"])
             if isinstance(row.get("hasVariant"), list):
-                self._add_products(row["hasVariant"])
+                product_group = row.get("productGroupID") if row.get("@type") == "ProductGroup" else None
+                self._add_products(row["hasVariant"], product_group)
+
+    def product_for_url(self, url: str) -> tuple[dict | None, bool]:
+        products = self.products
+        requested = _variant_url_key(url)
+        has_selector = bool(requested.query or requested.fragment)
+        requires_match = len(products) > 1
+        if requires_match or has_selector:
+            matched = []
+            for product in products:
+                for variant_url in product["variant_urls"]:
+                    try:
+                        link = public_link(urljoin(url, variant_url))
+                    except ValueError:
+                        continue
+                    if not link:
+                        continue
+                    candidate = _variant_url_key(link)
+                    if candidate == requested:
+                        matched.append(product)
+                        break
+                    if candidate.query or candidate.fragment:
+                        requires_match = True
+            if requires_match:
+                products = matched
+        if len(products) == 1 and products[0].get("designation"):
+            return {key: value for key, value in products[0].items() if key != "variant_urls"}, False
+        return None, requires_match and has_selector
 
     def handle_data(self, data):
         if self._structured is not None:
@@ -403,7 +449,7 @@ def _get_pinned(
 
 
 def _fetch_supplier(
-    url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD_BYTES, archive: bool = False,
+    url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD_BYTES, archived_product_url: str | None = None,
 ) -> Evidence:
     deadline = time.monotonic() + 7
     for _ in range(4):
@@ -415,9 +461,11 @@ def _fetch_supplier(
             raise TimeoutError("Supplier page timed out")
         status, location, content_type, body = _get_pinned(parsed, address, deadline, max_bytes=max_bytes)
         if status in (301, 302, 303, 307, 308) and location:
-            if archive:
+            if archived_product_url is not None:
                 raise ValueError("Archive snapshot redirected")
             url = urljoin(url, location)
+            if parsed.fragment and "#" not in location:
+                url = f"{urldefrag(url).url}#{parsed.fragment}"
             continue
         if status != 200:
             detail = {403: "access denied", 404: "page not found", 429: "rate limited"}.get(status)
@@ -445,8 +493,7 @@ def _fetch_supplier(
         title = " ".join(" ".join(parser.title).split())
         if title.casefold().rstrip(".") in {"just a moment", "access denied", "robot check", "attention required! | cloudflare"}:
             raise ValueError("Automated access blocked")
-        products = [p for p in parser.products if p.get("designation")]
-        product = products[0] if len(products) == 1 else None
+        product, selected_variant_unresolved = parser.product_for_url(archived_product_url or url)
         scopes = list(dict.fromkeys([*parser.main_scopes, *parser.scopes])) if parser.main_scopes else parser.scopes
         visible = " ".join(" ".join(scopes if parser.main_scopes else parser.words).split())
         # Put structured identity first so evidence still contains it on long pages.
@@ -461,6 +508,7 @@ def _fetch_supplier(
                 urljoin(url, link) for link in (*parser.datasheets, *parser.heading_datasheets)
             ))[:4],
             origin="openfilamentdatabase.org" if re.search(r"open filament database", visible, re.IGNORECASE) else "",
+            selected_variant_unresolved=selected_variant_unresolved,
         )
     raise ValueError("Too many supplier redirects")
 
@@ -475,7 +523,8 @@ async def fetch_supplier(url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD
 
 
 async def fetch_archived_supplier(url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD_BYTES) -> Evidence | None:
-    url = supplier_page_url(url)
+    product_url = supplier_page_url(url)
+    url, fragment = urldefrag(product_url)
     async with httpx.AsyncClient(timeout=4, trust_env=False) as client:
         response = await client.get("https://archive.org/wayback/available", params={"url": url})
         response.raise_for_status()
@@ -489,8 +538,12 @@ async def fetch_archived_supplier(url: str, *, max_bytes: int = DEFAULT_SUPPLIER
     path = f"web.archive.org/web/{timestamp}/{url}"
     if snapshot.get("url") not in (f"http://{path}", f"https://{path}"):
         return None
+    snapshot_url = f"https://{path}"
+    if fragment:
+        snapshot_url = f"{snapshot_url}#{fragment}"
     evidence = await asyncio.wait_for(
-        asyncio.to_thread(_fetch_supplier, f"https://{path}", max_bytes=max_bytes, archive=True), timeout=8,
+        asyncio.to_thread(_fetch_supplier, snapshot_url, max_bytes=max_bytes, archived_product_url=product_url),
+        timeout=8,
     )
     date = f"{timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}"
     return replace(evidence, archived_at=date, datasheets=())
