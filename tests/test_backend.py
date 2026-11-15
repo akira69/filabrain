@@ -1843,7 +1843,8 @@ async def test_catalog_matches_explicit_pla_plus_version_color_and_package(monke
     assert proposals.catalog_values(matches[0])["density_g_cm3"] == 1.21
 
 
-async def test_color_standard_preview_and_apply(installed, db_session, monkeypatch):
+@pytest.mark.parametrize("apply_identity", [False, True])
+async def test_color_standard_preview_and_apply(installed, db_session, monkeypatch, apply_identity):
     from app.models import Color, FilamentColor
     from filabrain import batch_api, color_standards
     from filabrain.db import FilamentResearchBatchItem
@@ -1859,7 +1860,8 @@ async def test_color_standard_preview_and_apply(installed, db_session, monkeypat
     db_session.add_all([maker, saved])
     await db_session.flush()
     filament = Filament(manufacturer_id=maker.id, designation='Fixture PETG', material_type='PETG',
-                        manufacturer_color_name='Enzo Red', diameter_mm=1.75, color_mode='single')
+                        manufacturer_color_name=None if apply_identity else 'Enzo Red',
+                        diameter_mm=1.75, color_mode='single')
     db_session.add(filament)
     await db_session.flush()
     assignment = FilamentColor(filament_id=filament.id, color_id=saved.id, position=1)
@@ -1872,8 +1874,36 @@ async def test_color_standard_preview_and_apply(installed, db_session, monkeypat
     item.status = 'ready'
     item.issues = [{'code': 'manufacturer_color_reference', 'name': 'RAL3020 Traffic red',
                     'url': 'https://fixture.example/products/red'}]
+    if apply_identity:
+        item.proposals = [{
+            'id': 'identity',
+            'fields': {
+                'manufacturer_color_name': {'old': None, 'value': 'Enzo Red'},
+                'manufacturer_sku': {'old': None, 'value': 'PETG-ENZO'},
+            },
+        }]
     await db_session.commit()
-    path = f"{BASE}/batches/{run['id']}/items/{item.id}/swatches"
+    batch_path = f"{BASE}/batches/{run['id']}"
+    path = f"{batch_path}/items/{item.id}/swatches"
+    if apply_identity:
+        selection = {
+            'item_id': item.id, 'revision': item.revision, 'decision_revision': item.decision_revision,
+            'approved_ids': ['identity'],
+        }
+        approved = await installed.post(f'{batch_path}/decisions', json={
+            'items': [selection | {'decision': 'approved'}],
+        })
+        assert approved.status_code == 200, approved.text
+        selection['decision_revision'] = approved.json()['items'][0]['decision_revision']
+        applied = await installed.post(f'{batch_path}/apply', json={'items': [selection]})
+        assert applied.status_code == 200, applied.text
+        assert applied.json()['results'][0]['status'] == 'applied'
+    else:
+        filament.manufacturer_sku = 'UNRELATED-VARIANT'
+        await db_session.commit()
+        assert (await installed.get(path)).status_code == 409
+        filament.manufacturer_sku = None
+        await db_session.commit()
     preview = await installed.get(path)
     assert preview.status_code == 200
     review = preview.json()

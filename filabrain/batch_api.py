@@ -143,6 +143,18 @@ async def load_items(db: DBSession, batch: Batch) -> list[Item]:
     ).order_by(Item.id).execution_options(populate_existing=True)))
 
 
+def reviewed_identity(item: Item) -> dict:
+    if item.status != "applied":
+        return item.identity
+    changes = {
+        field: change["value"]
+        for unit in item.proposals if unit["id"] in item.approved_ids
+        for field, change in unit["fields"].items()
+        if field in item.identity and field in item.changed_fields
+    }
+    return item.identity | changes
+
+
 def summary(batch: Batch, total: int) -> dict:
     return {
         "id": batch.id,
@@ -171,7 +183,7 @@ async def detail(db: DBSession, batch: Batch) -> dict:
             "revision": item.revision,
             "decision_revision": item.decision_revision,
             "identity": item.identity,
-            "color_references": list(references_from(item.issues, item.identity.get("manufacturer_color_name"))),
+            "color_references": list(references_from(item.issues, reviewed_identity(item).get("manufacturer_color_name"))),
             "proposals": item.proposals,
             "issues": item.issues,
             "approved_ids": item.approved_ids,
@@ -305,10 +317,9 @@ async def swatch_item(db: DBSession, batch_id: str, item_id: int, principal: Pri
     if filament is None:
         raise HTTPException(404, "Filament is unavailable")
     identity_fields = ("manufacturer_id", "designation", "material_type", "material_subgroup",
-                       "diameter_mm", "manufacturer_color_name", "finish_type", "color_mode")
-    if any(field in item.identity and item.identity[field] != getattr(filament, field) for field in identity_fields) or (
-        item.identity.get("manufacturer_sku") and item.identity["manufacturer_sku"] != filament.manufacturer_sku
-    ):
+                       "diameter_mm", "manufacturer_color_name", "finish_type", "color_mode", "manufacturer_sku")
+    identity = reviewed_identity(item)
+    if any(field in identity and identity[field] != getattr(filament, field) for field in identity_fields):
         raise HTTPException(409, "The filament changed after research. Start a new run to review its color.")
     return batch, item, filament
 
