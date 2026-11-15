@@ -34,6 +34,12 @@ npm run build
 python3 scripts/package_plugin.py
 ```
 
+## How filament lookup finds sources
+
+FilaBrain checks saved product links and searches using the product name, material, color, and any SKU. It also recognizes imported article numbers and can check a manufacturer's sitemap when it hasn't found a matching product page.
+
+A product page can supply color codes from its text or URL. A related listing can supply a color reference when the manufacturer identifies the same product group, material, and color, and any stated finish matches. Its dimensions, temperatures, and other variant specifications still need evidence for the filament being researched.
+
 ## Optional SearXNG search
 
 Attach the search container to the Docker network used by FilaMan and enter `http://searxng:8080` as the search URL in the plugin.

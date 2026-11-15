@@ -84,6 +84,7 @@ def filament_snapshot(filament: Filament) -> dict:
         "id": filament.id,
         "manufacturer_name": filament.manufacturer.name,
         "manufacturer_url": filament.manufacturer.url,
+        "imported_article_number": (filament.custom_fields or {}).get("article_number"),
         "filamentdb_spool_profile_id": getattr(filament, "filamentdb_spool_profile_id", None),
         **{field: getattr(filament, field) for field in fields},
     }
@@ -633,6 +634,38 @@ async def _paramount_candidates(identity: Identity, sku: str) -> list[str]:
     return [url for _, url in sorted(candidates, reverse=True)[:3]]
 
 
+def _imported_article_hint(snapshot: dict | None) -> str:
+    fields = snapshot or {}
+    number = fields.get("imported_article_number")
+    if isinstance(number, str) and re.fullmatch(r"(?=[\w.-]*\d)[a-z0-9][a-z0-9._-]{4,40}", number.strip(), re.I):
+        return number.strip()
+    misplaced_url = fields.get("shop_url") or ""
+    if re.fullmatch(r"(?=[\w.-]*[a-z])(?=[\w.-]*\d)[a-z0-9][\w.-]{5,40}", misplaced_url, re.I):
+        return misplaced_url
+    return ""
+
+
+async def _manufacturer_sitemap_candidates(site: str, domain: str, identity: Identity, article: str) -> list[str]:
+    name = set(_product_key(identity.designation))
+    if identity.color and not _swatch_code(identity.color):
+        name.update(_product_key(identity.color))
+    article_slug = "-".join(_product_key(article))
+    if len(name) < 2 and not article_slug:
+        return []
+
+    ranked = {}
+    for url in await supplier_sitemap_urls(site):
+        if not (link := public_link(url)) or not _on_manufacturer_site(link, domain):
+            continue
+        slug = unquote(urlsplit(link).path.rstrip("/").rsplit("/", 1)[-1])
+        words = _product_key(slug)
+        sku_match = bool(article_slug and f"-{article_slug}-" in f"-{'-'.join(words)}-")
+        name_match = len(name) >= 2 and name.issubset(words)
+        if sku_match or name_match:
+            ranked[supplier_page_url(link)] = (sku_match, name_match, -len(words))
+    return sorted(ranked, key=ranked.get, reverse=True)[:3]
+
+
 def _packaged_product(identity: Identity, page: Evidence, snapshot):
     product = page.product or {}
     title = product.get("designation") or re.split(r"\s*[|–]\s*", page.title, maxsplit=1)[0]
@@ -652,7 +685,7 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
     context = _variant_context(identity, snapshot)
     finish = _finish(identity.designation, context.get("finish_type"), identity.material)
     found_finish = _finish_markers(name)
-    search_hint = _norm((snapshot or {}).get("shop_url"))
+    search_hint = _norm(_imported_article_hint(snapshot))
     article_match = bool(part and (part in {_norm(identity.sku), search_hint} or _literal_in(part, identity.designation)))
     if (
         (name_key != _product_key(identity.designation) and not (article_match or paramount_alias))
@@ -691,6 +724,18 @@ def _paramount_color_family(page: Evidence) -> tuple[str, str] | None:
     if float(package["diameter"]) == 3:
         sku = sku.removesuffix(".3")
     return _norm(package["name"]), sku
+
+
+def _manufacturer_color_family(page: Evidence) -> tuple[str, ...] | None:
+    if not page.manufacturer_page or page.archived_at:
+        return None
+    product = page.product or {}
+    group = product.get("product_group_id")
+    material, color = (_norm(product.get(field)) for field in ("material", "color"))
+    if group and material and color:
+        finish = _norm(product.get("finish_type")) or " ".join(sorted(_finish_markers(product.get("designation") or "")))
+        return (_site_host(page.url), group, material, color, finish, _norm(product.get("manufacturer")))
+    return _paramount_color_family(page)
 
 
 def _paramount_url_identity(page: Evidence) -> Identity | None:
@@ -754,12 +799,17 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
         return []
     if sku and _norm(identity.sku) and _norm(sku) != _norm(identity.sku):
         return []
-    if identity.designation and title and _tokens(title) != _tokens(identity.designation) and not product_line:
+    exact_official_sku = page.manufacturer_page and bool(sku and _norm(sku) == _norm(identity.sku))
+    if (
+        identity.designation and title and _tokens(title) != _tokens(identity.designation)
+        and not (product_line or exact_official_sku)
+    ):
         return []
+    sku_and_saved_swatch = exact_official_sku and _swatch_code(identity.color)
     if any(
         known and found and _norm(known) != _norm(found)
         for known, found in (
-            (identity.color, product.get("color")),
+            (None if sku_and_saved_swatch else identity.color, product.get("color")),
             ("pla" if product_line else _material_family(identity.material),
              "pla" if product_line and _norm(product.get("material")) == "pla basic"
              else _material_family(product.get("material"))),
@@ -799,7 +849,7 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
         ):
             continue
         if identity.color and not (
-            _literal_in(identity.color, text) or universal
+            _literal_in(identity.color, text) or universal or (sku_and_saved_swatch and row_sku)
             or (product_line and row_sku and _literal_in(identity.designation, text)
                 and re.fullmatch(r"#?[a-fA-F0-9]{6}", identity.color))
         ):
@@ -1520,9 +1570,7 @@ async def research_products(
     first_pages = await check_pages(first_urls)
     if verified_paramount_url:
         first_pages[pasted_page.url] = pasted_page
-    imported_sku = (snapshot or {}).get("shop_url") or ""
-    if not re.fullmatch(r"(?=[\w.-]*[A-Z])(?=[\w.-]*\d)[A-Z0-9][\w.-]{5,40}", imported_sku, re.IGNORECASE):
-        imported_sku = ""
+    imported_sku = _imported_article_hint(snapshot)
     lookup_sku = identity.sku.strip() or sku_hint.strip() or imported_sku
     initial_query = search_terms(lookup_sku)
     early_web = not search_domain and bool(identity.manufacturer and initial_query)
@@ -1550,6 +1598,17 @@ async def research_products(
     elif early_web:
         web_urls = await search(initial_query)
         first_pages.update(await check_pages(web_urls))
+
+    if (
+        not product_url and manufacturer_site and manufacturer_domain and manufacturer_domain != "paramount-3d.com"
+        and SUPPLIER_TOO_LARGE not in fetch_errors.values() and not official_match()
+    ):
+        try:
+            async with network_time(8):
+                indexed = await _manufacturer_sitemap_candidates(manufacturer_site, manufacturer_domain, identity, lookup_sku)
+                first_pages.update(await check_pages(indexed))
+        except TimeoutError:
+            pass
 
     titles = _product_titles(identity)
     authoritative_docs: dict[str, Evidence] = {}
@@ -2119,9 +2178,9 @@ async def research_products(
             if not page.archived_at:
                 for code in references_in_product_url(page.url):
                     url_color_references.setdefault(code, page.url)
+            if family := _manufacturer_color_family(page):
+                verified_color_families.add(family)
             if product := _packaged_product(supplier_identity, page, snapshot):
-                if family := _paramount_color_family(page):
-                    verified_color_families.add(family)
                 title, part, diameter, weight = product
                 sku_quote = next((
                     line for line in page.scopes or () if part and _LABELLED_SKU.findall(line) == [part]
@@ -2151,7 +2210,7 @@ async def research_products(
     }
     checked_url_systems = {code.split()[0] for code in url_color_references}
     for page, _, scopes in official_scopes:
-        if any(not scope.shared for scope in scopes) or _paramount_color_family(page) not in verified_color_families:
+        if any(not scope.shared for scope in scopes) or _manufacturer_color_family(page) not in verified_color_families:
             continue
         for code in references_in_product_url(page.url):
             if code.split()[0] not in checked_url_systems:

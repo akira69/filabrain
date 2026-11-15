@@ -41,7 +41,13 @@ async def installed(auth_client, db_session, monkeypatch):
     monkeypatch.setattr(app.router, "lifespan_context", app.router.lifespan_context)
     monkeypatch.setattr(app.state, "plugin_mcp_tools", {}, raising=False)
     assert mount_plugin_router_on_app(app, plugin.plugin_key)
+    from filabrain import proposals
     from filabrain.db import Base as PluginBase
+
+    async def empty_sitemap(_url):
+        return ()
+
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", empty_sitemap)
 
     try:
         yield browser
@@ -1990,3 +1996,76 @@ async def test_pantone_preview_binds_chip_to_requested_code(monkeypatch):
     monkeypatch.setattr(colors, "read_asset", corrected)
     result = await colors.resolve_preview("Pantone 7546 C")
     assert result["hex_code"] == "#243746"
+
+
+@pytest.mark.parametrize("manufacturer_sku", [None, "OCEAN-175-X9"])
+async def test_general_lookup_finds_sku_and_related_color(installed, db_session, monkeypatch, manufacturer_sku):
+    from filabrain import proposals
+    from filabrain.sources import Evidence, _ProductPage
+
+    site = "https://filament-maker.example"
+    product_url = f"{site}/shop/ocean-175-x9"
+    related_url = f"{site}/shop/petg-ocean-blue-ral-5015-285mm"
+    different_color_url = f"{site}/shop/petg-ocean-blue-ral-3020-285mm"
+    reseller_url = "https://reseller.example/shop/ocean-175-x9"
+    fetched = []
+
+    def product_page(url, sku, color, diameter, designation, text):
+        parser = _ProductPage()
+        parser.feed(
+            '<script type="application/ld+json">' + json.dumps({
+                "@type": "Product", "name": designation, "sku": sku, "color": color, "material": "PETG",
+                "isVariantOf": {"@type": "ProductGroup", "productGroupID": "ocean-petg"},
+            }) + "</script>"
+        )
+        scope = f"{designation} {color} PETG {diameter} mm SKU: {sku} {text}"
+        return Evidence(url, designation, scope, parser.products[0], scopes=(scope,))
+
+    product_title = "PETG Ocean Blue 1.75 mm Refill" if manufacturer_sku else "PETG Ocean Blue"
+    pages = {
+        product_url: product_page(product_url, "OCEAN-175-X9", "Ocean Blue", 1.75, product_title, "density 1.27 g/cm3"),
+        related_url: product_page(related_url, "OCEAN-285-X9", "Ocean Blue", 2.85, "PETG Ocean Blue 2.85mm", "density 9 g/cm3"),
+        different_color_url: product_page(different_color_url, "RED-285-X9", "Red", 2.85, "PETG Red 2.85mm", "density 8 g/cm3"),
+    }
+
+    async def fetch(url, **_):
+        fetched.append(url)
+        if url not in pages:
+            raise ValueError("Not a product page")
+        return pages[url]
+
+    async def sitemap(origin):
+        assert origin.rstrip("/") == site
+        return different_color_url, reseller_url, related_url, product_url
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", sitemap)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Filament Maker", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation="PETG Ocean Blue", material_type="PETG", diameter_mm=1.75,
+        manufacturer_color_name="3172AD" if manufacturer_sku else "Ocean Blue",
+        manufacturer_sku=manufacturer_sku, custom_fields={"article_number": "OCEAN-175-X9"} if manufacturer_sku is None else None,
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    response = await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})
+    assert response.status_code == 200
+    data = response.json()
+    assert product_url in fetched and related_url in fetched and reseller_url not in fetched
+    suggestions = {entry["field"]: entry for entry in data["suggestions"]}
+    assert suggestions["shop_url"]["value"] == product_url
+    assert {issue["name"]: issue["url"] for issue in data["issues"]
+            if issue["code"] == "manufacturer_color_reference"} == {"RAL 5015": related_url}
+    assert all(source["url"] != related_url for entry in data["suggestions"] for source in entry["sources"])

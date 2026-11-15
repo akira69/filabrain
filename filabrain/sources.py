@@ -251,7 +251,7 @@ class _ProductPage(HTMLParser):
         super().close()
         self._finish_section()
 
-    def _add_products(self, value):
+    def _add_products(self, value, group_id=None):
         rows = value if isinstance(value, list) else [value]
         for row in rows:
             if not isinstance(row, dict):
@@ -263,8 +263,12 @@ class _ProductPage(HTMLParser):
                 image = row.get("image")
                 if isinstance(image, list):
                     image = next((item for item in image if isinstance(item, str)), None)
+                parent = row.get("isVariantOf")
                 product = {
                     "manufacturer": brand,
+                    "product_group_id": row.get("inProductGroupWithID") or (
+                        parent.get("productGroupID") if isinstance(parent, dict) else None
+                    ) or group_id,
                     "designation": row.get("name"),
                     "sku": row.get("sku"),
                     "color": row.get("color"),
@@ -283,7 +287,8 @@ class _ProductPage(HTMLParser):
             if isinstance(row.get("@graph"), list):
                 self._add_products(row["@graph"])
             if isinstance(row.get("hasVariant"), list):
-                self._add_products(row["hasVariant"])
+                product_group = row.get("productGroupID") if row.get("@type") == "ProductGroup" else None
+                self._add_products(row["hasVariant"], product_group)
 
     def handle_data(self, data):
         if self._structured is not None:
