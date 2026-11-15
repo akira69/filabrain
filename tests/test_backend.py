@@ -1998,8 +1998,9 @@ async def test_pantone_preview_binds_chip_to_requested_code(monkeypatch):
     assert result["hex_code"] == "#243746"
 
 
+@pytest.mark.parametrize("saved_link", [False, True])
 @pytest.mark.parametrize("manufacturer_sku", [None, "OCEAN-175-X9"])
-async def test_general_lookup_finds_sku_and_related_color(installed, db_session, monkeypatch, manufacturer_sku):
+async def test_general_lookup_finds_sku_and_related_color(installed, db_session, monkeypatch, manufacturer_sku, saved_link):
     from filabrain import proposals
     from filabrain.sources import Evidence, _ProductPage
 
@@ -2021,7 +2022,8 @@ async def test_general_lookup_finds_sku_and_related_color(installed, db_session,
         scope = f"{designation} {color} PETG {diameter} mm SKU: {sku} {text}"
         return Evidence(url, designation, scope, parser.products[0], scopes=(scope,))
 
-    product_title = "PETG Ocean Blue 1.75 mm Refill" if manufacturer_sku else "PETG Ocean Blue"
+    designation = "PETG Ocean Blue 1.75 mm" if saved_link else "PETG Ocean Blue"
+    product_title = "PETG Ocean Blue 1.75 mm Refill" if manufacturer_sku else designation
     pages = {
         product_url: product_page(product_url, "OCEAN-175-X9", "Ocean Blue", 1.75, product_title, "density 1.27 g/cm3"),
         related_url: product_page(related_url, "OCEAN-285-X9", "Ocean Blue", 2.85, "PETG Ocean Blue 2.85mm", "density 9 g/cm3"),
@@ -2054,9 +2056,10 @@ async def test_general_lookup_finds_sku_and_related_color(installed, db_session,
     db_session.add(maker)
     await db_session.flush()
     filament = Filament(
-        manufacturer_id=maker.id, designation="PETG Ocean Blue", material_type="PETG", diameter_mm=1.75,
+        manufacturer_id=maker.id, designation=designation, material_type="PETG", diameter_mm=1.75,
         manufacturer_color_name="3172AD" if manufacturer_sku else "Ocean Blue",
         manufacturer_sku=manufacturer_sku, custom_fields={"article_number": "OCEAN-175-X9"} if manufacturer_sku is None else None,
+        shop_url=product_url if saved_link else None,
     )
     db_session.add(filament)
     await db_session.commit()
@@ -2065,7 +2068,48 @@ async def test_general_lookup_finds_sku_and_related_color(installed, db_session,
     data = response.json()
     assert product_url in fetched and related_url in fetched and reseller_url not in fetched
     suggestions = {entry["field"]: entry for entry in data["suggestions"]}
-    assert suggestions["shop_url"]["value"] == product_url
+    if saved_link:
+        assert "shop_url" not in suggestions
+    else:
+        assert suggestions["shop_url"]["value"] == product_url
     assert {issue["name"]: issue["url"] for issue in data["issues"]
             if issue["code"] == "manufacturer_color_reference"} == {"RAL 5015": related_url}
     assert all(source["url"] != related_url for entry in data["suggestions"] for source in entry["sources"])
+
+
+@pytest.mark.parametrize("imported_field", ["imported_article_number", "shop_url"])
+async def test_imported_part_number_does_not_override_product_line(imported_field):
+    from filabrain import proposals as p
+    from filabrain.sources import Evidence
+
+    identity = p.Identity(manufacturer="Example Filaments", designation="PLA Tough (Black)", material="PLA",
+                          material_subgroup="Tough", color="Black", diameter_mm=1.75)
+    heading = "PLA (Black) 1.75mm 1kg Filament [ABC12345]"
+    page = Evidence("https://maker.example/pla-black", heading, heading,
+                    {"designation": heading, "manufacturer": identity.manufacturer}, manufacturer_page=True)
+    assert not p._supplier_scopes(identity, page, {imported_field: "ABC12345"})
+
+
+@pytest.mark.parametrize("second_url, expected_sku", [
+    ("/products/ocean-blue?size=285", "OCEAN-175"),
+    ("/products/ocean-blue?size=175", None),
+    (None, "OCEAN-175"),
+])
+async def test_supplier_selects_only_the_explicit_variant_url(monkeypatch, second_url, expected_sku):
+    from filabrain import sources
+
+    url = "https://maker.example/products/ocean-blue?size=175&utm_source=test"
+    variant = {"@type": "Product", "name": "Ocean Blue 1.75 mm", "sku": "OCEAN-175",
+               "url": "/products/ocean-blue?size=175", "color": "Ocean Blue", "material": "PETG"}
+    second = {"@type": "Product", "name": "Ocean Blue 2.85 mm", "sku": "OCEAN-285", "url": second_url}
+    markup = '<script type="application/ld+json">' + json.dumps({
+        "@type": "ProductGroup", "productGroupID": "OCEAN-PETG", "hasVariant": [variant, second],
+    }) + "</script>"
+    monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
+    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **__: (200, "", "text/html", markup.encode()))
+    product = sources._fetch_supplier(url).product
+    if expected_sku is None:
+        assert product is None
+    else:
+        assert product["sku"] == expected_sku
+        assert product["product_group_id"] == "OCEAN-PETG"

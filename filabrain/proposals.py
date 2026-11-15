@@ -645,17 +645,25 @@ def _imported_article_hint(snapshot: dict | None) -> str:
     return ""
 
 
-async def _manufacturer_sitemap_candidates(site: str, domain: str, identity: Identity, article: str) -> list[str]:
-    name = set(_product_key(identity.designation))
+async def _manufacturer_sitemap_candidates(
+    site: str, domain: str, identity: Identity, article: str, *, color_only: bool = False,
+) -> list[str]:
+    designation = identity.designation
+    if color_only:
+        designation = re.sub(r"(?<!\w)\d+(?:[.,]\d+)?\s*(?:mm|kg|g)\b", " ", designation, flags=re.I)
+    name = set(_product_key(designation))
     if identity.color and not _swatch_code(identity.color):
         name.update(_product_key(identity.color))
     article_slug = "-".join(_product_key(article))
     if len(name) < 2 and not article_slug:
         return []
 
+    urls = await paramount_product_urls() if domain == "paramount-3d.com" else await supplier_sitemap_urls(site)
     ranked = {}
-    for url in await supplier_sitemap_urls(site):
+    for url in urls:
         if not (link := public_link(url)) or not _on_manufacturer_site(link, domain):
+            continue
+        if color_only and not references_in_product_url(link):
             continue
         slug = unquote(urlsplit(link).path.rstrip("/").rsplit("/", 1)[-1])
         words = _product_key(slug)
@@ -685,8 +693,14 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
     context = _variant_context(identity, snapshot)
     finish = _finish(identity.designation, context.get("finish_type"), identity.material)
     found_finish = _finish_markers(name)
-    search_hint = _norm(_imported_article_hint(snapshot))
-    article_match = bool(part and (part in {_norm(identity.sku), search_hint} or _literal_in(part, identity.designation)))
+    article_match = bool(part and (part == _norm(identity.sku) or _literal_in(part, identity.designation)))
+    # Paramount drops this wording from its package title, so check the remaining name and article.
+    paramount_silk_alias = (
+        page.manufacturer_page and _site_host(page.url) == "paramount-3d.com"
+        and _product_key(identity.designation) == ("silk", "bi", "color", *name_key)
+        and bool(part and part == _norm(_imported_article_hint(snapshot)))
+    )
+    paramount_alias = paramount_alias or paramount_silk_alias
     if (
         (name_key != _product_key(identity.designation) and not (article_match or paramount_alias))
         or (product.get("manufacturer") and _product_key(product["manufacturer"]) != _product_key(identity.manufacturer))
@@ -700,7 +714,7 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
         or (identity.weight_g is not None and nominal_weight != identity.weight_g
             and not (linked_weight and abs(nominal_weight - identity.weight_g) <= nominal_weight * 0.02))
         or (found_finish and finish and found_finish != {finish})
-        or (finish in FINISHES and finish not in found_finish and not article_match)
+        or (finish in FINISHES and finish not in found_finish and not (article_match or paramount_silk_alias))
         or (identity.color and not (paramount_alias or _swatch_code(identity.color))
             and not set(_product_key(identity.color)).issubset(name_key))
     ):
@@ -1599,6 +1613,7 @@ async def research_products(
         web_urls = await search(initial_query)
         first_pages.update(await check_pages(web_urls))
 
+    related_color_pages = []
     if (
         not product_url and manufacturer_site and manufacturer_domain and manufacturer_domain != "paramount-3d.com"
         and SUPPLIER_TOO_LARGE not in fetch_errors.values() and not official_match()
@@ -1609,6 +1624,38 @@ async def research_products(
                 first_pages.update(await check_pages(indexed))
         except TimeoutError:
             pass
+    elif manufacturer_site and manufacturer_domain:
+        for page in first_pages.values():
+            if (
+                not page or page.manual or page.datasheet
+                or not _on_manufacturer_site(page.url, manufacturer_domain)
+                or references_in_product_url(page.url)
+            ):
+                continue
+            official = replace(page, manufacturer_page=True)
+            if not _manufacturer_color_family(official):
+                continue
+            scopes = [
+                scope for scope in _supplier_scopes(identity, official, snapshot) if not scope.shared
+            ]
+            if not scopes or any(
+                normalize_reference(name) for scope in scopes for name, _ in _published_colors(scope.text)
+            ):
+                continue
+            try:
+                async with network_time(8):
+                    indexed = await _manufacturer_sitemap_candidates(
+                        manufacturer_site, manufacturer_domain, identity, lookup_sku, color_only=True,
+                    )
+                    related = await check_pages(indexed)
+                    related_color_pages = [
+                        replace(candidate, manufacturer_page=True) for candidate in related.values()
+                        if candidate and not (candidate.manual or candidate.datasheet)
+                        and _on_manufacturer_site(candidate.url, manufacturer_domain)
+                    ]
+            except TimeoutError:
+                pass
+            break
 
     titles = _product_titles(identity)
     authoritative_docs: dict[str, Evidence] = {}
@@ -2209,8 +2256,11 @@ async def research_products(
         if issue["code"] == "manufacturer_color_reference" and (code := normalize_reference(issue["name"]))
     }
     checked_url_systems = {code.split()[0] for code in url_color_references}
-    for page, _, scopes in official_scopes:
-        if any(not scope.shared for scope in scopes) or _manufacturer_color_family(page) not in verified_color_families:
+    related_color_pages.extend(
+        page for page, _, scopes in official_scopes if not any(not scope.shared for scope in scopes)
+    )
+    for page in related_color_pages:
+        if _manufacturer_color_family(page) not in verified_color_families:
             continue
         for code in references_in_product_url(page.url):
             if code.split()[0] not in checked_url_systems:

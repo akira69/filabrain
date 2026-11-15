@@ -284,11 +284,33 @@ class _ProductPage(HTMLParser):
                 )
                 if isinstance(image, str) and len(image) <= 500:
                     self.products[-1]["image_url"] = image
+                offers = row.get("offers")
+                variant_url = row.get("url") or (offers.get("url") if isinstance(offers, dict) else None)
+                if isinstance(variant_url, str) and len(variant_url) <= 500:
+                    self.products[-1]["variant_url"] = variant_url.strip()
             if isinstance(row.get("@graph"), list):
                 self._add_products(row["@graph"])
             if isinstance(row.get("hasVariant"), list):
                 product_group = row.get("productGroupID") if row.get("@type") == "ProductGroup" else None
                 self._add_products(row["hasVariant"], product_group)
+
+    def product_for_url(self, url: str) -> dict | None:
+        products = [product for product in self.products if product.get("designation")]
+        if len(products) > 1:
+            matched = []
+            requested = supplier_page_url(url)
+            requested_fragment = urlsplit(url).fragment
+            for product in products:
+                if not (variant_url := product.get("variant_url")):
+                    continue
+                try:
+                    link = public_link(urljoin(url, variant_url))
+                except ValueError:
+                    continue
+                if link and supplier_page_url(link) == requested and urlsplit(link).fragment == requested_fragment:
+                    matched.append(product)
+            products = matched
+        return {key: value for key, value in products[0].items() if key != "variant_url"} if len(products) == 1 else None
 
     def handle_data(self, data):
         if self._structured is not None:
@@ -450,8 +472,7 @@ def _fetch_supplier(
         title = " ".join(" ".join(parser.title).split())
         if title.casefold().rstrip(".") in {"just a moment", "access denied", "robot check", "attention required! | cloudflare"}:
             raise ValueError("Automated access blocked")
-        products = [p for p in parser.products if p.get("designation")]
-        product = products[0] if len(products) == 1 else None
+        product = parser.product_for_url(url)
         scopes = list(dict.fromkeys([*parser.main_scopes, *parser.scopes])) if parser.main_scopes else parser.scopes
         visible = " ".join(" ".join(scopes if parser.main_scopes else parser.words).split())
         # Put structured identity first so evidence still contains it on long pages.
