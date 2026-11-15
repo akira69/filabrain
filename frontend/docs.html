@@ -21,8 +21,9 @@
         <dt><a href="https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk" target="_blank" rel="noopener noreferrer">Claude compatibility setup</a></dt>
         <dd><code>https://api.anthropic.com/v1</code><br>Use a workspace-scoped API key from Claude Console and a Claude model ID. Enter the ID manually if model discovery fails.</dd>
       </dl>
-      <p>In <strong>Model &amp; MCP settings</strong>, enter the model server URL and API key if required. Use <strong>Load models</strong> or open <strong>Enter a model ID manually</strong>. Select <strong>Test connection</strong>, then <strong>Save</strong>.</p>
-      <p>The model selector in chat can switch models on the configured server for that conversation. For server-managed credentials, configure <code>FILABRAIN_MODEL_URL</code> and <code>FILABRAIN_API_KEY</code>. FilaMan uses <code>OIDC_ENC_KEY</code> to encrypt keys saved in the UI.</p>
+      <p>In <strong>Model &amp; MCP settings</strong>, select <strong>Add endpoint</strong> to connect another model server. Enter a name, server URL and API key if required. Select <strong>Load models</strong> or open <strong>Enter a model ID manually</strong>. Use <strong>Test connection</strong> before saving.</p>
+      <p>Use <strong>Models shown in chat</strong> to choose which models appear under each endpoint. Chat and interactive research share the model picker. <strong>Make default</strong> sets the endpoint and model for new conversations and background batches.</p>
+      <p>For server-managed credentials, configure <code>FILABRAIN_MODEL_URL</code> and <code>FILABRAIN_API_KEY</code>. FilaMan uses <code>OIDC_ENC_KEY</code> to encrypt keys saved in the UI.</p>
       <p>In <strong>Internet search</strong>, select <strong>Test SearXNG</strong> to check the URL before saving it.</p>
     </details>
     <section data-guide-topic="chat">

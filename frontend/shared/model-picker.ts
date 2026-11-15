@@ -1,7 +1,11 @@
 import { api } from './api'
 import { t } from './i18n'
 
-export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | null, openSettings?: () => void) {
+export type ModelSelection = { model_id: string; endpoint_id?: string }
+type ModelGroup = { id: string; name: string; models: string[]; unavailable?: boolean }
+
+export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | null, openSettings?: () => void,
+  initialEndpoint?: string | null, onLoad?: () => void) {
   const trigger = form.querySelector<HTMLButtonElement>('[data-model-trigger]')!
   const name = form.querySelector<HTMLElement>('[data-model-name]')!
   const menu = form.querySelector<HTMLElement>('[data-model-menu]')!
@@ -19,27 +23,42 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
   let busy = false
   let revision = 0
   let activeDefault = defaultModel
-  let selected: string | undefined
-  let available: string[] | undefined
+  let selected: ModelSelection | undefined
+  let needsSelection = false
+  let groups: ModelGroup[] | undefined
+  let defaultEndpoint = initialEndpoint ?? null
 
   menu.id = `${form.id || 'filabrain-chat'}-model-menu`
   trigger.setAttribute('popovertarget', menu.id)
   trigger.setAttribute('aria-controls', menu.id)
 
   function updateSelection() {
-    const model = selected || activeDefault || t('filaBrain.researchNoModel')
+    const model = selected?.model_id || (!needsSelection && activeDefault)
+      || t(needsSelection ? 'filaBrain.chooseModel' : 'filaBrain.researchNoModel')
+    const endpoint = groups?.find(group => group.id === (selected?.endpoint_id ?? defaultEndpoint))
+    const label = endpoint ? `${model} · ${endpoint.name}` : model
     name.textContent = model
-    trigger.setAttribute('aria-label', `${t('filaBrain.modelForConversation')}, ${model}`)
+    trigger.setAttribute('aria-label', `${t('filaBrain.modelForConversation')}, ${label}`)
     trigger.title = model
     for (const item of options.querySelectorAll<HTMLButtonElement>('button')) {
-      item.setAttribute('aria-checked', String(item.value === (selected || '')))
+      const checked = selected ? (item.value || activeDefault) === selected.model_id && item.dataset.endpoint === (selected.endpoint_id ?? defaultEndpoint)
+        : !needsSelection && !item.value
+      item.setAttribute('aria-checked', String(checked))
+    }
+    if (groups) {
+      const unavailable = groups.filter(group => group.unavailable).map(group => group.name)
+      const stale = selected && !options.querySelector('[aria-checked="true"]')
+      warning.textContent = stale ? t('filaBrain.modelSelectionUnavailable')
+        : unavailable.length ? t('filaBrain.endpointModelsUnavailable', { names: unavailable.join(', ') }) : ''
+      status.hidden = !warning.textContent
     }
   }
 
-  function addOption(model: string, value: string) {
+  function addOption(group: HTMLElement, endpointId: string, model: string, isDefault: boolean) {
     const item = document.createElement('button')
     item.type = 'button'
-    item.value = value
+    item.value = isDefault ? '' : model
+    item.dataset.endpoint = endpointId
     item.tabIndex = -1
     item.className = 'chat-model-option'
     item.setAttribute('role', 'menuitemradio')
@@ -47,7 +66,7 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
     label.className = 'chat-model-option-name'
     label.textContent = model
     item.append(label)
-    if (!value) {
+    if (isDefault) {
       const badge = document.createElement('span')
       badge.className = 'chat-model-default'
       badge.textContent = t('filaBrain.modelDefault')
@@ -59,16 +78,20 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
     check.setAttribute('aria-hidden', 'true')
     item.append(check)
     item.addEventListener('click', () => {
-      selected = value || undefined
+      selected = isDefault ? undefined : { model_id: model, endpoint_id: endpointId }
+      needsSelection = false
       updateSelection()
       menu.hidePopover()
       trigger.focus()
+      onLoad?.()
     })
-    options.append(item)
+    group.append(item)
   }
 
   function updateDisabled() {
-    trigger.disabled = busy || options.childElementCount < 2
+    const optionsCount = options.querySelectorAll('button').length
+    const selectionIsCurrent = (!needsSelection && !selected && !!activeDefault) || !!options.querySelector('[aria-checked="true"]')
+    trigger.disabled = busy || optionsCount === 0 || (optionsCount === 1 && selectionIsCurrent)
     if (trigger.disabled && menu.matches(':popover-open')) menu.hidePopover()
   }
 
@@ -88,7 +111,8 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
     trigger.setAttribute('aria-expanded', String(open))
     if (!open) return
     positionMenu()
-    options.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus()
+    const first = options.querySelector<HTMLButtonElement>('[aria-checked="true"]') ?? options.querySelector('button')
+    first?.focus()
   })
   window.addEventListener('resize', () => {
     if (menu.matches(':popover-open')) positionMenu()
@@ -104,25 +128,38 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
     items[next]?.focus()
   })
 
-  async function load(model?: string | null) {
+  async function load(model?: string | null, endpoint?: string | null) {
     const current = ++revision
     activeDefault = model
-    selected = undefined
-    available = undefined
+    groups = undefined
+    defaultEndpoint = endpoint ?? null
     options.replaceChildren()
     status.hidden = true
     updateSelection()
     updateDisabled()
-    if (!model) return
+    if (!model && !endpoint) return
     try {
-      const { models } = await api.get<{ models: string[] }>('/filabrain/models', { cache: 'no-store' })
+      const result = await api.get<{ groups: ModelGroup[]; default_endpoint_id: string | null; default_model_id: string | null }>('/filabrain/models', { cache: 'no-store' })
       if (current !== revision) return
-      available = models
-      if (selected && !models.includes(selected)) selected = undefined
-      addOption(model, '')
-      for (const id of models) if (id !== model) addOption(id, id)
+      groups = result.groups
+      defaultEndpoint = result.default_endpoint_id
+      activeDefault = result.default_model_id
+      for (const endpoint of groups) {
+        if (!endpoint.models.length) continue
+        const group = document.createElement('div')
+        group.setAttribute('role', 'group')
+        group.setAttribute('aria-label', endpoint.name)
+        const heading = document.createElement('div')
+        heading.className = 'chat-model-menu-title'
+        heading.textContent = endpoint.name
+        heading.setAttribute('aria-hidden', 'true')
+        group.append(heading)
+        for (const id of endpoint.models) addOption(group, endpoint.id, id, endpoint.id === defaultEndpoint && id === activeDefault)
+        options.append(group)
+      }
       updateSelection()
       updateDisabled()
+      onLoad?.()
     } catch {
       if (current !== revision) return
       warning.textContent = t('filaBrain.otherModelsUnavailable')
@@ -130,13 +167,21 @@ export function mountModelPicker(form: HTMLFormElement, defaultModel?: string | 
     }
   }
 
-  void load(defaultModel)
+  function reset(model?: string | ModelSelection, requireSelection = false) {
+    // Older history entries with an explicit model refer to the migrated endpoint.
+    selected = typeof model === 'string' ? { model_id: model, endpoint_id: 'default' } : model
+    needsSelection = requireSelection && !selected
+    updateSelection()
+    updateDisabled()
+  }
+
+  void load(defaultModel, initialEndpoint)
   return {
-    get selected() { return selected },
-    reset(model?: string) {
-      selected = model && (!available || available.includes(model)) ? model : undefined
-      updateSelection()
-    },
+    get selected() { return selected ?? (!needsSelection && activeDefault ? { model_id: activeDefault, endpoint_id: defaultEndpoint ?? undefined } : undefined) },
+    get needsSelection() { return needsSelection },
+    get hasOptions() { return !!activeDefault || !!options.querySelector('button') },
+    reset,
+    preserve(selection?: ModelSelection) { selected ??= selection },
     setDefault: load,
     setBusy(value: boolean) {
       busy = value
