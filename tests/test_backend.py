@@ -2065,13 +2065,16 @@ async def test_color_standard_preview_and_apply(installed, db_session, monkeypat
     assert (await installed.get(path)).status_code == 409
 
 
-async def test_paramount_uses_matched_color_family_url_only(installed, db_session, monkeypatch):
+@pytest.mark.parametrize("unresolved_sibling", [False, True])
+async def test_paramount_uses_matched_color_family_url_only(installed, db_session, monkeypatch, unresolved_sibling):
     from filabrain import proposals
     from filabrain.sources import Evidence
 
     site = "https://www.paramount-3d.com"
     primary = site + "/product-page/pla-military-green-1-75mm-1kg-filament-ogrl60037764c"
     sibling = site + "/product-page/pla-pantone-military-green-7764c-3-00mm-1kg-filament-ogrl60037764c"
+    if unresolved_sibling:
+        sibling += "?size=175"
     other = site + "/product-page/pla-pantone-military-khaki-7530c-3-00mm-1kg-filament-gbrl10197530c"
     titles = {
         primary: "PLA (Military Green) 1.75mm 1kg Filament [OGRL60037764C]",
@@ -2082,7 +2085,9 @@ async def test_paramount_uses_matched_color_family_url_only(installed, db_sessio
     async def fetch(url, **_):
         name = titles[url]
         scopes = (name,) if url == primary else (name, 'Bed / Print Temperature: 1-2 C / 3-4 C')
-        return Evidence(url, name, name, {"designation": name}, scopes=scopes)
+        unresolved = unresolved_sibling and url == sibling
+        product = None if unresolved else {"designation": name}
+        return Evidence(url, name, name, product, scopes=scopes, selected_variant_unresolved=unresolved)
 
     async def sitemap():
         return tuple(titles)
@@ -2109,8 +2114,10 @@ async def test_paramount_uses_matched_color_family_url_only(installed, db_sessio
     await db_session.commit()
     result = (await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})).json()
     refs = [issue for issue in result["issues"] if issue["code"] == "manufacturer_color_reference"]
-    assert refs == [{"code": "manufacturer_color_reference", "name": "Pantone 7764 C", "url": sibling,
-                     "from_product_url": True}]
+    expected = [] if unresolved_sibling else [{
+        "code": "manufacturer_color_reference", "name": "Pantone 7764 C", "url": sibling, "from_product_url": True,
+    }]
+    assert refs == expected
     assert not {"bed_temp_range_c", "extruder_temp_range_c"} & {entry["field"] for entry in result["suggestions"]}
 
 

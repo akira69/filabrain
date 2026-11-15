@@ -756,7 +756,7 @@ def _paramount_color_family(page: Evidence) -> tuple[str, str] | None:
 
 
 def _manufacturer_color_family(page: Evidence) -> tuple[str, ...] | None:
-    if not page.manufacturer_page or page.archived_at:
+    if not page.manufacturer_page or page.archived_at or page.selected_variant_unresolved:
         return None
     product = page.product or {}
     group = product.get("product_group_id")
