@@ -2176,7 +2176,7 @@ async def test_supplier_does_not_substitute_named_product_for_unnamed_variant(mo
 
 
 @pytest.mark.parametrize(("selector", "paramount"), [("#size-", False), ("?size=", False), ("?size=", True)])
-async def test_pasted_link_does_not_propose_a_different_explicit_variant(installed, monkeypatch, selector, paramount):
+async def test_pasted_link_uses_only_the_verified_variant(installed, db_session, monkeypatch, selector, paramount):
     from filabrain import proposals, sources
 
     if paramount:
@@ -2186,7 +2186,7 @@ async def test_pasted_link_does_not_propose_a_different_explicit_variant(install
         title = "PETG (Ocean Blue) 1.75mm 1kg Filament [OCEAN-175]"
     else:
         site = "https://maker.example"
-        path = "/products/ocean-blue"
+        path = "/products/ocean-blue-ral-5015"
         brand = "Fixture Brand"
         title = "Ocean Blue 1.75 mm"
     markup = f'<title>{title}</title><script type="application/ld+json">' + json.dumps({
@@ -2195,9 +2195,15 @@ async def test_pasted_link_does_not_propose_a_different_explicit_variant(install
             "name": title, "sku": "OCEAN-175",
             "brand": {"name": brand}, "material": "PETG", "color": "Ocean Blue",
         }],
-    }) + "</script>"
+    }) + f"</script><main><p>{title} PETG Ocean Blue 1.75 mm SKU: OCEAN-175</p></main>"
+
+    def fetch(requested, *_, **__):
+        if requested.path != path:
+            return 404, "", "text/html", b""
+        return 200, "", "text/html", markup.encode()
+
     monkeypatch.setattr(sources, "_public_address", lambda *_: "192.0.2.4")
-    monkeypatch.setattr(sources, "_get_pinned", lambda *_, **__: (200, "", "text/html", markup.encode()))
+    monkeypatch.setattr(sources, "_get_pinned", fetch)
 
     async def catalog(_):
         return [], "", True
@@ -2213,18 +2219,64 @@ async def test_pasted_link_does_not_propose_a_different_explicit_variant(install
     monkeypatch.setattr(proposals, "paramount_product_urls", paramount_urls)
     monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    db_session.add(Manufacturer(name=brand, url=site))
+    await db_session.commit()
     response = await installed.post(f"{BASE}/proposals", json={
         "mode": "create", "product_url": f"{site}{path}{selector}285",
     })
     assert response.status_code == 200
     assert response.json()["suggestions"] == []
 
-    matching = await installed.post(f"{BASE}/proposals", json={
-        "mode": "create", "product_url": f"{site}{path}{selector}175",
-    })
+    verified_url = f"{site}{path}{selector}175"
+    matching = await installed.post(f"{BASE}/proposals", json={"mode": "create", "product_url": verified_url})
     assert matching.status_code == 200
     suggestions = {entry["field"]: entry["value"] for entry in matching.json()["suggestions"]}
     assert suggestions["manufacturer_sku"].casefold() == "ocean-175"
+    assert suggestions["shop_url"] == verified_url
+    if not paramount:
+        assert any(issue["code"] == "manufacturer_color_reference" and issue["name"] == "RAL 5015"
+                   for issue in matching.json()["issues"])
+
+
+async def test_edit_does_not_propose_a_link_with_an_unresolved_variant(installed, db_session, monkeypatch):
+    from filabrain import proposals
+    from filabrain.sources import Evidence
+
+    site = "https://filament-maker.example"
+    url = f"{site}/products/ocean-blue?size=285"
+    title = "PETG Ocean Blue"
+    scope = f"{title} 1.75 mm SKU: OCEAN-175"
+
+    async def fetch(requested, **_):
+        if requested != url:
+            raise ValueError("Not a product page")
+        return Evidence(url, title, scope, scopes=(scope,), selected_variant_unresolved=True)
+
+    async def catalog(_):
+        return [], "", True
+
+    async def ofd(_):
+        return [], ""
+
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Filament Maker", url=site)
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(
+        manufacturer_id=maker.id, designation=title, material_type="PETG",
+        diameter_mm=1.75, manufacturer_color_name="Ocean Blue", manufacturer_sku="OCEAN-175",
+    )
+    db_session.add(filament)
+    await db_session.commit()
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "edit", "filament_id": filament.id, "product_url": url,
+    })
+    assert response.status_code == 200
+    assert "shop_url" not in {entry["field"] for entry in response.json()["suggestions"]}
 
 
 @pytest.mark.parametrize("ral_known", [True, False])

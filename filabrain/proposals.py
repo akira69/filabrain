@@ -851,6 +851,8 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
     shared = []
     for text in dict.fromkeys(page.scopes if page.scopes is not None else (page.text,)):
         universal = bool(SHARED_SPEC.search(text))
+        if page.selected_variant_unresolved and not universal:
+            continue
         row_sku = _literal_in(identity.sku, text)
         labelled_skus = _LABELLED_SKU.findall(text)
         if universal and labelled_skus:
@@ -1480,6 +1482,7 @@ async def research_products(
 
     # Resolve a pasted product URL first so its brand and SKU can drive both catalogs.
     pasted_page = None
+    matched_pasted_identity = False
     verified_paramount_url = False
     resolve_pasted_url = (
         snapshot is None
@@ -1519,9 +1522,8 @@ async def research_products(
                 if not await add_draft_identity(product, cite_product, include_color=not paramount):
                     return proposal
                 identity = product.model_copy(update=constraints)
+                matched_pasted_identity = True
                 verified_paramount_url = bool(paramount)
-                if not verified_paramount_url:
-                    evidence.extend(_supplier_scopes(identity, pasted_page))
 
     manufacturer_site = (snapshot or {}).get("manufacturer_url")
     if snapshot is None and identity.manufacturer:
@@ -1597,8 +1599,11 @@ async def research_products(
     ]
     first_urls = [url for url in direct_urls if _on_manufacturer_site(url, manufacturer_domain)]
     first_pages = await check_pages(first_urls)
-    if verified_paramount_url:
-        first_pages[pasted_page.url] = pasted_page
+    if matched_pasted_identity:
+        if _on_manufacturer_site(pasted_page.url, manufacturer_domain):
+            first_pages[pasted_page.url] = pasted_page
+        else:
+            evidence.extend(_supplier_scopes(identity, pasted_page))
     imported_sku = _imported_article_hint(snapshot)
     lookup_sku = identity.sku.strip() or sku_hint.strip() or imported_sku
     initial_query = search_terms(lookup_sku)
