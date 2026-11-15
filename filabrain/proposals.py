@@ -646,10 +646,10 @@ def _imported_article_hint(snapshot: dict | None) -> str:
 
 
 async def _manufacturer_sitemap_candidates(
-    site: str, domain: str, identity: Identity, article: str, *, color_only: bool = False,
+    site: str, domain: str, identity: Identity, article: str, *, color_systems: set[str] | None = None,
 ) -> list[str]:
     designation = identity.designation
-    if color_only:
+    if color_systems is not None:
         designation = re.sub(r"(?<!\w)\d+(?:[.,]\d+)?\s*(?:mm|kg|g)\b", " ", designation, flags=re.I)
     name = set(_product_key(designation))
     if identity.color and not _swatch_code(identity.color):
@@ -663,7 +663,9 @@ async def _manufacturer_sitemap_candidates(
     for url in urls:
         if not (link := public_link(url)) or not _on_manufacturer_site(link, domain):
             continue
-        if color_only and not references_in_product_url(link):
+        if color_systems is not None and not any(
+            code.split()[0] in color_systems for code in references_in_product_url(link)
+        ):
             continue
         slug = unquote(urlsplit(link).path.rstrip("/").rsplit("/", 1)[-1])
         words = _product_key(slug)
@@ -2222,18 +2224,19 @@ async def research_products(
         code.split()[0] for issue in issues
         if issue["code"] == "manufacturer_color_reference" and (code := normalize_reference(issue["name"]))
     }
-    checked_url_systems = {code.split()[0] for code in url_color_references}
+    missing_color_systems = {"RAL", "Pantone"} - declared_color_systems - {
+        code.split()[0] for code in url_color_references
+    }
     related_color_pages = [
         page for page, _, scopes in official_scopes if not any(not scope.shared for scope in scopes)
     ]
-    if verified_color_families and manufacturer_site and manufacturer_domain and not (
-        declared_color_systems or checked_url_systems
-    ):
+    if verified_color_families and manufacturer_site and manufacturer_domain and missing_color_systems:
         indexed = []
         try:
             async with network_time(8):
                 indexed = await _manufacturer_sitemap_candidates(
-                    manufacturer_site, manufacturer_domain, supplier_identity, lookup_sku, color_only=True,
+                    manufacturer_site, manufacturer_domain, supplier_identity, lookup_sku,
+                    color_systems=missing_color_systems,
                 )
                 await check_pages(indexed)
         except TimeoutError:
@@ -2247,7 +2250,7 @@ async def research_products(
         if _manufacturer_color_family(page) not in verified_color_families:
             continue
         for code in references_in_product_url(page.url):
-            if code.split()[0] not in checked_url_systems:
+            if code.split()[0] in missing_color_systems:
                 url_color_references.setdefault(code, page.url)
     for system in ("RAL", "Pantone"):
         found = [(code, url) for code, url in url_color_references.items() if code.split()[0] == system]
