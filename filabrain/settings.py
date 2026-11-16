@@ -44,13 +44,6 @@ async def lock_research_plugin(db: DBSession) -> bool:
     return bool(await db.scalar(query))
 
 
-async def mcp_access_enabled(db: DBSession, *, locked: bool = False) -> bool:
-    query = select(FilamentResearchSettings.mcp_enabled).where(FilamentResearchSettings.id == 1)
-    if locked:
-        query = query.with_for_update()
-    return await db.scalar(query) is not False
-
-
 def _model_base_url(value: str) -> str:
     value = value.strip().rstrip("/")
     url = urlsplit(value)
@@ -122,7 +115,6 @@ class ModelEndpointInput(ModelConnection):
 
 class SettingsInput(ModelConnection):
     search_url: str = Field("", max_length=500)
-    mcp_enabled: StrictBool | None = None
     supplier_download_mib: int = Field(DEFAULT_SUPPLIER_DOWNLOAD_MIB, ge=1, le=32, strict=True)
     supplier_sites: list[SupplierSite] = Field(default_factory=list, max_length=4)
     model_endpoints: list[ModelEndpointInput] | None = None
@@ -137,10 +129,6 @@ class SettingsInput(ModelConnection):
         return sites
 
     validate_search_url = field_validator("search_url")(_validate_base_url)
-
-
-class McpSettingsInput(BaseModel):
-    mcp_enabled: StrictBool
 
 
 class SearchTestInput(BaseModel):
@@ -212,7 +200,7 @@ def model_key(config: dict) -> str:
     return deployment_key(config)
 
 
-def public_config(config: dict, mcp_enabled: bool) -> dict:
+def public_config(config: dict) -> dict:
     model_endpoints = endpoints(config)
     return {
         "model_url": config["model_url"],
@@ -220,7 +208,6 @@ def public_config(config: dict, mcp_enabled: bool) -> dict:
         "search_url": config["search_url"],
         "supplier_sites": config["supplier_sites"],
         "supplier_download_mib": config["supplier_download_mib"],
-        "mcp_enabled": mcp_enabled,
         "has_key": bool(config.get("encrypted_key") or deployment_key(config)),
         "default_endpoint_id": config.get("default_endpoint_id", model_endpoints[0]["id"] if model_endpoints else None),
         "model_revision": config.get("model_revision", "initial"),
@@ -235,13 +222,11 @@ def public_config(config: dict, mcp_enabled: bool) -> dict:
 @router.get("/settings")
 async def read_settings(db: DBSession, _principal=admin):
     _, config = await config_record(db)
-    return public_config(config, await mcp_access_enabled(db))
+    return public_config(config)
 
 
 @router.put("/settings")
 async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
-    if data.model_fields_set == {"mcp_enabled"}:
-        raise HTTPException(422, "Use the MCP settings endpoint to change MCP access")
     await lock_research_plugin(db)
     row, old = await config_record(db)
     config = dict(row.config or {}) if row else {}
@@ -293,7 +278,7 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
     row.config = config
     await db.commit()
     _, config = await config_record(db)
-    return public_config(config, await mcp_access_enabled(db))
+    return public_config(config)
 
 
 def saved_key(data: ModelConnection, old: dict) -> str | None:
@@ -308,18 +293,6 @@ def saved_key(data: ModelConnection, old: dict) -> str | None:
     if not data.clear_key and data.model_url == old.get("model_url"):
         return old.get("encrypted_key")
     return None
-
-
-@router.put("/settings/mcp")
-async def save_mcp_settings(data: McpSettingsInput, db: DBSession, _principal=admin):
-    await lock_research_plugin(db)
-    row = await db.get(FilamentResearchSettings, 1, with_for_update=True)
-    if row is None:
-        row = FilamentResearchSettings(id=1)
-        db.add(row)
-    row.mcp_enabled = data.mcp_enabled
-    await db.commit()
-    return data
 
 
 def _connection_key(data: ModelConnection, old: dict) -> str:

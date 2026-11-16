@@ -46,18 +46,17 @@ async def smoke(host: Path, archive: Path, directory: Path, previous: Path | Non
             await run_all_seeds(db)
             user = User(email="plugin-smoke@example.invalid", is_superadmin=True, is_active=True)
             maker = Manufacturer(name="Plugin Smoke Test")
-            db.add_all([user, maker])
-            await db.flush()
-            secret = generate_token_secret()
-            session = UserSession(user_id=user.id, session_token_hash=hash_token(secret))
-            db.add(session)
-            await db.commit()
             flags = await db.get(AppSettings, 1)
             if flags is None:
                 flags = AppSettings(id=1)
                 db.add(flags)
             flags.mcp_enabled = True
-            flags.mcp_write_enabled = False
+            flags.mcp_write_enabled = True
+            db.add_all([user, maker])
+            await db.flush()
+            secret = generate_token_secret()
+            session = UserSession(user_id=user.id, session_token_hash=hash_token(secret))
+            db.add(session)
             await db.commit()
             installer = PluginInstallService(db)
             if previous:
@@ -104,17 +103,17 @@ async def smoke(host: Path, archive: Path, directory: Path, previous: Path | Non
             assert key.status_code == 201
             async with AsyncClient(
                 transport=transport, base_url="https://test",
-                headers={"Authorization": f"Bearer {key.json()['token']}"},
+                headers={"Authorization": f"ApiKey {key.json()['token']}"},
             ) as external:
                 async def tool(name, arguments):
-                    response = await external.post(f"{root}/mcp", json={
+                    response = await external.post("/mcp", json={
                         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
                         "params": {"name": name, "arguments": arguments},
                     })
                     assert response.status_code == 200, response.text
                     result = response.json()["result"]
                     assert not result.get("isError"), result
-                    return result["structuredContent"]
+                    return json.loads(result["content"][0]["text"])
 
                 created = await tool("create_filament", {
                     "manufacturer_id": maker.id, "designation": "Smoke PETG",
@@ -123,13 +122,15 @@ async def smoke(host: Path, archive: Path, directory: Path, previous: Path | Non
                 spool = await tool("create_spool", {"filament_id": created["id"]})
                 assert (await browser.get(f"/api/v1/spools/{spool['id']}")).json()["filament_id"] == created["id"]
 
-                off = await browser.put(f"{root}/settings/mcp", headers=headers, json={"mcp_enabled": False})
-                assert off.json() == {"mcp_enabled": False}
-                disabled = await external.post(f"{root}/mcp", json={
+                removed = await external.post(f"{root}/mcp", json={
                     "jsonrpc": "2.0", "id": 1, "method": "tools/list",
                 })
-                assert disabled.status_code == 404
-                assert (await browser.get(f"{root}/status")).json()["enabled"] is True
+                assert removed.status_code == 404
+
+            async with async_session_maker() as db:
+                flags = await db.get(AppSettings, 1)
+                flags.mcp_write_enabled = False
+                await db.commit()
 
             native_headers = {"Authorization": f"ApiKey {key.json()['token']}"}
             async def rpc(method, params=None):

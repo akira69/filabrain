@@ -2,7 +2,7 @@
     <button type="button" class="fm-btn" id="settings-back-to-chat">Back to chat</button>
     <!-- editor-docs-button -->
   </div>
-  <div id="research-admin-settings" class="research-settings">
+  <div class="research-settings">
     <form id="filabrain-settings" class="fm-compact-form">
     <section class="fm-card fm-section" aria-labelledby="model-settings-title">
       <header class="fm-section-header"><h2 id="model-settings-title" data-i18n="filaBrain.settings">Model settings</h2></header>
@@ -115,43 +115,4 @@
           <p id="research-settings-message" class="fm-field-hint" role="status"></p>
         </div>
     </form>
-    <div class="research-mcp-section">
-      <section class="fm-card fm-section" aria-labelledby="mcp-settings">
-        <header class="fm-section-header"><h2 id="mcp-settings" data-i18n="filaBrain.standaloneMcp">External MCP connection</h2></header>
-        <div class="fm-section-body">
-        <div class="research-mcp-toggle">
-          <label id="research-mcp-label" for="research-mcp-enabled" data-i18n="filaBrain.mcpEnabled">Enable the FilaBrain MCP endpoint</label>
-          <span id="research-mcp-state" class="fm-field-hint" role="status"></span>
-          <label class="fm-toggle">
-            <input id="research-mcp-enabled" type="checkbox" role="switch" aria-labelledby="research-mcp-label" disabled />
-            <span class="fm-toggle-slider" aria-hidden="true"></span>
-          </label>
-        </div>
-        <p id="research-mcp-off" class="fm-field-hint" data-i18n="filaBrain.mcpOffHint" hidden>The separate FilaBrain endpoint is off. FilaMan’s built-in MCP has its own settings.</p>
-        <div id="research-mcp-setup" class="fm-compact-form" hidden>
-          <label>
-            <span data-i18n="filaBrain.mcpUrl">MCP URL</span>
-            <input id="research-mcp-url" class="fm-input" readonly />
-          </label>
-          <p class="fm-field-hint" data-i18n="filaBrain.standaloneMcpHint">Add this URL to an MCP client using Streamable HTTP. Use a FilaMan API key as the bearer token. Connect over HTTPS from another device.</p>
-          <div>
-            <a href="/settings/api-keys" class="fm-btn fm-btn-outline" data-i18n="settings.apiKeys">API Keys</a>
-          </div>
-        </div>
-        <p id="research-mcp-message" class="fm-field-hint" role="status"></p>
-      </div></section>
-    </div>
   </div>
-  <section class="fm-card fm-section" id="research-pairing" aria-labelledby="research-pair-title" hidden>
-    <header class="fm-section-header"><h2 id="research-pair-title" data-i18n="filaBrain.pairDraft">Pair this draft</h2></header>
-    <div class="fm-section-body">
-      <p class="fm-field-hint" data-i18n="filaBrain.researchPairHint">Connect an external MCP client to send proposals to this draft.</p>
-      <div><button type="button" class="fm-btn fm-btn-outline" id="pair-client" data-i18n="filaBrain.pair">Pair a client</button></div>
-      <div class="field-grid" id="pair-credentials" hidden>
-        <label><span data-i18n="filaBrain.mcpUrl">MCP URL</span><input id="pair-url" readonly></label>
-        <label><span data-i18n="filaBrain.mcpToken">Bearer token (expires in 15 minutes)</span><input id="pair-token" readonly></label>
-        <div><button class="fm-btn fm-btn-outline" type="button" id="pair-revoke" data-i18n="filaBrain.revoke">Disconnect</button></div>
-      </div>
-      <p id="pair-status" class="fm-field-hint" role="status"></p>
-    </div>
-  </section>

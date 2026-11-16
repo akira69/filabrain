@@ -41,7 +41,6 @@ try {
   page.setDefaultTimeout(5_000)
   const writes = []
   const savePaths = []
-  let mcpEnabled = false
   let searchUrl = ''
   let supplierDownloadMiB = 8
   let supplierSites = []
@@ -66,7 +65,6 @@ try {
   let duplicateSpoolLookup = false
   let conflictingSpoolWidth = false
   let differentSpoolPackage = false
-  let pairedProposal = null
   let heldModelList
   let staleBatchOnce = false
   let hasResearchRun = false
@@ -203,7 +201,7 @@ try {
       ], total: 2 } })
     }
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: canUseFilaments, chat_model: chatModelId, chat_endpoint_id: chatModelId ? defaultEndpoint : null,
-      can_create: canUseFilaments, can_add_spool: canAddSpool, can_read_spools: canAddSpool, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
+      can_create: canUseFilaments, can_add_spool: canAddSpool, can_read_spools: canAddSpool, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure } })
     if (path.endsWith('/filaments/10/research-record')) return recordUnavailable
       ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { record_token: editorRecordToken } })
@@ -316,10 +314,6 @@ try {
         ] : []),
       ] : [] } })
     }
-    if (path.endsWith('/settings/mcp')) {
-      mcpEnabled = req.postDataJSON().mcp_enabled
-      return route.fulfill({ json: { mcp_enabled: mcpEnabled } })
-    }
     if (path.endsWith('/settings/test-search')) {
       assert.deepEqual(req.postDataJSON(), { search_url: 'http://searxng:8080' })
       return route.fulfill({ json: { ok: true } })
@@ -331,14 +325,6 @@ try {
         model_url: 'http://ollama:11434', model_id: 'fixture:default', api_key: 'fixture-key', clear_key: false,
       })
       return route.fulfill({ json: { ok: true } })
-    }
-    if (path.endsWith('/pairings') && req.method() === 'POST') {
-      assert.equal(req.postDataJSON().filament_id, 10)
-      return route.fulfill({ json: { id: 'fixture-pair', url: 'https://fila.test/api/v1/filabrain/mcp', token: 'fixture-token' } })
-    }
-    if (path.endsWith('/pairings/fixture-pair')) {
-      return req.method() === 'DELETE' ? route.fulfill({ status: 204 })
-        : route.fulfill({ json: pairedProposal ? { proposal_id: 'from-client', proposal: pairedProposal } : {} })
     }
     if (path.endsWith('/settings')) {
       const settings = req.method() === 'PUT' ? req.postDataJSON() : null
@@ -355,7 +341,7 @@ try {
       return route.fulfill({ json: {
         model_url: endpoints.find(endpoint => endpoint.id === defaultEndpoint)?.model_url || '', model_id: chatModelId,
         model_endpoints: endpoints, default_endpoint_id: defaultEndpoint,
-        search_url: searchUrl, has_key: false, mcp_enabled: mcpEnabled,
+        search_url: searchUrl, has_key: false,
         supplier_sites: supplierSites, supplier_download_mib: supplierDownloadMiB,
       } })
     }
@@ -511,6 +497,11 @@ try {
   await page.reload()
   await page.getByText('Could not load other models.', { exact: true }).waitFor()
   assert.equal(await warning.count(), 0)
+  const migrationGuide = page.getByRole('dialog', { name: 'Guide' })
+  await page.locator('#plugin-header').getByRole('button', { name: 'Guide' }).click()
+  await migrationGuide.getByText('FilaMan MCP', { exact: true }).click()
+  await migrationGuide.getByText(/switch your client to FilaMan’s built-in/).waitFor()
+  await migrationGuide.getByRole('button', { name: 'Close' }).click()
 
   canConfigure = true
   modelsUnavailable = false
@@ -586,7 +577,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
   }
   const pluginHeader = page.locator('#plugin-header')
-  const headerSettings = pluginHeader.getByRole('button', { name: 'Model & MCP settings' })
+  const headerSettings = pluginHeader.getByRole('button', { name: 'FilaBrain settings' })
   const tabStops = [headerGuide, headerSettings, ...await headerNav.getByRole('button').all()]
   for (const width of [390, 1120, 1121]) {
     await page.setViewportSize({ width, height: 780 })
@@ -762,7 +753,7 @@ try {
   await page.goto(url)
   await runsTab.waitFor()
 
-  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await page.getByRole('button', { name: 'FilaBrain settings' }).click()
   const settingsTitle = page.getByRole('heading', { name: 'Model settings', exact: true })
   await settingsTitle.waitFor()
   const settingsBefore = await settingsTitle.boundingBox()
@@ -774,10 +765,12 @@ try {
   const formWithGuide = await settingsForm.boundingBox()
   assert.equal(formWithGuide.x, formBefore.x, 'the guide preserves the settings form position')
   assert.equal(formWithGuide.width, formBefore.width, 'the guide preserves the settings form width')
-  await guide.getByText('External MCP', { exact: true }).waitFor()
+  await guide.getByText('FilaMan MCP', { exact: true }).click()
+  assert.equal(await guide.getByRole('link', { name: 'FilaMan’s app settings' }).getAttribute('href'), '/admin/app-settings#mcp-title')
+  await guide.getByText(/switch your client to FilaMan’s built-in/).waitFor()
   await page.getByRole('button', { name: 'Research library', exact: true }).click()
   await guide.getByRole('heading', { name: 'Research library' }).waitFor()
-  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await page.getByRole('button', { name: 'FilaBrain settings' }).click()
   const guideBounds = await guide.boundingBox()
   assert.ok(guideBounds.x >= formBefore.x + formBefore.width, 'the guide sits beside settings')
   assert.equal(guideBounds.y, (await page.locator('[data-view="settings"]').boundingBox()).y, 'the guide and settings start on the same row')
@@ -813,8 +806,6 @@ try {
   assert.equal(await guideClose.locator('svg[aria-hidden="true"]').count(), 1)
   await guideClose.click()
   await guide.waitFor({ state: 'hidden' })
-  const settings = page.locator('#mcp-settings').locator('..').locator('..')
-  await settings.getByText('Off', { exact: true }).waitFor()
   const enableSearch = page.getByRole('button', { name: 'Set up search' })
   const searchField = page.getByRole('textbox', { name: 'SearXNG URL (optional)' })
   const sources = page.getByRole('region', { name: 'Research sources' })
@@ -870,7 +861,7 @@ try {
   await page.getByText('Settings saved.').waitFor()
   assert.equal(searchUrl, 'http://searxng:8080')
   await page.reload()
-  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await page.getByRole('button', { name: 'FilaBrain settings' }).click()
   await searchField.waitFor()
   assert.equal(await searchField.inputValue(), searchUrl)
   assert.equal(await downloadLimit.inputValue(), '12')
@@ -894,7 +885,7 @@ try {
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('Settings saved.').waitFor()
   await page.reload()
-  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await page.getByRole('button', { name: 'FilaBrain settings' }).click()
   await endpointPicker.selectOption({ label: 'Remote models' })
   await visibility.click()
   assert.equal(await page.getByRole('checkbox', { name: 'fixture:hidden', exact: true }).isChecked(), false)
@@ -923,7 +914,7 @@ try {
   await legacyChat.locator('[data-chat-status]').getByText('Choose a model').waitFor()
   await legacyChat.close()
   assert.equal(chatRequests, 2, 'legacy history cannot send to the new default before a model is chosen')
-  await page.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await page.getByRole('button', { name: 'FilaBrain settings' }).click()
   await supplier.uncheck()
   await page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByText('Settings saved.').waitFor()
@@ -933,11 +924,6 @@ try {
   await page.getByText('Settings saved.').waitFor()
   assert.deepEqual(supplierSites, [])
   assert.equal(await enableSearch.isVisible(), false)
-  assert.equal(await settings.getByRole('textbox', { name: 'MCP URL' }).isVisible(), false)
-  await settings.getByRole('switch').press('Space')
-  await settings.getByText('On', { exact: true }).waitFor()
-  assert.equal(await settings.getByRole('textbox', { name: 'MCP URL' }).isVisible(), true)
-
   holdStage = true
   await page.goto('https://fila.test/editor-fixture')
   const frame = page.frameLocator('iframe')
@@ -950,9 +936,9 @@ try {
   await frame.locator('#filabrain-docs[open]:not(:modal)').waitFor()
   const drawerBounds = await frame.locator('.research-chat').boundingBox()
   assert.ok((await drawerGuide.boundingBox()).x >= drawerBounds.x + drawerBounds.width)
-  await frame.getByRole('button', { name: 'Model & MCP settings' }).click()
+  await frame.getByRole('button', { name: 'FilaBrain settings' }).click()
   await frame.locator('#filabrain-docs:modal').waitFor()
-  await drawerGuide.getByText('External MCP', { exact: true }).waitFor()
+  await drawerGuide.getByText('FilaMan MCP', { exact: true }).waitFor()
   await drawerGuide.getByRole('button', { name: 'Close' }).click()
   const settingsGuide = frame.getByRole('button', { name: 'Guide', exact: true })
   await settingsGuide.locator('xpath=self::*[@aria-expanded="false"]').waitFor()
@@ -968,16 +954,7 @@ try {
   await researchMenu.getByRole('group', { name: 'Remote models' }).getByRole('menuitemradio', { name: 'fixture:alternate' }).click()
   await researchMenu.waitFor({ state: 'hidden' })
   assert.equal(await frame.getByText('Advanced options', { exact: true }).count(), 0)
-  assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).isVisible(), false)
-  await frame.getByRole('button', { name: 'Model & MCP settings' }).click()
-  const pair = frame.getByRole('region', { name: 'Pair this draft' })
-  await pair.getByRole('button', { name: 'Pair a client' }).click()
-  const token = pair.getByRole('textbox', { name: /Bearer token/ })
-  await token.waitFor()
-  assert.equal(await token.inputValue(), 'fixture-token')
-  await pair.getByRole('button', { name: 'Disconnect' }).click()
-  assert.equal(await token.isVisible(), false)
-  await frame.getByRole('button', { name: 'Back to chat' }).click()
+  assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).count(), 0)
   assert.equal(await followUp.isVisible(), false)
   assert.match(await researchModel.innerText(), /fixture:alternate/)
   await frame.getByRole('button', { name: 'Find specifications' }).click()
@@ -1092,22 +1069,6 @@ try {
   await frame.locator('[data-chat-history] summary').click()
   await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
   await frame.getByRole('button', { name: 'Stage 2 fields' }).waitFor()
-  await frame.getByRole('button', { name: 'Model & MCP settings' }).click()
-  pairedProposal = {
-    target: { mode: 'edit', filament_id: 10 },
-    suggestions: [{ field: 'density_g_cm3', value: 1.28, sources: evidence }],
-    issues: [],
-  }
-  await pair.getByRole('button', { name: 'Pair a client' }).click()
-  await frame.locator('[data-chat-log]').getByText('A paired client sent a proposal.').waitFor({ state: 'attached' })
-  assert.equal(await token.isVisible(), true, 'an incoming proposal leaves settings visible')
-  await frame.getByRole('button', { name: 'Back to chat' }).click()
-  await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).waitFor()
-  await page.reload()
-  await frame.locator('[data-chat-history] summary').click()
-  await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
-  await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).waitFor()
-  pairedProposal = null
   for (const token of ['d'.repeat(32), null, 'unavailable']) {
     recordUnavailable = token === 'unavailable'
     editorRecordToken = token
@@ -1116,7 +1077,7 @@ try {
     await frame.locator('[data-chat-history-list]').getByRole('button', { name: 'Find specifications', exact: true }).click()
     await frame.getByText(/Saved findings are read-only/).waitFor()
     await frame.getByText('Earlier findings', { exact: true }).first().waitFor()
-    assert.equal(await frame.getByRole('checkbox', { name: /Density.*1\.28/ }).count(), 0)
+    assert.equal(await frame.getByRole('checkbox', { name: /Fixture-PLA.*Silk/ }).count(), 0)
     assert.equal(proposalRequests, requestsBeforeReopen)
   }
 
@@ -1437,7 +1398,7 @@ try {
   await page.goto(url)
   await page.getByRole('region', { name: 'Model settings' }).waitFor()
   assert.equal(await page.getByRole('navigation', { name: 'FilaBrain' }).count(), 0)
-  console.log('FilaBrain plugin page: both scales, NFC reader, spool lookup, chat, create/edit, batches and MCP passed')
+  console.log('FilaBrain plugin page: both scales, NFC reader, spool lookup, chat, create/edit, batches and the MCP migration guide passed')
 } finally {
   await browser.close()
 }

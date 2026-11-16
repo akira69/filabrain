@@ -40,7 +40,6 @@ from .settings import (
     default_endpoint_id,
     endpoints,
     lock_research_plugin,
-    mcp_access_enabled,
     model_group,
     model_key,
     select_model,
@@ -147,7 +146,6 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         endpoint_id = default_endpoint_id(config)
     return {
         "enabled": enabled,
-        "mcp_enabled": enabled and await mcp_access_enabled(db),
         "can_create": enabled and "filaments:create" in permissions,
         "can_add_spool": enabled and principal.auth_type == "session"
         and {"filaments:read", "spools:create"} <= permissions,

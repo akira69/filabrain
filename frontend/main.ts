@@ -19,7 +19,6 @@ export type Status = {
   can_update: boolean
   can_update_manufacturer?: boolean
   can_configure: boolean
-  mcp_enabled: boolean
 }
 
 export function element<T extends HTMLElement = HTMLElement>(id: string) {
@@ -268,9 +267,6 @@ async function main() {
   const message = element('plugin-status')
   try {
     const status = await api.get<Status>('/filabrain/status', { cache: 'no-store' })
-    document.addEventListener('filaman:mcp-state', event => {
-      status.mcp_enabled = (event as CustomEvent<boolean>).detail
-    })
     document.addEventListener('filaman:model-change', event => {
       Object.assign(status, (event as CustomEvent<Pick<Status, 'chat_model' | 'chat_endpoint_id'>>).detail)
     })
@@ -304,8 +300,7 @@ async function main() {
             void mountSettings()
           }
         }
-        element('research-admin-settings').hidden = !status.can_configure
-        settingsButton.hidden = !status.can_configure && !status.mcp_enabled
+        settingsButton.hidden = !status.can_configure
         settingsButton.addEventListener('click', openEditorSettings)
         back.parentElement!.hidden = false
         setGuide('editor')
@@ -340,9 +335,6 @@ async function main() {
     let chat: ReturnType<typeof mountChat> | undefined
     let startResearch: ReturnType<typeof mountResearch> | undefined
     let stopSpoolIntake: (() => void) | undefined
-    let draftOpen = false
-    const canOpenSettings = () => status.can_configure || (draftOpen && status.mcp_enabled)
-    element('research-admin-settings').hidden = !status.can_configure
     function openConversation() {
       const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
       view.hidden = false
@@ -369,12 +361,11 @@ async function main() {
         batch.querySelector<HTMLElement>('[data-batch-message]')!.removeAttribute('data-i18n')
         mountResearchBatches(batch, id)
       }),
-      settings: () => { if (status.can_configure) void mountSettings() },
+      settings: status.can_configure && (() => { void mountSettings() }),
     }
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-tab]')]
     const visited = new Set<string>()
     function show(tab: string, spoolInput?: SpoolResearchInput) {
-      if (tab === 'settings' && !canOpenSettings()) return
       const run = Object.hasOwn(mount, tab) && mount[tab]
       if (!run) return
       if (tab !== 'spool') stopSpoolIntake?.()
@@ -404,12 +395,11 @@ async function main() {
     }
     for (const button of buttons) {
       const tab = button.dataset.tab!
-      button.hidden = tab === 'settings' ? !canOpenSettings()
-        : !mount[tab] || (tab === 'batches' && params.get('tab') !== 'batches')
+      button.hidden = !mount[tab] || (tab === 'batches' && params.get('tab') !== 'batches')
       button.addEventListener('click', () => show(tab))
     }
     nav.hidden = !nav.querySelector('button:not([hidden])')
-    const available = Object.keys(mount).find(tab => tab === 'settings' ? canOpenSettings() : mount[tab])
+    const available = Object.keys(mount).find(tab => mount[tab])
     if (!available) {
       message.textContent = 'You do not have permission to use FilaBrain.'
       return
@@ -417,17 +407,15 @@ async function main() {
     message.textContent = ''
     document.addEventListener('filabrain:chat-mode', event => {
       const researching = (event as CustomEvent<boolean>).detail
-      draftOpen = researching
       const tab = researching ? 'new' : status.can_chat ? 'chat' : 'new'
       for (const button of buttons) {
-        if (button.dataset.tab === 'settings') button.hidden = !canOpenSettings()
         if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
         else button.removeAttribute('aria-current')
       }
       setGuide(tab)
     })
     const tab = params.get('tab') || available
-    show(Object.hasOwn(mount, tab) && (tab === 'settings' ? canOpenSettings() : mount[tab]) ? tab : available)
+    show(Object.hasOwn(mount, tab) && mount[tab] ? tab : available)
     if (mount.batches && tab !== 'batches') {
       const runsButton = nav.querySelector<HTMLButtonElement>('[data-tab="batches"]')!
       function refreshRuns() {

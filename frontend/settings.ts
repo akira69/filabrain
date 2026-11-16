@@ -8,8 +8,6 @@ type SupplierSite = { domain: string; enabled: boolean }
 
 export async function mountSettings() {
   await initI18n()
-  document.querySelector<HTMLInputElement>('#research-mcp-url')!.value =
-    new URL('/api/v1/filabrain/mcp', location.origin).href
   const route = '/api/v1/filabrain/settings'
   const form = document.querySelector<HTMLFormElement>('#filabrain-settings')!
   const message = document.getElementById('research-settings-message')!
@@ -24,12 +22,6 @@ export async function mountSettings() {
   const supplierMessage = document.getElementById('research-supplier-message')!
   const testSearch = form.querySelector<HTMLButtonElement>('#research-test-search')!
   const searchMessage = document.getElementById('research-search-message')!
-  const mcpSwitch = document.querySelector<HTMLInputElement>('#research-mcp-enabled')!
-  const mcpState = document.getElementById('research-mcp-state')!
-  const mcpOff = document.getElementById('research-mcp-off')!
-  const mcpSetup = document.getElementById('research-mcp-setup')!
-  const mcpMessage = document.getElementById('research-mcp-message')!
-  let mcpEnabled: boolean
   let savedSources: string | undefined
   let savedModels: string | undefined
   let modelRevision: string | undefined
@@ -41,36 +33,6 @@ export async function mountSettings() {
     search_url: field('search_url').value.trim(),
     supplier_sites: sites,
     supplier_download_mib: field('supplier_download_mib').valueAsNumber,
-  })
-
-  function showMcp(enabled: boolean) {
-    mcpEnabled = enabled
-    mcpSwitch.checked = enabled
-    mcpState.textContent = t(enabled ? 'common.on' : 'common.off')
-    mcpOff.hidden = enabled
-    mcpSetup.hidden = !enabled
-    document.dispatchEvent(new CustomEvent('filaman:mcp-state', { detail: enabled }))
-  }
-
-  mcpSwitch.addEventListener('change', async () => {
-    const hadFocus = document.activeElement === mcpSwitch
-    mcpSwitch.disabled = true
-    mcpMessage.textContent = ''
-    try {
-      const response = await fetch(`${route}/mcp`, {
-        method: 'PUT', credentials: 'include', headers: researchHeaders(),
-        body: JSON.stringify({ mcp_enabled: mcpSwitch.checked }),
-      })
-      if (!response.ok) throw new Error()
-      const data = await response.json()
-      showMcp(data.mcp_enabled)
-    } catch {
-      mcpSwitch.checked = mcpEnabled
-      mcpMessage.textContent = t('filaBrain.mcpSaveFailed')
-    } finally {
-      mcpSwitch.disabled = false
-      if (hadFocus && document.activeElement === document.body) mcpSwitch.focus({ preventScroll: true })
-    }
   })
 
   function refresh() {
@@ -224,11 +186,6 @@ export async function mountSettings() {
     const focusUrl = document.activeElement === form.querySelector('#research-add-endpoint')
     fill(data)
     if (focusUrl) field('model_url').focus()
-    showMcp(data.mcp_enabled)
-    mcpSwitch.disabled = false
-    if (location.hash === '#mcp-settings') {
-      document.getElementById('mcp-settings')?.closest('section')?.scrollIntoView({ block: 'end' })
-    }
     refresh()
     form.addEventListener('submit', event => { event.preventDefault(); void send('save') })
     testSearch.addEventListener('click', () => void send('test-search'))
@@ -238,6 +195,5 @@ export async function mountSettings() {
     })
   } catch {
     message.textContent = t('filaBrain.failed')
-    mcpMessage.textContent = t('filaBrain.failed')
   }
 }

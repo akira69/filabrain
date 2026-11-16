@@ -1,5 +1,5 @@
 import { element, errorText, hostRequest, type Status } from './main'
-import { api, fetchAllPages, getCsrfToken } from './shared/api'
+import { api, fetchAllPages } from './shared/api'
 import { researchFieldLabel, researchOptionValue, researchRecommendation, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
 import type { Chat } from './chat'
@@ -145,10 +145,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   const save = element<HTMLButtonElement>('save-filament')
   const confirm = element<HTMLDialogElement>('create-confirm')
   const createButton = element<HTMLButtonElement>('create-filament')
-  const pairing = element('research-pairing')
-  const pair = element<HTMLButtonElement>('pair-client')
-  const credentials = element('pair-credentials')
-  const pairStatus = element('pair-status')
   const manufacturer = element<HTMLInputElement>('draft-manufacturer')
   const manufacturerOptions = element<HTMLDataListElement>('draft-manufacturer-options')
   let manufacturers: { id: number; name: string }[] = []
@@ -171,16 +167,13 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   const inputs = element('research-inputs')
   const chatInput = document.querySelector('[data-chat-research-input]')!
   const chatResults = document.querySelector('[data-chat-research-results]')!
-  const mcpTarget = (context: EditorContext) => ({
+  const proposalTarget = (context: EditorContext) => ({
     mode: context.mode, filament_id: context.filament_id, identity: identity(context.fields),
   })
   let choices = new Map<HTMLInputElement, Unit>()
   let bound: EditorContext | undefined
   let boundProposal: ResearchProposal | undefined
   let draft: Fields | undefined
-  let pairId: string | undefined
-  let pairGeneration = 0
-  let pairPoll = 0
   let busy = false
   let saving = false
   let duplicate = false
@@ -596,7 +589,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       await chat.researchTurn(prompt || label || (proposalTitle && !editor ? `${actionLabel} · ${proposalTitle}` : actionLabel), async () => {
         try {
           let proposal = await api.post<ResearchProposal>(route + '/proposals', {
-            ...mcpTarget(context),
+            ...proposalTarget(context),
             record_token: context.record_token,
             action,
             product_url: productUrl || undefined,
@@ -667,7 +660,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     notice.textContent = ''
     lastAction = 'fill'
     if (editor) buttons[0].before(chat.picker)
-    void disconnect()
   }
 
   function archivedValue(field: string, value: Value, sources: ResearchOption['sources']) {
@@ -689,7 +681,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     formRevision++
     clearResults()
     notice.textContent = ''
-    void disconnect()
   })
 
   chat.setResearch({
@@ -895,36 +886,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     }
   })
 
-  function revoke(id: string) {
-    return api.delete(route + '/pairings/' + encodeURIComponent(id), { keepalive: true, csrfToken: getCsrfToken() }).catch(() => {})
-  }
-
-  function disconnect() {
-    pairGeneration++
-    window.clearTimeout(pairPoll)
-    credentials.hidden = true
-    pairStatus.textContent = ''
-    element<HTMLInputElement>('pair-url').value = ''
-    element<HTMLInputElement>('pair-token').value = ''
-    pair.disabled = false
-    const id = pairId
-    pairId = undefined
-    if (id) return revoke(id)
-  }
-
-  let draftOpen = !!editor
-  function showPairing(enabled: boolean) {
-    pairing.hidden = !enabled || !draftOpen
-    if (pairing.hidden) void disconnect()
-  }
-  showPairing(status.mcp_enabled)
-  document.addEventListener('filaman:mcp-state', event => showPairing((event as CustomEvent<boolean>).detail))
-  document.addEventListener('filabrain:chat-mode', event => {
-    if (!editor) {
-      draftOpen = (event as CustomEvent<boolean>).detail
-      showPairing(status.mcp_enabled)
-    }
-  })
   window.addEventListener('focus', async () => {
     if (form.closest<HTMLElement>('[data-view]')?.hidden) return
     try {
@@ -934,71 +895,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
           detail: { chat_model: current.chat_model, chat_endpoint_id: current.chat_endpoint_id },
         }))
       }
-      status.mcp_enabled = current.mcp_enabled
-      showPairing(current.mcp_enabled)
     } catch { /* Keep the last known settings while the server is unreachable. */ }
-  })
-  element('pair-revoke').addEventListener('click', () => { void disconnect() })
-  window.addEventListener('pagehide', () => { void disconnect() })
-
-  pair.addEventListener('click', async () => {
-    const generation = ++pairGeneration
-    pair.disabled = true
-    try {
-      const context = await target()
-      const session = await api.post<{ id: string; url: string; token: string }>(route + '/pairings', mcpTarget(context))
-      if (generation !== pairGeneration) {
-        void revoke(session.id)
-        return
-      }
-      pairId = session.id
-      element<HTMLInputElement>('pair-url').value = session.url
-      element<HTMLInputElement>('pair-token').value = session.token
-      credentials.hidden = false
-      const path = route + '/pairings/' + encodeURIComponent(session.id)
-      let lastId: string | undefined
-      const poll = async () => {
-        if (pairId !== session.id) return
-        try {
-          const incoming = await api.get<{ proposal_id?: string; proposal?: ResearchProposal }>(path, { cache: 'no-store' })
-          if (pairId !== session.id) return
-          if (incoming.proposal && incoming.proposal_id && incoming.proposal_id !== lastId) {
-            const proposal = incoming.proposal
-            const current = await target()
-            if (pairId !== session.id) return
-            if (current.filament_id !== context.filament_id || current.record_token !== context.record_token ||
-                JSON.stringify(identity(current.fields)) !== JSON.stringify(identity(context.fields))) {
-              void disconnect()
-              pairStatus.textContent = t('filaBrain.identityChanged')
-              return
-            }
-            if (!busy && !saving) {
-              showInChat(true, false)
-              if (await chat.researchTurn(t('filaBrain.pairReceived'), async () => {
-                conversation.hidden = false
-                lastAction = 'fill'
-                render(proposal, current)
-                return {
-                  reply: t(results.childElementCount ? 'filaBrain.researchReview' : 'filaBrain.noSuggestions'),
-                  draft: { fields: Object.fromEntries(new FormData(form).entries()) as Record<string, string>,
-                    context: current, proposal, action: 'fill' },
-                }
-              })) lastId = incoming.proposal_id
-            }
-          }
-          pairPoll = window.setTimeout(poll, 2000)
-        } catch {
-          if (pairId !== session.id) return
-          void disconnect()
-          pairStatus.textContent = t('filaBrain.pairExpired')
-        }
-      }
-      pairPoll = window.setTimeout(poll, 2000)
-    } catch (error) {
-      if (generation !== pairGeneration) return
-      void disconnect()
-      pairStatus.textContent = errorText(error)
-    }
   })
   if (editor) showInChat(false)
   return (input?: SpoolResearchInput) => {
