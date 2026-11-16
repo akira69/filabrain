@@ -2,7 +2,7 @@ import { isAbortError } from './abort'
 import { api, ApiError } from './api'
 import { CACHE_KEYS, invalidateCache } from './cache'
 import { escapeHtml, formatNumericRange } from './extra-fields'
-import { researchFieldLabel, researchOptionValue, type ResearchOption } from './filabrain'
+import { researchFieldLabel, researchOptionValue, researchRecommendation, type ResearchIssue } from './filabrain'
 import { t } from './i18n'
 import { mountSwatchReview } from './swatch-review'
 
@@ -40,7 +40,7 @@ type Item = {
   }
   color_references?: string[]
   proposals: Proposal[]
-  issues: { code: string; field?: string; source?: string; name?: string; message?: string; reason?: string; url?: string; product_url?: string | null; options?: ResearchOption[] }[]
+  issues: (ResearchIssue & { message?: string })[]
   approved_ids: string[]
   changed_fields: string[]
   applied_at: string | null
@@ -179,19 +179,29 @@ function issueText(issue: Item['issues'][number]) {
   return description === key ? issue.code.replaceAll('_', ' ') : description
 }
 
-function issueList(issues: Item['issues'], evidence: ReturnType<typeof proposalSources>, changedFields: string[] = []) {
+function issueList(issues: Item['issues'], evidence: ReturnType<typeof proposalSources>,
+  changedFields: string[] = [], proposals: Proposal[] = []) {
   const linked = new Set(evidence.keys())
   return `<ul class="batch-evidence">
     ${issues.map(issue => {
       const url = issue.url && /^https?:\/\//i.test(issue.url) && !linked.has(issue.url) ? issue.url : ''
       if (url) linked.add(url)
+      const field = issue.field
+      const preferred = field && proposals.find(proposal => field in proposal.fields)?.fields[field].value
       return `<li>${escapeHtml(issueText(issue))}${issue.reason ? ` (${escapeHtml(issue.reason)})` : ''}
       ${url ? link(url, tr('source')) : ''}
-      ${issue.options?.length ? `<ul>${issue.options.map(option => `
-        <li>${escapeHtml(researchOptionValue(option.value))}
-          ${option.sources.map(source => source.url && /^https?:\/\//i.test(source.url)
-            ? link(source.url, source.title) : escapeHtml(source.title)).join(' ')}
-        </li>`).join('')}</ul>` : ''}
+      ${issue.options?.length ? `
+        ${issue.requires_product_choice ? `<p>${escapeHtml(t('filaBrain.chooseProductFirst'))}</p>` : ''}
+        <ul>${issue.options.map(option => {
+          const recommendation = researchRecommendation(issue, option.value, preferred)
+          return `<li>${escapeHtml(researchOptionValue(option.value))}
+            ${recommendation ? `<span class="batch-muted">${escapeHtml(recommendation)}</span>` : ''}
+            ${option.sources.map(source => `<p>
+              ${source.url && /^https?:\/\//i.test(source.url) ? link(source.url, source.title) : escapeHtml(source.title)}
+              ${source.evidence ? `<span class="batch-muted"> — <span>${escapeHtml(source.evidence)}</span></span>` : ''}
+            </p>`).join('')}
+          </li>`
+        }).join('')}</ul>` : ''}
     </li>`
     }).join('')}
     ${changedFields.map(field => `<li>${escapeHtml(fieldName(field))}</li>`).join('')}
@@ -307,7 +317,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
     const diagnostics: Item['issues'] = []
     const seenIssues = new Set<string>()
     const checkedUrls = new Set(item.issues.filter(issue => issue.code === 'manufacturer_page' ||
-      issue.code === 'unavailable_source' || issue.code === 'supplier_download_limit').map(issue => issue.url).filter(Boolean))
+      issue.code === 'unavailable_source' || issue.code === 'supplier_download_limit' ||
+      issue.code === 'supplier_rate_limited').map(issue => issue.url).filter(Boolean))
     for (const issue of item.issues) {
       const key = JSON.stringify(issue)
       if (seenIssues.has(key)) continue
@@ -316,7 +327,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
         const productUrl = issue.code === 'manufacturer_page' ? issue.url : issue.product_url
         if (productUrl && (evidence.has(productUrl) || issue.code === 'possible_match' && checkedUrls.has(productUrl))) continue
         diagnostics.push(issue)
-      } else if (proposals.length && ['unavailable_source', 'supplier_download_limit'].includes(issue.code)) {
+      } else if (proposals.length && ['unavailable_source', 'supplier_download_limit', 'supplier_rate_limited'].includes(issue.code)) {
         diagnostics.push(issue)
       } else notes.push(issue)
     }
@@ -345,7 +356,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
         <p class="batch-muted" tabindex="-1" role="status" data-swatch-status></p>
       </section>` : ''}
       ${visibleNotes.length || changedFields.length ? `
-        <div class="batch-notes">${issueList(visibleNotes, evidence, changedFields)}</div>` : ''}
+        <div class="batch-notes">${issueList(visibleNotes, evidence, changedFields, proposals)}</div>` : ''}
       ${editable && canRetry(item) && item.decision !== 'skipped' ? `
         <form class="batch-retry">
           <label>${escapeHtml(tr('retrySku'))}<input class="fm-input" name="sku_hint" maxlength="250" /></label>
@@ -386,11 +397,12 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       ['stale', batch.items.filter(item => item.status === 'stale' ||
         (item.status === 'unavailable' && item.changed_fields.length > 0) ||
         lastApply.some(result => result.item_id === item.id && result.status === 'stale'))],
+      ['skipped', batch.items.filter(item => item.decision === 'skipped')],
       ['pending', batch.items.filter(item => item.decision !== 'skipped' && (researching(item) || ['ready', 'needs_match', 'failed'].includes(item.status)))],
       ['approval_changed', batch.items.filter(item => lastApply.some(result => result.item_id === item.id && result.status === 'approval_changed'))],
       ['error', batch.items.filter(item => lastApply.some(result => result.item_id === item.id && result.status === 'error'))],
     ] as const
-    report.hidden = !lastApply.length && !categories.slice(0, 2).some(([, items]) => items.length)
+    report.hidden = !lastApply.length && !categories.slice(0, 3).some(([, items]) => items.length)
     const expanded = new Set(Array.from(report.querySelectorAll<HTMLDetailsElement>('details[open]'), el => el.dataset.result))
     report.innerHTML = report.hidden ? '' : `
       <header class="fm-section-header"><h2 tabindex="-1">${escapeHtml(tr('report'))}</h2></header>
@@ -401,6 +413,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
           <ul>${items.map(item => `<li>
             <button class="batch-text-button" data-item="${item.id}" type="button">${escapeHtml(label(item))}</button>
             ${item.live_filament_id ? link(`/filaments/${item.live_filament_id}?edit=1`, tr('openEditor')) : ''}
+            ${key === 'applied' && item.changed_fields.length
+              ? `<p class="batch-muted">${escapeHtml(item.changed_fields.map(fieldName).join(' · '))}</p>` : ''}
           </li>`).join('')}</ul>
         </details>`).join('')}</div>`
   }

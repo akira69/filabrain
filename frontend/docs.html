@@ -14,8 +14,20 @@
     <details data-guide-settings open>
       <summary>Model providers</summary>
       <dl>
-        <dt><a href="https://docs.ollama.com/api/openai-compatibility" target="_blank" rel="noopener noreferrer">Ollama setup</a></dt>
-        <dd><code>http://&lt;ollama-host&gt;:11434/v1</code><br>Use an address the FilaMan server can reach and a model already installed on Ollama. Local Ollama typically uses no key.</dd>
+        <dt>Recommended hosted setup · <a href="https://github.com/cheaper-inference/OmniRoute" target="_blank" rel="noopener noreferrer">OmniRoute setup</a></dt>
+        <dd>
+          <p>In the OmniRoute dashboard, open <strong>Providers → Groq</strong> and connect your Groq API key. Groq offers Qwen 3.8 27B on its rate-limited free plan. <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">Create a Groq API key</a> · <a href="https://console.groq.com/docs/model/qwen/qwen3.8-27b" target="_blank" rel="noopener noreferrer">Groq model</a> · <a href="https://console.groq.com/docs/rate-limits" target="_blank" rel="noopener noreferrer">Groq rate limits</a></p>
+          <p>Add <code>http://&lt;omniroute-host&gt;:20128/v1</code> or your configured HTTPS URL in FilaBrain. Use the <strong>OmniRoute endpoint key</strong> from its dashboard and select <code>groq/qwen/qwen3.8-27b</code>. Test the connection, save, and choose <strong>Make default</strong> if you want to start with it.</p>
+          <p>In one matched FilaBrain test, Groq and local Qwen 27B returned the same nine specs. Extraction took 1.7 seconds through OmniRoute and 33.9 seconds locally on an NVIDIA V100 with 32 GB of VRAM. Hosted models receive your question and relevant FilaMan context.</p>
+        </dd>
+        <dt><a href="https://docs.ollama.com/quickstart" target="_blank" rel="noopener noreferrer">Ollama setup</a></dt>
+        <dd>
+          <p>Install and start Ollama on the computer running the model. Start with <code>ollama pull qwen3:4b-instruct</code>.</p>
+          <p>In FilaBrain, enter <code>http://&lt;ollama-host&gt;:11434/v1</code> using an address reachable from FilaMan, including from inside its container if applicable. Leave the API key blank for a standard local Ollama server. For a separate machine, use a private network and configure Ollama to listen on it. <a href="https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network" target="_blank" rel="noopener noreferrer">Ollama network setup</a></p>
+          <p>Load models, pick the model you downloaded, test the connection, and save. Try asking which filament suits an outdoor bracket. Use <strong>Sources and inventory</strong> to check exact weights, settings, and compatibility. The built-in references are available without SearXNG.</p>
+        </dd>
+        <dt><a href="https://openrouter.ai/collections/free-models" target="_blank" rel="noopener noreferrer">OpenRouter free tier</a></dt>
+        <dd>Use <code>https://openrouter.ai/api/v1</code> and an <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noopener noreferrer">OpenRouter API key</a>. Select a currently available model with the <code>:free</code> suffix and test the connection.</dd>
         <dt><a href="https://developers.openai.com/api/reference/overview" target="_blank" rel="noopener noreferrer">OpenAI API setup</a></dt>
         <dd><code>https://api.openai.com/v1</code><br>Use an OpenAI project API key and a text model that supports Chat Completions.</dd>
         <dt><a href="https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk" target="_blank" rel="noopener noreferrer">Claude compatibility setup</a></dt>
@@ -28,10 +40,13 @@
     </details>
     <section data-guide-topic="chat">
       <h3 data-i18n="filaBrain.chat">Chat</h3>
-      <p>Ask about materials, print settings, or troubleshooting. Open <strong>History</strong> to continue a conversation saved in this browser.</p>
+      <p>Ask which spools in your library suit a job or select a printer and filament for settings. Open <strong>Sources and inventory</strong> below the answer to check weight, compatibility, and published settings.</p>
+      <p>Ask for a spool’s empty weight or dimensions to compare catalog matches and photos. Select the reel that matches yours to keep the choice in this conversation.</p>
+      <p>Printing references and catalogs work with a local model when the Internet is unavailable. Choose <strong>Search the web</strong> to check known manufacturer pages and datasheets. SearXNG can find additional sources. Open <strong>History</strong> to continue a conversation saved in this browser.</p>
     </section>
     <section data-guide-topic="new" hidden>
       <h3>Research new filament</h3>
+      <p>Use <strong>Find spool specs</strong> in a new or existing filament. Choose a matching reel to review its empty weight, outer diameter, and width before saving. If the filament already links to a FilaManDB spool profile, FilaBrain shows its photo when available.</p>
       <p>Enter a product name or paste a product URL, then select <strong>Find specifications</strong>. Use the chat input to ask a follow-up. Review the values and their sources before saving.</p>
       <p>Manufacturer sources take priority. SearXNG can find additional product pages and datasheets.</p>
     </section>
@@ -42,6 +57,11 @@
     <section data-guide-topic="library" hidden>
       <h3>Research library</h3>
       <p>Select up to 50 existing filaments and choose a research mode. Review the results in <strong>Research runs</strong>.</p>
+    </section>
+    <section data-guide-topic="spool" hidden>
+      <h3 data-i18n="spoolIntake.title">Add spool</h3>
+      <p>Choose <strong>Spool link</strong> to check a tag for a linked spool, or <strong>Filament details</strong> to read the product from the scale. After reading the details, verify the spool link or choose <strong>Find filament for a new spool</strong>. You can also search by label, SKU, or product URL.</p>
+      <p>Review the match and save the spool in FilaMan. Use the scale to link the tag and record its weight.</p>
     </section>
     <section data-guide-topic="batches" hidden>
       <h3 data-i18n="researchBatches.title">Research runs</h3>

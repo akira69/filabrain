@@ -1,0 +1,418 @@
+[
+  {
+    "id": "paramount-enzo-petg",
+    "identity": {
+      "manufacturer": "Paramount 3D",
+      "designation": "PETG (Enzo Red)",
+      "material": "PETG",
+      "color": "Enzo Red",
+      "sku": "TRRL3020485G"
+    },
+    "source": "https://www.paramount-3d.com/product-page/petg-enzo-red-1-75mm-1kg-filament-trrl3020485g",
+    "expected": {
+      "manufacturer_sku": "TRRL3020485G",
+      "extruder_temp_range_c": {
+        "min": 220,
+        "max": 260
+      },
+      "bed_temp_range_c": {
+        "min": 60,
+        "max": 80
+      }
+    },
+    "product_url": "https://www.paramount-3d.com/product-page/petg-enzo-red-1-75mm-1kg-filament-trrl3020485g",
+    "expected_issue_texts": ["RAL 3020"]
+  },
+  {
+    "id": "paramount-harajuku-petg",
+    "identity": {
+      "manufacturer": "Paramount 3D",
+      "designation": "PETG (Harajuku Pink)",
+      "material": "PETG",
+      "color": "Harajuku Pink",
+      "sku": "TMRL4010675G"
+    },
+    "source": "https://www.paramount-3d.com/product-page/petg-harajuku-pink-1-75mm-1kg-filament-tmrl4010675a",
+    "expected": {
+      "manufacturer_sku": "TMRL4010675G",
+      "extruder_temp_range_c": {
+        "min": 220,
+        "max": 260
+      },
+      "bed_temp_range_c": {
+        "min": 60,
+        "max": 80
+      }
+    },
+    "product_url": "https://www.paramount-3d.com/product-page/petg-harajuku-pink-1-75mm-1kg-filament-tmrl4010675a",
+    "expected_issue_texts": ["RAL 4010"]
+  },
+  {
+    "id": "paramount-khaki-asa",
+    "identity": {
+      "manufacturer": "Paramount 3D",
+      "designation": "ASA (Military Khaki)",
+      "material": "ASA",
+      "color": "Military Khaki",
+      "sku": "GBRL10197530SA"
+    },
+    "source": "https://www.paramount-3d.com/product-page/paramount-3d-asa-military-khaki-1-75mm-1kg-filament-gbrl10197530sa-asa",
+    "expected": {
+      "manufacturer_sku": "GBRL10197530SA"
+    },
+    "product_url": "https://www.paramount-3d.com/product-page/paramount-3d-asa-military-khaki-1-75mm-1kg-filament-gbrl10197530sa-asa"
+  },
+  {
+    "id": "paramount-enzo-asa",
+    "identity": {
+      "manufacturer": "Paramount 3D",
+      "designation": "ASA (Enzo Red)",
+      "material": "ASA",
+      "color": "Enzo Red",
+      "sku": "TRRL3020485SA"
+    },
+    "source": "https://www.paramount-3d.com/product-page/paramount-3d-asa-enzo-red-1-75mm-1kg-filament-trrl3020485sa-asa",
+    "expected": {
+      "manufacturer_sku": "TRRL3020485SA"
+    },
+    "product_url": "https://www.paramount-3d.com/product-page/paramount-3d-asa-enzo-red-1-75mm-1kg-filament-trrl3020485sa-asa"
+  },
+  {
+    "id": "paramount-black-petg",
+    "identity": {
+      "manufacturer": "Paramount 3D",
+      "designation": "PETG (Black)",
+      "material": "PETG",
+      "color": "Black"
+    },
+    "source": "https://www.paramount-3d.com/product-page/petg-pantone-black-6c-1-75mm",
+    "expected": {
+      "diameter_mm": 1.75,
+      "raw_material_weight_g": 1000
+    },
+    "product_url": "https://www.paramount-3d.com/product-page/petg-pantone-black-6c-1-75mm",
+    "expected_issue_texts": ["RAL 9004", "Pantone Black 6 C"]
+  },
+  {
+    "id": "paramount-enzo-from-label",
+    "identity": {
+      "manufacturer": "Paramount 3D",
+      "designation": "PETG Enzo Red",
+      "material": "PETG",
+      "color": "Enzo Red"
+    },
+    "source": "https://www.paramount-3d.com/product-page/petg-enzo-red-1-75mm-1kg-filament-trrl3020485g",
+    "expected": {
+      "manufacturer_sku": "TRRL3020485G"
+    }
+  },
+  {
+    "id": "bambu-green-spool",
+    "identity": {
+      "manufacturer": "Bambu Lab",
+      "designation": "PLA Basic",
+      "material": "PLA",
+      "color": "Bambu Green",
+      "sku": "10501"
+    },
+    "source": "https://bambu-lab-jp.myshopify.com/products/pla-basic-filament?variant=45285045043492",
+    "expected": {
+      "raw_material_weight_g": 1000
+    },
+    "product_url": "https://bambu-lab-jp.myshopify.com/products/pla-basic-filament?variant=45285045043492"
+  },
+  {
+    "id": "bambu-green-refill",
+    "identity": {
+      "manufacturer": "Bambu Lab",
+      "designation": "PLA Basic Refill",
+      "material": "PLA",
+      "color": "Bambu Green",
+      "sku": "10501"
+    },
+    "source": "https://bambu-lab-ca.myshopify.com/products/pla-basic-filament",
+    "expected": {
+      "raw_material_weight_g": 1000
+    },
+    "product_url": "https://bambu-lab-ca.myshopify.com/products/pla-basic-filament",
+    "guidance": "This is the 1 kg refill without a spool. Check the refill variant.",
+    "forbidden_fields": [
+      "default_spool_weight_g",
+      "spool_outer_diameter_mm",
+      "spool_width_mm",
+      "spool_material"
+    ]
+  },
+  {
+    "id": "bambu-petg-hf",
+    "identity": {
+      "manufacturer": "Bambu Lab",
+      "designation": "PETG HF",
+      "material": "PETG"
+    },
+    "source": "https://bambu-lab-global.myshopify.com/products/petg-hf",
+    "expected": {
+      "density_g_cm3": 1.28,
+      "drying_temp_c": 65,
+      "drying_time_hours": 8,
+      "extruder_temp_range_c": {
+        "min": 230,
+        "max": 260
+      }
+    },
+    "product_url": "https://bambu-lab-global.myshopify.com/products/petg-hf"
+  },
+  {
+    "id": "bambu-petg-translucent",
+    "identity": {
+      "manufacturer": "Bambu Lab",
+      "designation": "PETG Translucent",
+      "material": "PETG"
+    },
+    "source": "https://bambu-lab-global.myshopify.com/products/petg-translucent",
+    "expected": {
+      "density_g_cm3": 1.25,
+      "drying_temp_c": 65,
+      "drying_time_hours": 8,
+      "extruder_temp_range_c": {
+        "min": 230,
+        "max": 270
+      }
+    },
+    "product_url": "https://bambu-lab-global.myshopify.com/products/petg-translucent",
+    "source_conflict": {
+      "field": "extruder_temp_range_c",
+      "values": [
+        {
+          "min": 230,
+          "max": 260
+        },
+        {
+          "min": 230,
+          "max": 270
+        }
+      ]
+    }
+  },
+  {
+    "id": "bambu-tpu-95a-hf",
+    "identity": {
+      "manufacturer": "Bambu Lab",
+      "designation": "TPU 95A HF",
+      "material": "TPU"
+    },
+    "source": "https://bambu-lab-global.myshopify.com/products/tpu-95a-hf",
+    "expected": {
+      "density_g_cm3": 1.22,
+      "drying_temp_c": 70,
+      "drying_time_hours": 8,
+      "extruder_temp_range_c": {
+        "min": 220,
+        "max": 240
+      }
+    },
+    "product_url": "https://bambu-lab-global.myshopify.com/products/tpu-95a-hf"
+  },
+  {
+    "id": "bambu-asa",
+    "identity": {
+      "manufacturer": "Bambu Lab",
+      "designation": "ASA",
+      "material": "ASA"
+    },
+    "source": "https://bambu-lab-global.myshopify.com/products/asa-filament",
+    "expected": {
+      "density_g_cm3": 1.05,
+      "drying_temp_c": 80,
+      "drying_time_hours": 8,
+      "extruder_temp_range_c": {
+        "min": 240,
+        "max": 270
+      }
+    },
+    "product_url": "https://bambu-lab-global.myshopify.com/products/asa-filament"
+  },
+  {
+    "id": "polymaker-petg",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "Polymaker PETG",
+      "material": "PETG"
+    },
+    "source": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/technical-data-at-a-glance",
+    "expected": {
+      "density_g_cm3": 1.3
+    }
+  },
+  {
+    "id": "polylite-petg",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "PolyLite PETG",
+      "material": "PETG"
+    },
+    "source": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/technical-data-at-a-glance",
+    "expected": {
+      "density_g_cm3": 1.25
+    }
+  },
+  {
+    "id": "polymax-petg",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "PolyMax PETG",
+      "material": "PETG"
+    },
+    "source": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/technical-data-at-a-glance",
+    "expected": {
+      "density_g_cm3": 1.24
+    }
+  },
+  {
+    "id": "polylite-abs",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "PolyLite ABS",
+      "material": "ABS"
+    },
+    "source": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/technical-data-at-a-glance",
+    "expected": {
+      "density_g_cm3": 1.04
+    }
+  },
+  {
+    "id": "polymaker-asa",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "Polymaker ASA",
+      "material": "ASA"
+    },
+    "source": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/technical-data-at-a-glance",
+    "expected": {
+      "density_g_cm3": 1.13
+    }
+  },
+  {
+    "id": "polyflex-tpu95",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "PolyFlex TPU95",
+      "material": "TPU"
+    },
+    "source": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/technical-data-at-a-glance",
+    "expected": {
+      "density_g_cm3": 1.22
+    }
+  },
+  {
+    "id": "polyflex-tpu95-hf",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "PolyFlex TPU95-HF",
+      "material": "TPU"
+    },
+    "source": "https://wiki.polymaker.com/polymaker-products/more-about-our-products/documents/technical-data-sheets/tpu/polyflex-tm-tpu95-hf",
+    "expected": {
+      "density_g_cm3": 1.16
+    },
+    "product_url": "https://wiki.polymaker.com/polymaker-products/more-about-our-products/documents/technical-data-sheets/tpu/polyflex-tm-tpu95-hf"
+  },
+  {
+    "id": "fiberon-pa6-cf20-500",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "Fiberon PA6-CF20",
+      "material": "PA",
+      "weight_g": 500
+    },
+    "source": "https://fiberon.polymaker.com/product/pa6-cf20/",
+    "expected": {
+      "raw_material_weight_g": 500,
+      "density_g_cm3": 1.17
+    },
+    "product_url": "https://fiberon.polymaker.com/product/pa6-cf20/",
+    "guidance": "Research the 500 g package only."
+  },
+  {
+    "id": "fiberon-pa6-cf20-2000",
+    "identity": {
+      "manufacturer": "Polymaker",
+      "designation": "Fiberon PA6-CF20",
+      "material": "PA",
+      "weight_g": 2000
+    },
+    "source": "https://fiberon.polymaker.com/product/pa6-cf20/",
+    "expected": {
+      "raw_material_weight_g": 2000,
+      "density_g_cm3": 1.17
+    },
+    "product_url": "https://fiberon.polymaker.com/product/pa6-cf20/",
+    "guidance": "Research the 2000 g package only."
+  },
+  {
+    "id": "prusa-pla",
+    "identity": {
+      "manufacturer": "Prusament",
+      "designation": "Prusament PLA",
+      "material": "PLA"
+    },
+    "source": "https://prusament.com/wp-content/uploads/2022/10/PLA_Prusament_TDS_2021_10_DE.pdf",
+    "expected": {
+      "density_g_cm3": 1.24
+    },
+    "product_url": "https://prusament.com/wp-content/uploads/2022/10/PLA_Prusament_TDS_2021_10_DE.pdf"
+  },
+  {
+    "id": "prusa-petg",
+    "identity": {
+      "manufacturer": "Prusament",
+      "designation": "Prusament PETG",
+      "material": "PETG"
+    },
+    "source": "https://prusament.com/wp-content/uploads/2022/10/PETG_Prusament_TDS_2021_10_EN.pdf",
+    "expected": {
+      "density_g_cm3": 1.27
+    },
+    "product_url": "https://prusament.com/wp-content/uploads/2022/10/PETG_Prusament_TDS_2021_10_EN.pdf"
+  },
+  {
+    "id": "prusa-tpu95",
+    "identity": {
+      "manufacturer": "Prusament",
+      "designation": "Prusament TPU 95A",
+      "material": "TPU"
+    },
+    "source": "https://prusament.com/materials/prusament-tpu-95a/",
+    "expected": {
+      "extruder_temp_range_c": {
+        "min": 220,
+        "max": 240
+      },
+      "bed_temp_range_c": {
+        "min": 55,
+        "max": 75
+      }
+    },
+    "product_url": "https://prusament.com/materials/prusament-tpu-95a/"
+  },
+  {
+    "id": "prusa-pc-blend",
+    "identity": {
+      "manufacturer": "Prusament",
+      "designation": "Prusament PC Blend",
+      "material": "PC"
+    },
+    "source": "https://prusament.com/materials/prusament-pc-blend/",
+    "expected": {
+      "extruder_temp_range_c": {
+        "min": 265,
+        "max": 285
+      },
+      "bed_temp_range_c": {
+        "min": 100,
+        "max": 120
+      }
+    },
+    "product_url": "https://prusament.com/materials/prusament-pc-blend/"
+  }
+]

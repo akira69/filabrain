@@ -1,5 +1,7 @@
-import { api } from './shared/api'
-import { t } from './shared/i18n'
+import { api, fetchAllPages } from './shared/api'
+import { getLang, t } from './shared/i18n'
+import { researchFieldLabel } from './shared/filabrain'
+import { spoolProfileCards, type SpoolProfile } from './shared/spool-profiles'
 import { mountModelPicker, type ModelSelection } from './shared/model-picker'
 import { identity, type ResearchDraft } from './research'
 
@@ -11,8 +13,18 @@ const pageLabels = {
   model_settings: 'filaBrain.settings',
 }
 type Action = { page: keyof typeof pageLabels; url: string }
+type Evidence = {
+  id: string; kind: string; title: string; url: string; text?: string; details?: Record<string, unknown>
+  scope?: 'grade' | 'variant'
+  links?: { title: string; url: string }[]
+  remaining_g?: number | null; meets_required?: boolean | null; status?: string
+}
+type Grounding = {
+  evidence: Evidence[]; notices: string[]; search: string | null; required_g: number | null
+}
 type Message = {
   role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal']; savedDraftId?: string
+  grounding?: Grounding; spoolProfiles?: SpoolProfile[]; selectedSpoolProfile?: string
 }
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
@@ -26,11 +38,74 @@ type Research = {
   followUp(prompt: string): Promise<void>
 }
 
-export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined) {
+const evidenceLabels: Record<string, string> = {
+  spool: 'chatInventory', filament: 'chatSavedFilament', printer: 'chatSavedPrinter',
+  saved_profile: 'chatSavedProfile', saved_calibration: 'chatSavedCalibration',
+  preset: 'chatPreset', catalog: 'chatCatalog', live: 'chatLive',
+}
+const noticeLabels: Record<string, string> = {
+  no_spools: 'chatNoSpools', spools_forbidden: 'chatSpoolsForbidden', printer_required: 'chatPrinterRequired',
+  filament_required: 'chatFilamentRequired', nozzle_required: 'chatNozzleRequired',
+  no_exact_profile: 'chatNoExactProfile', missing_evidence: 'chatMissingEvidence',
+}
+const searchLabels: Record<string, string> = {
+  disabled: 'chatSearchDisabled', no_terms: 'chatSearchNoTerms', no_match: 'chatSearchNoMatch',
+  failed: 'chatSearchFailed', complete: 'chatSearchComplete',
+}
+const profileFields: Record<string, string> = {
+  nozzle_diameter_mm: 'nozzle_mm', nozzle_temp_c: 'extruder_temp_range_c',
+  nozzle_temperature_c: 'extruder_temp_range_c', bed_temp_c: 'bed_temp_range_c',
+  bed_temperature_c: 'bed_temp_range_c', net_weight_g: 'raw_material_weight_g',
+  spool_weight_g: 'default_spool_weight_g',
+  bambu_k_value: 'pressure_advance_k', bambu_bed_temp: 'bed_temp_range_c',
+}
+
+
+function evidenceValue(value: unknown): string {
+  if (typeof value === 'number') return new Intl.NumberFormat(getLang(), { maximumFractionDigits: 6 }).format(value)
+  if (typeof value === 'string' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map(evidenceValue).filter(Boolean).join(', ')
+  if (!value || typeof value !== 'object') return ''
+  if ('min' in value || 'max' in value) {
+    const { min, max } = value as { min?: unknown; max?: unknown }
+    return [...new Set([min, max].map(evidenceValue).filter(Boolean))].join(' – ')
+  }
+  return Object.entries(value).map(([key, item]) => `${researchFieldLabel(key)} · ${evidenceValue(item)}`).join('; ')
+}
+
+function evidenceHref(url: string) {
+  if (/^\/(?:spools|filaments|printers)\/\d+$/.test(url)) return url
+  if (!/^https?:\/\//i.test(url) || /[\s\\]/.test(url)) return ''
+  try {
+    const parsed = new URL(url)
+    return parsed.username || parsed.password ? '' : parsed.href
+  } catch { return '' }
+}
+
+function evidenceLink(title: string, url: string) {
+  const href = evidenceHref(url)
+  const element = href ? document.createElement('a') : document.createElement('strong')
+  if (element instanceof HTMLAnchorElement) {
+    element.href = href
+    element.target = '_blank'
+    element.rel = 'noopener noreferrer'
+  }
+  element.textContent = title
+  return element
+}
+
+export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined) {
   let model = statusModel.chat_model
   const form = document.querySelector<HTMLFormElement>('[data-chat-form]')!
   const input = form.querySelector('textarea')!
-  const submit = form.querySelector<HTMLButtonElement>('[type=submit]')!
+  const submit = form.querySelector<HTMLButtonElement>('.chat-send')!
+  const webSearch = form.querySelector<HTMLButtonElement>('[data-chat-web-search]')!
+  const contextPanel = form.querySelector<HTMLDetailsElement>('[data-chat-context]')!
+  const printer = contextPanel.querySelector<HTMLSelectElement>('[data-chat-printer]')!
+  const filament = contextPanel.querySelector<HTMLSelectElement>('[data-chat-filament]')!
+  const filamentSearch = contextPanel.querySelector<HTMLInputElement>('[data-chat-filament-search]')!
+  const nozzle = contextPanel.querySelector<HTMLSelectElement>('[data-chat-nozzle]')!
+  const contextStatus = contextPanel.querySelector<HTMLElement>('[data-chat-context-status]')!
   const status = document.querySelector<HTMLElement>('[data-chat-status]')!
   const transcript = document.querySelector<HTMLElement>('[data-chat-transcript]')!
   const log = document.querySelector<HTMLElement>('[data-chat-log]')!
@@ -54,6 +129,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   let research: Research | undefined
   let activeAnswer: HTMLElement | undefined
   let forkNextResearchTurn = false
+  let evidenceCount = 0
+  let filamentQuery = 0
+  let queryTimer: number | undefined
+  let printersLoaded = false
   const modelPicker = mountModelPicker(form, model, openSettings, statusModel.chat_endpoint_id, updateControls)
   const picker = form.querySelector<HTMLElement>('.chat-model-picker')!
   status.removeAttribute('data-i18n')
@@ -62,6 +141,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
 
   function scrollToEnd() { transcript.scrollTop = transcript.scrollHeight }
 
+  function lastQuestion() {
+    return current.messages.at(-2)?.content ?? ''
+  }
+
   function updateControls() {
     form.hidden = (!researching && !modelPicker.hasOptions) || (editorScope !== undefined && !form.contains(picker))
     input.disabled = researching && !current.messages.length && !busyResearch
@@ -69,6 +152,9 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     input.placeholder = t(researching ? 'filaBrain.followUpHint' : 'filaBrain.chatPlaceholder')
     input.setAttribute('aria-label', t(researching ? 'filaBrain.followUp' : 'filaBrain.chatQuestion'))
     submit.disabled = busyResearch || staging || !request && (input.disabled || !input.value.trim())
+    webSearch.hidden = contextPanel.hidden = researchOnly || researching
+    webSearch.disabled = !!request || busyResearch || staging || !modelPicker.selected || (!input.value.trim() && !lastQuestion())
+    for (const field of [printer, filament, filamentSearch, nozzle]) field.disabled = !!request
     const label = t(request ? 'filaBrain.chatStop' : researching ? 'filaBrain.sendFollowUp' : 'filaBrain.chatSend')
     submit.setAttribute('aria-label', label)
     submit.title = label
@@ -83,11 +169,143 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     researchInput.hidden = researchResults.hidden = !researching
   }
 
+  const setOptions = (select: HTMLSelectElement, options: [number, string][]) => {
+    const selected = select.selectedOptions[0]
+    const selectedId = Number(selected?.value)
+    select.replaceChildren(new Option(t('filaBrain.chatNoSelection'), ''))
+    if (selectedId && !options.some(([id]) => id === selectedId)) select.append(selected)
+    for (const [id, name] of options) select.add(new Option(name, String(id)))
+    if (selectedId) select.value = String(selectedId)
+  }
+  setOptions(printer, [])
+  setOptions(filament, [])
+  contextPanel.querySelector<HTMLElement>('[data-chat-printer-field]')!.hidden = !statusModel.can_read_printers
+  contextPanel.addEventListener('toggle', async () => {
+    if (!contextPanel.open || printersLoaded || !statusModel.can_read_printers) return
+    printersLoaded = true
+    try {
+      const { items } = await fetchAllPages<{ id: number; name: string; is_active: boolean }>('/api/v1/printers')
+      setOptions(printer, items.filter(item => item.is_active).map(item => [item.id, item.name]))
+    } catch {
+      printersLoaded = false
+      contextStatus.textContent = t('filaBrain.chatContextUnavailable')
+    }
+  })
+  filamentSearch.addEventListener('keydown', event => {
+    if (event.key === 'Enter') event.preventDefault()
+  })
+  filamentSearch.addEventListener('input', () => {
+    const generation = ++filamentQuery
+    const search = filamentSearch.value.trim()
+    window.clearTimeout(queryTimer)
+    if (!search) {
+      setOptions(filament, [])
+      return
+    }
+    queryTimer = window.setTimeout(async () => {
+      const query = new URLSearchParams({ search, page_size: '25' })
+      try {
+        const { items } = await api.get<{ items: { id: number; designation: string; manufacturer?: { name: string } }[] }>(
+          `/filaments?${query}`, { cache: 'no-store' },
+        )
+        if (generation !== filamentQuery) return
+        contextStatus.textContent = ''
+        setOptions(filament, items.map(item => [item.id, [item.manufacturer?.name, item.designation].filter(Boolean).join(' · ')]))
+      } catch {
+        if (generation === filamentQuery) contextStatus.textContent = t('filaBrain.chatContextUnavailable')
+      }
+    }, 200)
+  })
+
+  function appendEvidence(paragraph: HTMLParagraphElement, content: string, grounding: Grounding) {
+    const facts = document.createElement('details')
+    facts.className = 'chat-evidence'
+    facts.setAttribute('data-chat-evidence', '')
+    facts.open = true
+    const summary = document.createElement('summary')
+    summary.textContent = t('filaBrain.chatEvidence')
+    facts.append(summary)
+    const note = (text: string, parent: HTMLElement = facts) => {
+      const line = document.createElement('p')
+      line.className = 'fm-field-hint'
+      line.textContent = text
+      parent.append(line)
+    }
+    if (typeof grounding.required_g === 'number') note(`${t('filaBrain.chatRequiredWeight')} · ${evidenceValue(grounding.required_g)} g`)
+    for (const notice of grounding.notices) {
+      if (Object.hasOwn(noticeLabels, notice)) note(t(`filaBrain.${noticeLabels[notice]}`))
+    }
+    if (grounding.search && Object.hasOwn(searchLabels, grounding.search)) note(t(`filaBrain.${searchLabels[grounding.search]}`))
+    const list = document.createElement('ul')
+    const anchors = new Map<string, string>()
+    const turn = ++evidenceCount
+    for (const [index, row] of grounding.evidence.entries()) {
+      if (!row || typeof row.id !== 'string' || typeof row.title !== 'string' || typeof row.url !== 'string') continue
+      const item = document.createElement('li')
+      item.id = `chat-source-${turn}-${index}`
+      anchors.set(row.id, item.id)
+      const label = row.kind === 'live' && row.scope === 'grade'
+        ? 'chatLiveGrade' : Object.hasOwn(evidenceLabels, row.kind) ? evidenceLabels[row.kind] : 'chatGuidance'
+      note(t(`filaBrain.${label}`), item)
+      item.append(evidenceLink(row.title, row.url))
+      if (row.kind === 'spool') {
+        const weight = typeof row.remaining_g === 'number'
+          ? `${evidenceValue(row.remaining_g)} g` : t('filaBrain.chatUnknownWeight')
+        const threshold = typeof row.meets_required === 'boolean'
+          ? t(row.meets_required ? 'filaBrain.chatMeetsWeight' : 'filaBrain.chatBelowWeight') : ''
+        note([row.status, weight, threshold].filter(Boolean).join(' · '), item)
+      }
+      if (row.text) note(row.text, item)
+      for (const [key, value] of Object.entries(row.details ?? {})) {
+        const detail = evidenceValue(value)
+        if (!detail) continue
+        const field = profileFields[key] ?? key
+        const label = field === 'nozzle_mm' ? t('filaBrain.chatNozzle') : researchFieldLabel(field)
+        note(`${label} · ${detail}${field === 'nozzle_mm' ? ' mm' : ''}`, item)
+      }
+      if (Array.isArray(row.links)) {
+        for (const link of row.links) {
+          if (typeof link?.title !== 'string' || typeof link.url !== 'string') continue
+          const line = document.createElement('p')
+          line.append(evidenceLink(link.title, link.url))
+          item.append(line)
+        }
+      }
+      list.append(item)
+    }
+    if (list.childElementCount) facts.append(list)
+    paragraph.replaceChildren()
+    let offset = 0
+    for (const match of content.matchAll(/\[([^\[\]\r\n]{1,128})\]/g)) {
+      const id = anchors.get(match[1])
+      if (!id) continue
+      paragraph.append(content.slice(offset, match.index))
+      const citation = document.createElement('a')
+      citation.href = '#' + id
+      citation.textContent = match[0]
+      citation.addEventListener('click', () => { facts.open = true })
+      paragraph.append(citation)
+      offset = match.index! + match[0].length
+    }
+    paragraph.append(content.slice(offset))
+    log.append(facts)
+  }
+
   function append(message: Message) {
     const paragraph = document.createElement('p')
     paragraph.className = `chat-message chat-${message.role}`
     paragraph.textContent = message.content
     log.append(paragraph)
+    if (message.role === 'assistant' && Array.isArray(message.grounding?.evidence) && Array.isArray(message.grounding.notices)) {
+      appendEvidence(paragraph, message.content, message.grounding)
+    }
+    if (message.role === 'assistant' && Array.isArray(message.spoolProfiles)) {
+      const cards = spoolProfileCards(message.spoolProfiles, message.selectedSpoolProfile, profile => {
+        message.selectedSpoolProfile = profile?.id
+        remember()
+      })
+      if (cards) log.append(cards)
+    }
     if (message.action && Object.hasOwn(pageLabels, message.action.page)) {
       const { page, url } = message.action
       if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') && !url.includes('\\')) {
@@ -109,8 +327,15 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       link.rel = 'noopener noreferrer'
       link.textContent = t('filaBrain.openSavedFilament')
       log.append(link)
+      if (statusModel.can_add_spool && editorScope === undefined) {
+        const spool = link.cloneNode() as HTMLAnchorElement
+        spool.href += '?add_spool=1'
+        spool.textContent = t('spoolIntake.title')
+        log.append(spool)
+      }
     }
-    scrollToEnd()
+    if (message.grounding || message.spoolProfiles?.length) transcript.scrollTop = paragraph.offsetTop - 8
+    else scrollToEnd()
     return paragraph
   }
 
@@ -146,8 +371,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         current = { ...selected, messages: [...selected.messages] }
         let lastResult = -1
         current.messages.forEach((message, index) => { if (message.proposal) lastResult = index })
-        if (selected.research && lastResult === -1) {
-          lastResult = current.messages.length - 1
+        if (selected.research) {
+          if (lastResult === -1) lastResult = current.messages.length - 1
           current.messages[lastResult] = { ...current.messages[lastResult], proposal: selected.research.proposal }
         }
         modelPicker.reset(selected.model, true)
@@ -297,6 +522,12 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     activeAnswer = undefined
     log.replaceChildren()
     input.value = ''
+    contextPanel.open = false
+    filamentQuery++
+    filamentSearch.value = ''
+    filament.value = printer.value = nozzle.value = ''
+    setOptions(filament, [])
+    contextStatus.textContent = ''
     status.textContent = ''
     history.open = false
     renderHistory()
@@ -335,7 +566,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       request.abort()
       return
     }
-    const content = input.value.trim()
+    const searchWeb = event.submitter === webSearch && !researching
+    const content = input.value.trim() || (searchWeb ? lastQuestion() : '')
     if (!content || busyResearch || staging) return
     if (researching) {
       try { await research?.followUp(content) }
@@ -354,12 +586,24 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     status.textContent = t('filaBrain.chatWorking')
     updateControls()
     try {
-      const { reply, action } = await api.post<{ reply: string; action: Action | null }>('/filabrain/chat', {
+      const selectedProfileId = current.messages.at(-1)?.selectedSpoolProfile
+      const { reply, action, spool_profiles, ...grounding } = await api.post<{
+        reply: string; action: Action | null; spool_profiles?: SpoolProfile[]
+      } & Partial<Grounding>>('/filabrain/chat', {
         messages: [...current.messages.slice(-10), question].map(({ role, content }) => ({ role, content })),
         ...modelPicker.selected,
+        ...(typeof selectedProfileId === 'string' ? { selected_spool_profile_id: selectedProfileId } : {}),
+        ...(searchWeb ? { web_search: true } : {}),
+        ...(printer.value ? { printer_id: Number(printer.value) } : {}),
+        ...(filament.value ? { filament_id: Number(filament.value) } : {}),
+        ...(nozzle.value ? { nozzle_mm: Number(nozzle.value) } : {}),
       }, { signal: controller.signal })
       if (request !== controller) return
-      const answer: Message = { role: 'assistant', content: reply, action: action ?? undefined }
+      const answer: Message = {
+        role: 'assistant', content: reply, action: action ?? undefined,
+        grounding: Array.isArray(grounding.evidence) ? grounding as Grounding : undefined,
+        spoolProfiles: Array.isArray(spool_profiles) ? spool_profiles.slice(0, 4) : undefined,
+      }
       current.messages.push(question, answer)
       append(answer)
       status.textContent = ''
@@ -384,9 +628,9 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     void modelPicker.setDefault(model, detail.chat_endpoint_id)
     updateControls()
   })
-  function startResearch() {
-    if (busyResearch) return
-    if (!researching && (current.messages.length || input.value || request)) reset(true)
+  function startResearch(fresh = false) {
+    if (busyResearch || staging) return false
+    if (fresh || !researching && (current.messages.length || input.value || request)) reset(true)
     else if (!researching) {
       researching = true
       document.dispatchEvent(new CustomEvent('filabrain:chat-mode', { detail: true }))
@@ -394,6 +638,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     updateControls()
     const field = researchInput.querySelector<HTMLElement>('input[name="designation"]:not([type="hidden"])')
     if (field?.getClientRects().length) field.focus()
+    return true
   }
 
   updateControls()

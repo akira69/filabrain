@@ -1,0 +1,164 @@
+[
+  {
+    "source_id": "bambu-studio:a1-pla-basic",
+    "title": "Bambu Studio · Bambu PLA Basic · A1",
+    "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/Bambu%20PLA%20Basic%20%40BBL%20A1.json",
+    "source_links": [
+      {
+        "title": "Bambu PLA Basic @base.json",
+        "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/Bambu%20PLA%20Basic%20%40base.json"
+      },
+      {
+        "title": "fdm_filament_pla.json",
+        "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/fdm_filament_pla.json"
+      }
+    ],
+    "text": "Selected temperature settings from the pinned Bambu Studio A1 preset and its inherited profiles. Match the installed nozzle and selected plate.",
+    "maker": "Bambu Lab",
+    "product": "PLA Basic",
+    "slicer": "Bambu Studio",
+    "revision": "8f360010bb300bd1bc45fa76d1b8d1b055ba824d",
+    "profile_version": "v02.03.00.70",
+    "revision_date": "2025-10-14",
+    "compatible": [
+      "Bambu Lab A1 0.4 nozzle",
+      "Bambu Lab A1 0.6 nozzle",
+      "Bambu Lab A1 0.8 nozzle"
+    ],
+    "settings": {
+      "nozzle_temperature_c": 220,
+      "first_layer_nozzle_temperature_c": 220,
+      "bed_temperature_c": {
+        "Cool Plate": 35,
+        "Smooth PEI Plate / High Temp Plate": 65,
+        "Textured PEI Plate": 65
+      },
+      "first_layer_bed_temperature_c": {
+        "Cool Plate": 35,
+        "Smooth PEI Plate / High Temp Plate": 65,
+        "Textured PEI Plate": 65
+      }
+    }
+  },
+  {
+    "source_id": "bambu-studio:a1-petg-hf",
+    "title": "Bambu Studio · Bambu PETG HF · A1",
+    "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/Bambu%20PETG%20HF%20%40BBL%20A1.json",
+    "source_links": [
+      {
+        "title": "Bambu PETG HF @base.json",
+        "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/Bambu%20PETG%20HF%20%40base.json"
+      }
+    ],
+    "text": "Selected temperature settings from the pinned Bambu Studio A1 preset and its inherited profiles. Match the installed nozzle and selected plate.",
+    "maker": "Bambu Lab",
+    "product": "PETG HF",
+    "slicer": "Bambu Studio",
+    "revision": "8f360010bb300bd1bc45fa76d1b8d1b055ba824d",
+    "profile_version": "v02.03.00.70",
+    "revision_date": "2025-10-14",
+    "compatible": [
+      "Bambu Lab A1 0.4 nozzle"
+    ],
+    "settings": {
+      "nozzle_temperature_c": 240,
+      "first_layer_nozzle_temperature_c": 230,
+      "bed_temperature_c": {
+        "Engineering Plate": 70,
+        "Smooth PEI Plate / High Temp Plate": 70,
+        "Textured PEI Plate": 70
+      },
+      "first_layer_bed_temperature_c": {
+        "Engineering Plate": 70,
+        "Smooth PEI Plate / High Temp Plate": 70,
+        "Textured PEI Plate": 70
+      }
+    }
+  },
+  {
+    "source_id": "bambu-studio:a1-tpu-for-ams",
+    "title": "Bambu Studio · Bambu TPU for AMS · A1",
+    "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/Bambu%20TPU%20for%20AMS%20%40BBL%20A1.json",
+    "source_links": [
+      {
+        "title": "Bambu TPU for AMS @base.json",
+        "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/Bambu%20TPU%20for%20AMS%20%40base.json"
+      },
+      {
+        "title": "fdm_filament_tpu.json",
+        "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/fdm_filament_tpu.json"
+      }
+    ],
+    "text": "Selected temperature settings from the pinned Bambu Studio A1 preset and its inherited profiles. Match the installed nozzle and selected plate. Check the chosen feeder and required AMS Hub before printing.",
+    "maker": "Bambu Lab",
+    "product": "TPU for AMS",
+    "slicer": "Bambu Studio",
+    "revision": "8f360010bb300bd1bc45fa76d1b8d1b055ba824d",
+    "profile_version": "v02.03.00.70",
+    "revision_date": "2025-10-14",
+    "compatible": [
+      "Bambu Lab A1 0.4 nozzle",
+      "Bambu Lab A1 0.6 nozzle",
+      "Bambu Lab A1 0.8 nozzle"
+    ],
+    "settings": {
+      "nozzle_temperature_c": 230,
+      "first_layer_nozzle_temperature_c": 230,
+      "bed_temperature_c": {
+        "Cool Plate": 30,
+        "Engineering Plate": 30,
+        "Smooth PEI Plate / High Temp Plate": 35,
+        "Textured PEI Plate": 35
+      },
+      "first_layer_bed_temperature_c": {
+        "Cool Plate": 30,
+        "Engineering Plate": 30,
+        "Smooth PEI Plate / High Temp Plate": 35,
+        "Textured PEI Plate": 35
+      }
+    }
+  },
+  {
+    "source_id": "bambu-studio:a1-tpu-95a-hf",
+    "title": "Bambu Studio · Bambu TPU 95A HF · A1",
+    "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/Bambu%20TPU%2095A%20HF%20%40BBL%20A1.json",
+    "source_links": [
+      {
+        "title": "Bambu TPU 95A HF @base.json",
+        "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/Bambu%20TPU%2095A%20HF%20%40base.json"
+      },
+      {
+        "title": "fdm_filament_tpu.json",
+        "url": "https://github.com/bambulab/BambuStudio/blob/8f360010bb300bd1bc45fa76d1b8d1b055ba824d/resources/profiles/BBL/filament/fdm_filament_tpu.json"
+      }
+    ],
+    "text": "Selected temperature settings from the pinned Bambu Studio A1 preset and its inherited profiles. Match the installed nozzle and selected plate. Feed this grade from the external spool holder.",
+    "maker": "Bambu Lab",
+    "product": "TPU 95A HF",
+    "slicer": "Bambu Studio",
+    "revision": "8f360010bb300bd1bc45fa76d1b8d1b055ba824d",
+    "profile_version": "v02.03.00.70",
+    "revision_date": "2025-10-14",
+    "compatible": [
+      "Bambu Lab A1 0.4 nozzle",
+      "Bambu Lab A1 0.6 nozzle",
+      "Bambu Lab A1 0.8 nozzle"
+    ],
+    "settings": {
+      "nozzle_temperature_c": 230,
+      "first_layer_nozzle_temperature_c": 230,
+      "bed_temperature_c": {
+        "Cool Plate": 30,
+        "Engineering Plate": 30,
+        "Smooth PEI Plate / High Temp Plate": 45,
+        "Textured PEI Plate": 45
+      },
+      "first_layer_bed_temperature_c": {
+        "Cool Plate": 30,
+        "Engineering Plate": 30,
+        "Smooth PEI Plate / High Temp Plate": 45,
+        "Textured PEI Plate": 45
+      }
+    }
+  }
+]

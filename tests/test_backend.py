@@ -89,6 +89,27 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
         assert await connection.scalar(text("SELECT mcp_enabled FROM filabrain_settings WHERE id = 1")) == 0
 
 
+async def test_spool_filament_lookup_matches_full_label_across_library_fields(installed, db_session):
+    brand = Manufacturer(name="Bambu Lab")
+    db_session.add(brand)
+    await db_session.flush()
+    jade, black = [
+        Filament(manufacturer_id=brand.id, designation="Basic", material_type="PLA",
+                 manufacturer_color_name=color, diameter_mm=1.75)
+        for color in ("Jade White", "Jade Black")
+    ]
+    db_session.add_all([jade, black])
+    await db_session.commit()
+
+    response = await installed.get(f"{BASE}/spool-filaments", params={"search": "Bambu Lab PLA Basic Jade White"})
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["items"]] == [jade.id]
+
+    response = await installed.get(f"{BASE}/spool-filaments", params={"search": "Bambu %"})
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == []
+
+
 async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
     import asyncio
 
@@ -97,7 +118,7 @@ async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
     from app.models import User
     from app.models.base import Base as HostBase
     from filabrain.db import Base as PluginBase
-    from filabrain.research import open_saved_filament, save_research_filament
+    from filabrain.research import lookup_spool_filament, open_saved_filament, save_research_filament
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'drafts.db'}")
 
@@ -121,7 +142,8 @@ async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
         draft_id = "a" * 32
         data = FilamentCreate(
             manufacturer_id=manufacturer.id, designation="Fixture PLA", material_type="PLA",
-            diameter_mm=1.75, density_g_cm3=1.24,
+            diameter_mm=1.75, density_g_cm3=1.24, manufacturer_sku="FB-PLA1",
+            shop_url="https://fixture.example/filaments/pla",
         )
 
         async def save():
@@ -138,6 +160,16 @@ async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
             assert records[0].density_g_cm3 == 1.24
             assert records[0].default_spool_weight_g == 180
             assert (await open_saved_filament(draft_id, db, principal)).headers["location"] == f"/filaments/{saved_id}"
+            spool_link = await open_saved_filament(draft_id, db, principal, add_spool=True)
+            assert spool_link.headers["location"] == f"/spools/new?filament_id={saved_id}"
+            read_only = Principal(auth_type="session", user_id=owner.id, is_superadmin=True, scopes=["filaments:read"])
+            with pytest.raises(HTTPException) as forbidden:
+                await open_saved_filament(draft_id, db, read_only, add_spool=True)
+            assert forbidden.value.status_code == 403
+            for term in ("fb-pla1", "https://fixture.example/filaments/pla"):
+                results = await lookup_spool_filament(db, principal, exact=term)
+                assert [item["id"] for item in results["items"]] == [saved_id]
+            assert (await lookup_spool_filament(db, principal, exact="FB-PLA"))["items"] == []
             await db.delete(records[0])
             await db.commit()
             db.add(Filament(id=saved_id, manufacturer_id=manufacturer.id, designation="Replacement", material_type="PLA", diameter_mm=1.75))
@@ -1252,6 +1284,7 @@ async def test_searxng_connection_requires_plugin_admin(installed, normal_user, 
 @pytest.mark.parametrize(("base_url", "limit"), [
     ("https://api.openai.com/v1", "max_completion_tokens"),
     ("https://api.anthropic.com/v1", "max_tokens"),
+    ("https://openrouter.ai/api/v1", "max_tokens"),
     ("http://ollama:11434/v1", "max_tokens"),
 ])
 async def test_model_completion_provider_request(monkeypatch, base_url, limit):
@@ -1718,6 +1751,7 @@ async def test_research_uses_only_the_linked_spool_profile(installed, db_session
     monkeypatch.setattr(filamentdb_proxy, "_proxy_get", profile)
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "lookup_catalog", lambda *_args, **_kwargs: [])
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
     maker = Manufacturer(name="Bambu Lab")
     db_session.add(maker)
@@ -2014,6 +2048,7 @@ async def test_paramount_uses_matched_color_family_url_only(installed, db_sessio
     monkeypatch.setattr(proposals, "paramount_product_urls", sitemap)
     monkeypatch.setattr(proposals, "catalog_candidates", catalog)
     monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "lookup_catalog", lambda *_args, **_kwargs: [])
     monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
     monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
     manufacturer = Manufacturer(name="Paramount 3D", url=site)

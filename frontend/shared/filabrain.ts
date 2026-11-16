@@ -1,4 +1,5 @@
 import { t } from './i18n'
+import type { SpoolProfile } from './spool-profiles'
 
 export type ResearchIdentity = {
   manufacturer: string
@@ -18,6 +19,8 @@ export type ResearchOption = {
   sources: Array<{ url?: string; title: string; evidence: string }>
 }
 
+export type ResearchIssue = ResearchProposal['issues'][number]
+
 export type ResearchProposal = {
   target: { mode: 'edit' | 'create'; filament_id?: number | null; identity: ResearchIdentity }
   suggestions: Array<ResearchOption & { field: string }>
@@ -33,6 +36,9 @@ export type ResearchProposal = {
     group_key: string | null
   }>
   standardization_context?: Record<string, string | null>
+  spool_profiles?: SpoolProfile[]
+  spool_profile_id?: string
+  spool_reply?: string
 }
 
 export function researchHeaders() {
@@ -71,4 +77,10 @@ export function researchOptionValue(value: ResearchOption['value']) {
   return typeof value === 'object'
     ? [...new Set([value.min, value.max].filter(endpoint => endpoint != null))].join(' – ')
     : String(value)
+}
+
+export function researchRecommendation(issue: ResearchIssue, value: ResearchOption['value'], preferred: unknown) {
+  if (issue.requires_product_choice || JSON.stringify(value) !== JSON.stringify(preferred)) return ''
+  return t(`filaBrain.${issue.code === 'source_disagreement' ? 'manufacturerPreferred'
+    : issue.code === 'corroborated' ? 'corroboratedPreferred' : 'recommendedValue'}`)
 }

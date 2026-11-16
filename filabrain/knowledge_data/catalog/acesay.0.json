@@ -1,0 +1,3 @@
+[
+{"bed_temperature_max_c":80,"bed_temperature_min_c":60,"color":"BLACK","color_hex":"#000000","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"ACESAY","manufacturer_product":true,"manufacturer_sku":"TPU-95A-BLACK","material":"TPU","net_weight_g":250,"nozzle_temperature_max_c":230,"nozzle_temperature_min_c":200,"product":"TPU 95A","product_id":"14ab1a71-4f10-4525-878a-ae28d5d6714e","product_url":"https://www.amazon.com/stores/ACESAY/page/861F2177-57A5-44FB-9983-374FBD3E36C4","source_id":"ofd:49f70b47-eeca-4189-ae62-c635044a9bd2","source_path":"data/acesay/TPU/tpu_95a_black/black/sizes.json","variant":"BLACK","variant_id":"5b188393-2666-4e1b-b6d0-eb87f900765b"}
+]

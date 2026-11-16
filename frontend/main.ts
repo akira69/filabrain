@@ -1,6 +1,7 @@
 import { mountChat } from './chat'
 import { mountDocs } from './docs'
 import { mountSettings } from './settings'
+import { mountSpoolIntake, type SpoolResearchInput } from './spool-intake'
 import { mountResearch, type EditorContext, type SelectionContext } from './research'
 import { ApiError, api } from './shared/api'
 import { batchHref, createResearchBatch, listResearchRuns, mountResearchBatches, type BatchMode, type ExpectedFilament } from './shared/filabrain-batches'
@@ -12,6 +13,9 @@ export type Status = {
   chat_model?: string | null
   chat_endpoint_id?: string | null
   can_create: boolean
+  can_add_spool?: boolean
+  can_read_spools?: boolean
+  can_read_printers?: boolean
   can_update: boolean
   can_update_manufacturer?: boolean
   can_configure: boolean
@@ -329,7 +333,8 @@ async function main() {
     stackedHeader.addEventListener('change', syncHeaderOrder)
 
     let chat: ReturnType<typeof mountChat> | undefined
-    let startResearch: (() => void) | undefined
+    let startResearch: ReturnType<typeof mountResearch> | undefined
+    let stopSpoolIntake: (() => void) | undefined
     function openConversation() {
       const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
       view.hidden = false
@@ -341,6 +346,14 @@ async function main() {
     const mount: Record<string, (() => void) | false> = {
       chat: status.can_chat && (() => { openConversation(); chat?.showChat() }),
       new: status.can_create && (() => { openConversation(); startResearch?.() }),
+      spool: !!status.can_add_spool && (() => {
+        const researchFromSpool = status.can_create ? (input: SpoolResearchInput) => {
+          show('new', input)
+        } : undefined
+        stopSpoolIntake = mountSpoolIntake(
+          document.querySelector<HTMLElement>('[data-view="spool"]')!, !!status.can_read_spools, researchFromSpool,
+        )
+      }),
       library: status.can_update && (() => mountLibrary()),
       batches: status.can_update && (() => {
         const batch = element('filament-batches')
@@ -352,9 +365,10 @@ async function main() {
     }
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('[data-tab]')]
     const visited = new Set<string>()
-    function show(tab: string) {
+    function show(tab: string, spoolInput?: SpoolResearchInput) {
       const run = Object.hasOwn(mount, tab) && mount[tab]
       if (!run) return
+      if (tab !== 'spool') stopSpoolIntake?.()
       for (const button of buttons) {
         if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
         else button.removeAttribute('aria-current')
@@ -362,7 +376,10 @@ async function main() {
       setGuide(tab)
       const activeView = tab === 'new' ? 'chat' : tab
       for (const view of document.querySelectorAll<HTMLElement>('[data-view]')) view.hidden = view.dataset.view !== activeView
-      if (tab === 'chat' || tab === 'new') {
+      if (tab === 'new' && spoolInput) {
+        openConversation()
+        startResearch?.(spoolInput)
+      } else if (tab === 'chat' || tab === 'new') {
         run()
       } else if (!visited.has(tab)) {
         visited.add(tab)

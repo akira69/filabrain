@@ -12,6 +12,8 @@ const filament = {
   material_type: 'PLA', diameter_mm: 1.75, color_mode: 'single',
 }
 const evidence = [{ title: 'Fixture catalog', url: 'https://manufacturer.test/pla', evidence: '1.24 g/cm³' }]
+const refillUrl = 'https://manufacturer.test/pla-refill'
+const rotatingVariantUrl = 'https://manufacturer.test/pla-select-package'
 const batchSource = { title: 'Fixture catalog | Fixture Brand', url: 'https://manufacturer.test/pla', quote: 'Fixture catalog' }
 const fixtureBatch = {
   id: 'fixture-batch', mode: 'fill', status: 'active', total: 1,
@@ -22,6 +24,10 @@ const fixtureBatch = {
       { code: 'manufacturer_page', name: batchSource.title, url: batchSource.url },
       { code: 'possible_match', name: 'Other PLA', url: 'https://manufacturer.test/other', source: 'Web search' },
       { code: 'possible_match', name: 'Other PLA', url: 'https://manufacturer.test/other', source: 'Web search' },
+      { code: 'source_disagreement', field: 'density_g_cm3', options: [
+        { value: 1.24, sources: [{ ...evidence[0], title: 'Fixture manufacturer', evidence: 'Density for Fixture PLA: 1.24 g/cm³' }] },
+        { value: 1.30, sources: [{ title: 'Reseller', url: 'https://reseller.test/pla', evidence: 'Reseller lists 1.30 g/cm³' }] },
+      ] },
     ],
     approved_ids: [], changed_fields: [], applied_at: null,
     proposals: [{ id: 'density', fields: { density_g_cm3: { old: null, value: 1.24 } },
@@ -44,11 +50,21 @@ try {
   let defaultEndpoint = null
   let canConfigure = true
   let canUseFilaments = true
+  let canAddSpool = false
+  let scaleRequested = false
+  let stockRequested = false
+  let scaleResultReads = 0
+  let scalePassiveReads = 0
+  let passiveScanReads = 0
+  const scanWrites = []
   let modelsUnavailable = false
   let hostPicker = false
   let account = 7
   let chatRequests = 0
   let proposalRequests = 0
+  let duplicateSpoolLookup = false
+  let conflictingSpoolWidth = false
+  let differentSpoolPackage = false
   let heldModelList
   let staleBatchOnce = false
   let hasResearchRun = false
@@ -103,7 +119,7 @@ try {
           if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
           const { type, request_id, units } = event.data;
           if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'${editorMode}',
-            filament_id:${editorMode === 'edit' ? 10 : 'null'}, record_token:${JSON.stringify(hostEditorToken)}, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75 }}, location.origin)
+            filament_id:${editorMode === 'edit' ? 10 : 'null'}, record_token:${JSON.stringify(hostEditorToken)}, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75, ...window.editorEdits }}, location.origin)
           if (type === 'filaman:filament-stage') {
             window.staged = units;
             const reply = () => event.source.postMessage({type, request_id, staged:units.flatMap(unit => Object.keys(unit)), skipped:[]}, location.origin)
@@ -113,8 +129,79 @@ try {
         })
       </script>` })
     if (path.endsWith('/me')) return route.fulfill({ json: { id: account } })
+    if (path === '/api/v1/filamentdb/spool-profile-image') return route.fulfill({
+      contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"/>',
+    })
+    if (path === '/api/v1/devices/active') return route.fulfill({ json: [
+      { id: 4, name: 'SpoolmanScale' }, { id: 8, name: 'FilaMan ESP32' },
+    ] })
+    if (path === '/api/v1/tag/readers') return route.fulfill({ json: [
+      { reader_id: 'spoolmanscale-A1B2C3', name: 'SpoolmanScale' },
+      { reader_id: 'usb-nfc', name: 'NFC reader' },
+    ] })
+    if (path === '/api/v1/tag/last-scan') {
+      const reader = new URL(req.url()).searchParams.get('reader_id')
+      if (reader === 'spoolmanscale-A1B2C3') {
+        return route.fulfill({ json: ++scalePassiveReads === 1
+          ? { reader_id: reader, seq: 21, uid: '0201' }
+          : { reader_id: reader, seq: 22, uid: '0202', spool_id: 19 } })
+      }
+      if (reader === 'usb-nfc') {
+        passiveScanReads++
+        return route.fulfill({ json: passiveScanReads < 3
+          ? { reader_id: reader, seq: 100, uid: '0101', spool_id: 12 }
+          : { reader_id: reader, seq: 101, uid: '0102', spool_id: 17 },
+        })
+      }
+      return route.fulfill({ json: { seq: 0 } })
+    }
+    if (path === '/api/v1/devices/8/request-tag-scan') {
+      stockRequested = true
+      scanWrites.push(path)
+      return route.fulfill({ json: { success: true } })
+    }
+    if (path === '/api/v1/devices/8/tag-scan-result') {
+      return route.fulfill({ json: stockRequested ? {
+        status: 'success', timestamp: '2026-11-16T12:02:00Z',
+        tag_data: { protocol: 'filaman', brand: 'Fixture Brand', type: 'PLA', color_hex: '#33AA55' },
+      } : { status: 'none' } })
+    }
+    if (path === '/api/v1/devices/4/request-tag-scan') {
+      scaleRequested = true
+      scanWrites.push(path)
+      return route.fulfill({ json: { success: true } })
+    }
+    if (path === '/api/v1/devices/4/tag-scan-result') {
+      const fresh = scaleRequested && ++scaleResultReads > 1
+      return route.fulfill({ json: {
+        status: 'success',
+        timestamp: fresh ? '2026-11-16T12:01:00Z' : '2026-11-16T12:00:00Z',
+        tag_data: fresh
+          ? { brand: 'Fixture Brand', type: 'PLA', color_hex: '33AA55', min_temp: '200', max_temp: '220', sm_id: 32 }
+          : { brand: 'Old result', type: 'PETG', color_hex: 'FF0000', sm_id: 99 },
+      } })
+    }
+    if (path === '/api/v1/filaments' && new URL(req.url()).searchParams.get('search') === 'FIX-123') {
+      return route.fulfill({ json: { items: [], total: 0 } })
+    }
+    if (path === '/api/v1/filabrain/spool-filaments') {
+      const params = new URL(req.url()).searchParams
+      if (params.get('exact') === 'FIX-123') return route.fulfill({ json: { items: [filament], total: 1 } })
+      assert.equal(params.get('search'), 'Bambu Lab PLA Basic Jade White')
+      return route.fulfill({ json: { items: [{
+        ...filament, id: 26, designation: 'PLA Basic', manufacturer: { name: 'Bambu Lab' },
+        manufacturer_color_name: 'Jade White',
+      }], total: 1 } })
+    }
+    if (path === '/api/v1/filaments' && new URL(req.url()).searchParams.get('type') === 'PLA') {
+      assert.equal(new URL(req.url()).searchParams.get('search'), 'Fixture Brand')
+      return route.fulfill({ json: { items: [
+        { ...filament, colors: [{ color: { hex_code: '#33AA55' } }] },
+        { ...filament, id: 11, designation: 'Other Color', colors: [{ color: { hex_code: '#112233' } }] },
+      ], total: 2 } })
+    }
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: canUseFilaments, chat_model: chatModelId, chat_endpoint_id: chatModelId ? defaultEndpoint : null,
-      can_create: canUseFilaments, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure } })
+      can_create: canUseFilaments, can_add_spool: canAddSpool, can_read_spools: canAddSpool, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure } })
     if (path.endsWith('/filaments/10/research-record')) return recordUnavailable
       ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { record_token: editorRecordToken } })
@@ -152,9 +239,34 @@ try {
     if (path.endsWith('/proposals')) {
       proposalRequests++
       const target = req.postDataJSON()
+      if (target.spool_lookup) return route.fulfill({ json: {
+        target, issues: duplicateSpoolLookup ? [{ code: 'duplicate', filament_id: 10 }] : [],
+        suggestions: [], spool_reply: 'Which spool matches yours?',
+        spool_profiles: [{ id: 'example-spool', title: 'Fixture Brand PLA 1 kg', source: 'OnlySpoolz',
+          url: 'https://www.onlyspoolz.com/portfolio/spool-fixture/', empty_weight_g: 233,
+          outer_diameter_mm: 200, width_mm: 66, hole_diameter_mm: 58, net_weight_g: 1000 },
+        { id: 'filamandb-735', title: '170g Spool', source: 'FilaManDB',
+          url: 'https://db.filaman.app/api/v1/spool-profiles/735',
+          photo: '/api/v1/filamentdb/spool-profile-image?image_file=735.png', empty_weight_g: 170 }],
+      } })
+      if (target.guidance === 'Recheck this density') return route.fulfill({ json: { target, issues: [], suggestions: [
+        { field: 'density_g_cm3', value: 1.27, sources: evidence },
+      ] } })
       if (chatModelId && target.filament_id === 10 && target.action === 'fill') {
         assert.equal(target.model_id, 'fixture:alternate')
         assert.equal(target.endpoint_id, endpoints.find(endpoint => endpoint.name === 'Remote models')?.id || defaultEndpoint)
+      }
+      if (target.product_url === refillUrl) return route.fulfill({ json: { target, issues: [], suggestions: [
+        { field: 'density_g_cm3', value: 1.22, sources: [{ title: 'Refill specifications', url: refillUrl, evidence: '1.22 g/cm³' }] },
+        { field: 'manufacturer_sku', value: 'FIX-REFILL', sources: [{ title: 'Refill specifications', url: refillUrl, evidence: 'FIX-REFILL' }] },
+      ] } })
+      if (target.product_url === rotatingVariantUrl) {
+        const refill = target.guidance === 'Check the density again'
+        return route.fulfill({ json: { target, issues: [], suggestions: [
+          { field: 'manufacturer_sku', value: refill ? 'NEW-PACKAGE' : 'OLD-PACKAGE', sources: evidence },
+          { field: 'raw_material_weight_g', value: refill ? 500 : 1000, sources: evidence },
+          { field: 'density_g_cm3', value: refill ? 1.22 : 1.24, sources: evidence },
+        ] } })
       }
       if (target.product_url) assert.equal(target.product_url, evidence[0].url)
       if (target.guidance === 'Continue in stale tab') return route.fulfill({
@@ -176,9 +288,19 @@ try {
           material_subgroup: { old: null, value: target.guidance ? 'Silk' : 'Matte' },
         }, sources: [], reason: 'Consistent designation and finish.', group_key: null }],
       } })
+      if (target.reference_url === 'https://manufacturer.test/specs.pdf') return route.fulfill({ json: { target,
+        suggestions: [
+          { field: 'density_g_cm3', value: 1.27, sources: [{ ...evidence[0], evidence: '1.27 g/cm³' }] },
+          { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
+          { field: 'bed_temp_range_c', value: { min: 42, max: 42 }, sources: evidence },
+        ], issues: [],
+      } })
       return route.fulfill({ json: { target, suggestions: [
         { field: 'density_g_cm3', value: 1.24, sources: evidence },
         { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
+        ...(conflictingSpoolWidth ? [{ field: 'spool_width_mm', value: 72, sources: evidence }] : []),
+        ...(differentSpoolPackage ? [{ field: 'raw_material_weight_g', value: 500, sources: evidence }] : []),
+        ...(!chatModelId ? [{ field: 'drying_temp_c', value: 50, sources: evidence }] : []),
       ], issues: target.mode === 'edit' ? [
         { code: 'manufacturer_page', name: 'Fixture datasheet', url: evidence[0].url },
         { code: 'manufacturer_page', name: 'Fixture datasheet', url: evidence[0].url },
@@ -262,12 +384,72 @@ try {
     }
     if (path.endsWith('/apply')) {
       assert.equal(req.postDataJSON().items[0].decision_revision, 1)
-      Object.assign(fixtureBatch.items[0], { status: 'applied', applied_at: '2026-01-01T00:00:00Z' })
-      return route.fulfill({ json: { batch: fixtureBatch, results: [{ item_id: 12, status: 'applied', changed_fields: [] }] } })
+      const changed_fields = ['density_g_cm3']
+      Object.assign(fixtureBatch.items[0], { status: 'applied', applied_at: '2026-01-01T00:00:00Z', changed_fields })
+      return route.fulfill({ json: { batch: fixtureBatch, results: [{ item_id: 12, status: 'applied', changed_fields }] } })
     }
     if (path.endsWith('/batches')) return route.fulfill({ json: hasResearchRun ? [fixtureBatch] : [] })
     return route.fulfill({ status: 404, json: {} })
   })
+
+  canAddSpool = true
+  const intake = await context.newPage()
+  intake.setDefaultTimeout(5_000)
+  await intake.goto(`${url}?tab=spool`)
+  const readerChoice = intake.getByRole('combobox', { name: 'Reader', exact: true })
+  await readerChoice.locator('option', { hasText: 'FilaMan ESP32' }).waitFor({ state: 'attached' })
+  await readerChoice.selectOption('device-4')
+  await intake.locator('#spool-read-tag').click()
+  const useFilament = intake.getByRole('link', { name: 'Use this filament' })
+  await intake.getByText(/^Tag read · Fixture Brand/).waitFor()
+  assert.equal(await useFilament.count(), 0)
+  assert.equal(await intake.getByRole('button', { name: 'Research new filament' }).count(), 0)
+  assert.equal(await intake.getByRole('link', { name: 'Choose in FilaMan' }).count(), 0)
+  assert.equal(await intake.getByRole('link', { name: 'Check existing spools' }).getAttribute('href'), '/spools')
+  assert.equal(await intake.locator('a[href="/spools/32"]').count(), 0)
+  await intake.getByText(/suggests spool #32/).waitFor()
+  await intake.setViewportSize({ width: 320, height: 700 })
+  assert.equal(await intake.evaluate(() => document.documentElement.scrollWidth), 320)
+  assert.equal(await readerChoice.locator('option', { hasText: 'SpoolmanScale' }).count(), 2)
+  assert.equal(await readerChoice.locator('option:checked').textContent(), 'SpoolmanScale · Filament details')
+  await intake.getByRole('button', { name: 'Find filament for a new spool' }).click()
+  await useFilament.waitFor()
+  assert.equal(await useFilament.getAttribute('href'), '/spools/new?filament_id=10')
+  assert.equal(await intake.getByText('Old result').isVisible(), false)
+  assert.equal(await intake.getByText('Other Color').isVisible(), false)
+  await intake.getByRole('button', { name: 'Research new filament' }).click()
+  assert.equal(await intake.locator('#draft-manufacturer').inputValue(), 'Fixture Brand')
+  assert.equal(await intake.locator('#product-research input[name="material_type"]').inputValue(), 'PLA')
+  await intake.locator('[data-tab="spool"]').click()
+  const openSpool = intake.getByRole('link', { name: 'Open existing spool' })
+  const checkTag = intake.getByRole('button', { name: 'Check tag for linked spool' })
+  await readerChoice.selectOption({ label: 'SpoolmanScale · Spool link' })
+  await checkTag.click()
+  await openSpool.waitFor()
+  assert.equal(await openSpool.getAttribute('href'), '/spools/19')
+  await readerChoice.selectOption({ label: 'NFC reader · Spool link' })
+  await checkTag.click()
+  await openSpool.waitFor()
+  assert.equal(await openSpool.getAttribute('href'), '/spools/17')
+  await readerChoice.selectOption({ label: 'FilaMan ESP32 · Filament details' })
+  await intake.getByRole('button', { name: 'Read filament details' }).click()
+  await intake.getByRole('button', { name: 'Find filament for a new spool' }).waitFor()
+  assert.equal(await useFilament.count(), 0)
+  await intake.getByRole('button', { name: 'Find filament for a new spool' }).click()
+  await useFilament.waitFor()
+  assert.equal(await useFilament.getAttribute('href'), '/spools/new?filament_id=10')
+  assert.deepEqual(scanWrites, ['/api/v1/devices/4/request-tag-scan', '/api/v1/devices/8/request-tag-scan'])
+  await intake.getByLabel('Product name, SKU, or URL').fill('FIX-123')
+  await intake.getByRole('button', { name: 'Find in library' }).click()
+  await useFilament.waitFor()
+  assert.equal(await useFilament.getAttribute('href'), '/spools/new?filament_id=10')
+  await intake.getByLabel('Product name, SKU, or URL').fill('Bambu Lab PLA Basic Jade White')
+  await intake.getByRole('button', { name: 'Find in library' }).click()
+  await useFilament.waitFor()
+  assert.equal(await useFilament.getAttribute('href'), '/spools/new?filament_id=26')
+  assert.equal(await intake.evaluate(() => document.documentElement.scrollWidth), 320)
+  await intake.close()
+  canAddSpool = false
 
   chatModelId = ''
   await page.goto(url)
@@ -289,7 +471,7 @@ try {
   await page.getByRole('textbox', { name: 'Your question' }).waitFor()
   assert.equal(await setupModel.isVisible(), false)
   assert.equal(await page.getByRole('button', { name: 'Guide', exact: true }).count(), 1)
-  assert.equal(await page.locator('#plugin-header [data-tab] svg[aria-hidden="true"]').count(), 5)
+  assert.equal(await page.locator('#plugin-header [data-tab]:not(:has(svg[aria-hidden="true"]))').count(), 0)
 
   chatModelId = ''
   canConfigure = false
@@ -369,6 +551,10 @@ try {
     assert.equal(overflow, false)
   })
   await checkGuideTypography()
+  const omniRoute = guide.getByRole('link', { name: 'OmniRoute setup' })
+  await omniRoute.waitFor()
+  assert.equal(await omniRoute.getAttribute('href'), 'https://github.com/cheaper-inference/OmniRoute')
+  await guide.getByText('groq/qwen/qwen3.8-27b', { exact: true }).waitFor()
   const providerLink = guide.getByRole('link', { name: 'Ollama setup' })
   await providerLink.waitFor()
   const artBounds = await guide.getByRole('img').boundingBox()
@@ -544,7 +730,9 @@ try {
   assert.equal(await batchReview.locator('.batch-review-fields').getByText('Density (g/cm³)', { exact: true }).count(), 1)
   await batchReview.getByText('Sources (1)', { exact: true }).click()
   assert.equal(await batchReview.getByRole('link', { name: batchSource.title }).count(), 1)
-  assert.equal(await batchReview.locator('blockquote').count(), 0)
+  assert.equal(await batchReview.locator('.batch-disclosure blockquote').count(), 0)
+  assert.equal(await batchReview.getByText('Reseller lists 1.30 g/cm³', { exact: true }).count(), 1)
+  assert.equal(await batchReview.getByText('Manufacturer value', { exact: true }).count(), 1)
   assert.equal(await batchReview.getByText(/Possible match.*Other PLA/).isVisible(), false)
   await batchReview.getByText('Search details (1)', { exact: true }).click()
   assert.equal(await batchReview.getByText(/Possible match.*Other PLA/).count(), 1)
@@ -554,6 +742,9 @@ try {
   await page.getByRole('button', { name: 'Apply approved changes' }).click()
   await page.getByRole('dialog').getByRole('button', { name: /Apply/ }).click()
   await page.getByRole('heading', { name: 'Apply report' }).waitFor()
+  const appliedDetails = page.locator('[data-batch-report] details[data-result="applied"]')
+  await appliedDetails.locator('summary').click()
+  assert.equal(await appliedDetails.getByText('Density (g/cm³)', { exact: true }).count(), 1)
   await page.getByRole('link', { name: 'All runs' }).click()
   const batchOverview = page.getByRole('region', { name: 'Research runs' })
   await batchOverview.getByRole('link', { name: 'Fill missing specs' }).waitFor()
@@ -1043,11 +1234,171 @@ try {
   assert.equal(followUpPayload.model_id, undefined)
   assert.equal(followUpPayload.endpoint_id, undefined)
 
+  const activeResearch = frame.locator('#research-results')
+  const reviewedSku = activeResearch.getByRole('checkbox', { name: /FIX-123/ })
+  await reviewedSku.check()
+  const reviewedDrying = activeResearch.getByRole('checkbox', { name: /Drying temperature.*50/ })
+  await reviewedDrying.check()
+  await page.evaluate(() => { window.editorEdits = { drying_temp_c: 60 } })
+  const followUpField = frame.getByRole('combobox', { name: 'Follow-up field', exact: true })
+  assert.equal(await followUpField.count(), 1, 'research can follow up on one field')
+  await followUpField.selectOption('density_g_cm3')
+  const checkDensity = 'Check the published density https://manufacturer.test/specs.pdf'
+  const checkedReference = page.waitForRequest(request => request.method() === 'POST' &&
+    request.url().endsWith('/proposals') && request.postDataJSON().guidance.startsWith('Check the published density'))
+  await followUp.fill(checkDensity)
+  await followUp.press('Enter')
+  const referencePayload = (await checkedReference).postDataJSON()
+  assert.equal(referencePayload.reference_url, 'https://manufacturer.test/specs.pdf')
+  assert.equal(referencePayload.guidance, 'Check the published density')
+  await activeResearch.getByRole('checkbox', { name: /Density.*1\.27/ }).waitFor()
+  assert.equal(await reviewedSku.isChecked(), true, 'an unrelated reviewed value stays selected')
+  assert.equal(await activeResearch.getByRole('checkbox', { name: /Bed temperature.*42/ }).count(), 0)
+  assert.equal(await reviewedDrying.count(), 0, 'a value edited in the host form is no longer eligible')
+  assert.equal(await frame.getByRole('button', { name: 'Stage 1 field' }).isEnabled(), true)
+  const stagedBeforeCorrection = await page.evaluate(() => window.staged)
+  const correctedProduct = page.waitForRequest(request => request.method() === 'POST' &&
+    request.url().endsWith('/proposals'))
+  await followUp.fill(`Use the refill at ${refillUrl}`)
+  await followUp.press('Enter')
+  const correctedPayload = (await correctedProduct).postDataJSON()
+  assert.equal(correctedPayload.product_url, refillUrl)
+  assert.equal(correctedPayload.reference_url, undefined)
+  await activeResearch.getByRole('checkbox', { name: /Density.*1\.22/ }).waitFor()
+  assert.equal(await reviewedSku.count(), 0, 'the old variant is no longer proposed')
+  assert.equal(await activeResearch.getByRole('checkbox', { name: /FIX-REFILL/ }).isChecked(), false)
+  assert.deepEqual(await page.evaluate(() => window.staged), stagedBeforeCorrection, 'follow-ups never stage changes')
+
+  const urlDraft = await context.newPage()
+  urlDraft.setDefaultTimeout(5_000)
+  await urlDraft.goto(`${url}?tab=new`)
+  await urlDraft.getByRole('textbox', { name: 'Product URL (optional)' }).fill(rotatingVariantUrl)
+  await urlDraft.getByRole('button', { name: 'Find specifications' }).click()
+  const urlResults = urlDraft.locator('#research-results')
+  const oldPackage = urlResults.getByRole('checkbox', { name: /OLD-PACKAGE/ })
+  await oldPackage.check()
+  await urlDraft.getByRole('combobox', { name: 'Follow-up field' }).selectOption('density_g_cm3')
+  const urlFollowUp = urlDraft.getByRole('textbox', { name: 'Follow up on this search' })
+  await urlFollowUp.fill('Check the density again')
+  await urlFollowUp.press('Enter')
+  await urlResults.getByRole('checkbox', { name: /Density.*1\.22/ }).waitFor()
+  assert.equal(await oldPackage.count(), 0, 'a scoped follow-up cannot carry the old URL-only variant')
+  assert.equal(await urlResults.getByRole('checkbox', { name: /NEW-PACKAGE/ }).isChecked(), false)
+  await urlDraft.close()
+
+  await page.reload()
+  await page.evaluate(() => { window.editorEdits = { spool_width_mm: 62 } })
+  await frame.getByRole('button', { name: 'Find spool specs' }).click()
+  await frame.getByText('Which spool matches yours?', { exact: true }).waitFor()
+  await frame.getByRole('img', { name: 'Photo of 170g Spool' }).waitFor()
+  const styleReply = 'It is clear plastic with no slots.'
+  const styleRequest = page.waitForRequest(req => req.url().endsWith('/proposals') && req.postDataJSON().guidance === styleReply)
+  await followUp.fill(styleReply)
+  await followUp.press('Enter')
+  assert.equal((await styleRequest).postDataJSON().spool_lookup, true)
+  await frame.getByRole('button', { name: 'This matches: Fixture Brand PLA 1 kg' }).click()
+  await frame.getByRole('combobox', { name: 'Follow-up field', exact: true }).selectOption('density_g_cm3')
+  await followUp.fill('Recheck this density')
+  await followUp.press('Enter')
+  await activeResearch.getByRole('checkbox', { name: /Density.*1\.27/ }).waitFor()
+  assert.equal(await activeResearch.getByRole('button', { name: 'Selected: Fixture Brand PLA 1 kg' }).count(), 1)
+  assert.equal(await page.evaluate(() => window.staged), undefined)
+  await frame.getByRole('button', { name: 'Stage 2 fields' }).click()
+  await page.waitForFunction(() => window.staged)
+  assert.deepEqual(await page.evaluate(() => window.staged), [
+    { default_spool_weight_g: { old: null, value: 233 } },
+    { spool_outer_diameter_mm: { old: null, value: 200 } },
+  ], 'spool profile only stages supported blank fields after the explicit Stage action')
+
+  const spoolDraft = await context.newPage()
+  spoolDraft.setDefaultTimeout(5_000)
+  await spoolDraft.goto(`${url}?tab=new`)
+  await spoolDraft.getByLabel('Manufacturer', { exact: true }).fill('Fixture Brand')
+  await spoolDraft.getByLabel('Product name', { exact: true }).fill('Fixture PLA')
+  await spoolDraft.locator('#research-advanced-fields summary').click()
+  await spoolDraft.getByLabel('Material', { exact: true }).fill('PLA')
+  await spoolDraft.getByLabel('Diameter (mm)').fill('1.75')
+  await spoolDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  const chooseSpool = spoolDraft.getByRole('button', { name: 'This matches: Fixture Brand PLA 1 kg' })
+  const selectedSpool = spoolDraft.getByRole('button', { name: 'Selected: Fixture Brand PLA 1 kg' })
+  const firstSpoolSearch = spoolDraft.locator('.chat-history-list').getByRole('button', { name: 'Find spool specs · Fixture Brand Fixture PLA', exact: true }).first()
+  const reopenSpoolDraft = async () => {
+    await spoolDraft.reload()
+    await spoolDraft.locator('.chat-header').getByText('History', { exact: true }).click()
+    await firstSpoolSearch.click()
+  }
+  await chooseSpool.waitFor()
+  await reopenSpoolDraft()
+  await chooseSpool.click()
+  await spoolDraft.locator('#research-options > summary').click()
+  await spoolDraft.getByRole('button', { name: 'Find specifications' }).click()
+  await spoolDraft.getByRole('checkbox', { name: /Density.*1\.24/ }).waitFor()
+  assert.equal(await selectedSpool.count(), 1, 'filament specs for the same product retain the spool choice')
+  const writesBeforeSpool = writes.length
+  await spoolDraft.getByRole('button', { name: 'Save new filament' }).click()
+  await spoolDraft.locator('#create-preview').getByText('233', { exact: true }).waitFor()
+  await spoolDraft.locator('#create-preview').getByText('66', { exact: true }).waitFor()
+  assert.equal(writes.length, writesBeforeSpool, 'opening the create review does not save the filament')
+  await spoolDraft.getByRole('button', { name: 'Cancel', exact: true }).click()
+  conflictingSpoolWidth = true
+  await spoolDraft.locator('#research-options > summary').click()
+  await spoolDraft.getByRole('button', { name: 'Find specifications' }).click()
+  const supplierWidth = spoolDraft.getByRole('checkbox', { name: /Spool Width.*72/ })
+  const spoolWidth = spoolDraft.getByRole('checkbox', { name: /Spool Width.*66/ })
+  await supplierWidth.waitFor()
+  assert.equal(await selectedSpool.count(), 1)
+  assert.equal(await spoolWidth.isChecked(), false, 'new conflicting measurements require another explicit choice')
+  await supplierWidth.check()
+  await spoolWidth.check()
+  assert.equal(await supplierWidth.isChecked(), false, 'choosing the spool width clears the competing supplier value')
+  await supplierWidth.check()
+  assert.equal(await spoolWidth.isChecked(), false, 'choosing the supplier width clears the competing spool value')
+  await spoolDraft.getByRole('button', { name: 'Save new filament' }).click()
+  await spoolDraft.locator('#create-preview').getByText('233', { exact: true }).waitFor()
+  await spoolDraft.locator('#create-preview').getByText('72', { exact: true }).waitFor()
+  assert.equal(await spoolDraft.locator('#create-preview').getByText('66', { exact: true }).count(), 0)
+  await spoolDraft.getByRole('button', { name: 'Cancel', exact: true }).click()
+  conflictingSpoolWidth = false
+  differentSpoolPackage = true
+  await spoolDraft.locator('#research-options > summary').click()
+  await spoolDraft.getByRole('button', { name: 'Find specifications' }).click()
+  await spoolDraft.getByRole('checkbox', { name: /Filament weight.*500/i }).waitFor()
+  assert.equal(await selectedSpool.count(), 0, 'specs for a different package weight require another spool choice')
+  differentSpoolPackage = false
+  await spoolDraft.locator('#research-options > summary').click()
+  await spoolDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  await chooseSpool.click()
+  duplicateSpoolLookup = true
+  await spoolDraft.locator('#research-options > summary').click()
+  await spoolDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  await spoolDraft.getByText('A matching filament already exists.', { exact: false }).waitFor()
+  assert.equal(await spoolDraft.getByRole('button', { name: 'Save new filament' }).isDisabled(), true)
+  await reopenSpoolDraft()
+  await spoolDraft.getByText('Earlier findings', { exact: true }).first().click()
+  await spoolDraft.locator('.research-history-value').filter({ hasText: '233' }).first().waitFor()
+  duplicateSpoolLookup = false
+  await spoolDraft.locator('#research-options > summary').click()
+  await spoolDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  await spoolDraft.locator('#save-filament:enabled').waitFor()
+  await selectedSpool.waitFor()
+  await reopenSpoolDraft()
+  await selectedSpool.click()
+  await spoolDraft.getByRole('button', { name: 'This matches: 170g Spool' }).click()
+  await spoolDraft.getByRole('button', { name: 'Save new filament' }).click()
+  await spoolDraft.getByRole('dialog').getByRole('button', { name: 'Create filament' }).click()
+  await spoolDraft.getByRole('link', { name: 'Open saved filament' }).waitFor()
+  assert.equal(writes.at(-1).default_spool_weight_g, 170)
+  await reopenSpoolDraft()
+  await spoolDraft.getByRole('link', { name: 'Open saved filament' }).waitFor()
+  await spoolDraft.getByText('Earlier findings', { exact: true }).last().click()
+  await spoolDraft.locator('.research-history-value').filter({ hasText: '170' }).waitFor()
+  await spoolDraft.close()
+
   canUseFilaments = false
   await page.goto(url)
   await page.getByRole('region', { name: 'Model settings' }).waitFor()
   assert.equal(await page.getByRole('navigation', { name: 'FilaBrain' }).count(), 0)
-  console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP migration guide, linked editor staging and host selection passed')
+  console.log('FilaBrain plugin page: both scales, NFC reader, spool lookup, chat, create/edit, batches and the MCP migration guide passed')
 } finally {
   await browser.close()
 }

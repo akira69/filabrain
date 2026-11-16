@@ -10,19 +10,22 @@ from app.core.cache import response_cache
 from app.core.db_utils import get_next_available_id
 from app.core.event_bus import event_bus
 from app.models import Filament, FilamentColor, InstalledPlugin, Manufacturer
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StrictBool, StringConstraints
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from .catalog import linked_spool_card
+from .chat_context import NAVIGATION, collect_context, lookup_live
 from .db import FilamentResearchSave
 from .model import request_completion
 from .proposals import (
     Identity,
     Text,
     batch_proposal,
+    duplicate_ids,
     filament_identity,
     filament_snapshot,
     identity_matches,
@@ -41,6 +44,11 @@ from .settings import (
     model_key,
     select_model,
 )
+from .spool_profiles import (
+    DIMENSION_FIELDS, LOOKUP_WORDS, PACKAGE_WEIGHT, STYLE_CUES, find_spool_profiles, spool_follow_up, spool_intent,
+    spool_profile_result,
+)
+from .weights import grams_from_match
 
 router = APIRouter(tags=["FilaBrain"])
 PLUGIN_KEY = "filabrain"
@@ -52,6 +60,8 @@ CHAT_PAGES = {
     "model_settings": ("/admin/system/filabrain", "admin:plugins_manage"),
 }
 PAGE_MARKER = re.compile(r"(?m)^\[\[open:([a-z_]+)(?:\|([^\]\r\n]{1,255}))?\]\][ \t]*$")
+SELECTED_SPOOL = re.compile(r"\b(?:my|this|(?:the\s+)?selected)\s+(?:spool|reel|bobbin|filament)\b", re.I)
+SELECTED_SPOOL_WORDS = LOOKUP_WORDS | {"chose", "chosen", "its", "picked", "selected"}
 RecordToken = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
 DraftId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")]
 
@@ -62,9 +72,11 @@ class ProposalRequest(BaseModel):
     identity: Identity | None = None
     record_token: RecordToken | None = None
     product_url: Annotated[str, Field(max_length=2048)] | None = None
+    reference_url: Annotated[str, Field(max_length=2048)] | None = None
     sku_hint: Text = ""
     guidance: Annotated[str, Field(max_length=400)] = ""
     action: Literal["fill", "standardize"] = "fill"
+    spool_lookup: StrictBool = False
     model_id: ModelId | None = None
     endpoint_id: EndpointId | None = None
 
@@ -83,8 +95,13 @@ class ManufacturerWebsite(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: Annotated[list[ChatMessage], Field(min_length=1, max_length=11)]
+    selected_spool_profile_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
     model_id: ModelId | None = None
     endpoint_id: EndpointId | None = None
+    filament_id: Annotated[int, Field(gt=0, le=2_147_483_647)] | None = None
+    printer_id: Annotated[int, Field(gt=0, le=2_147_483_647)] | None = None
+    nozzle_mm: Annotated[float, Field(gt=0, le=2, allow_inf_nan=False)] | None = None
+    web_search: StrictBool = False
 
 
 async def is_enabled(db: DBSession) -> bool:
@@ -110,6 +127,9 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "filaments:update",
                 "filaments:read",
                 "manufacturers:update",
+                "spools:create",
+                "spools:read",
+                "printers:read",
                 "admin:plugins_manage",
             )
         except HTTPException as exc:
@@ -127,6 +147,10 @@ async def research_status(db: DBSession, principal: PrincipalDep):
     return {
         "enabled": enabled,
         "can_create": enabled and "filaments:create" in permissions,
+        "can_add_spool": enabled and principal.auth_type == "session"
+        and {"filaments:read", "spools:create"} <= permissions,
+        "can_read_spools": enabled and principal.auth_type == "session" and "spools:read" in permissions,
+        "can_read_printers": enabled and principal.auth_type == "session" and "printers:read" in permissions,
         "can_update": "filaments:update" in permissions,
         "can_update_manufacturer": enabled and principal.auth_type == "session"
         and {"filaments:update", "manufacturers:update"} <= permissions,
@@ -143,7 +167,9 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         raise HTTPException(404, "FilaBrain is disabled")
     if principal.auth_type != "session":
         raise HTTPException(403, "A browser session is required")
-    permissions = await ensure_any_permission(db, principal, *(permission for _, permission in CHAT_PAGES.values()))
+    permissions = await ensure_any_permission(
+        db, principal, "spools:read", "printers:read", *(permission for _, permission in CHAT_PAGES.values()),
+    )
     if "filaments:read" not in permissions:
         raise HTTPException(403, "Filament read access is required")
     allowed_pages = {name: url for name, (url, permission) in CHAT_PAGES.items() if permission in permissions}
@@ -156,11 +182,69 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     _, config = await config_record(db)
     if not data.endpoint_id and not (config["model_url"] and config["model_id"]):
         raise HTTPException(503, "Configure a model in FilaBrain settings")
+    question = data.messages[-1].content
+    if not NAVIGATION.search(question):
+        selected_intent = None
+        lookup_messages = data.messages
+        if data.selected_spool_profile_id and len(data.messages) >= 3 and (
+            set(re.findall(r"\w+", question.lower())) <= SELECTED_SPOOL_WORDS
+        ):
+            selected_intent = spool_intent(question + " spool")
+            if selected_intent:
+                lookup_messages = data.messages[:-2]
+                question = lookup_messages[-1].content
+        intent = spool_intent(question)
+        refinements = []
+        for previous in (-3, -5):
+            if intent or NAVIGATION.search(question) or len(lookup_messages) < -previous or not spool_follow_up(
+                question, lookup_messages[previous + 1].content,
+            ):
+                break
+            refinements.insert(0, question)
+            question = lookup_messages[previous].content
+            intent = spool_intent(question)
+        if intent and not NAVIGATION.search(question):
+            refinement = " ".join(refinements)
+            profile_id = None
+            package_weight_g = None
+            search_identity = {}
+            if data.filament_id is not None:
+                filament = await db.get(Filament, data.filament_id, options=(selectinload(Filament.manufacturer),))
+                if filament and linked_spool_question(question, filament):
+                    saved = filament_identity(filament)
+                    search_identity = {
+                        "manufacturer_name": saved.manufacturer, "product_name": saved.designation,
+                        "material_name": saved.material,
+                    }
+                    question = f"{saved.manufacturer} {saved.designation} {question}"
+                    if not PACKAGE_WEIGHT.search(refinement):
+                        profile_id = getattr(filament, "filamentdb_spool_profile_id", None)
+                        package_weight_g = saved.weight_g
+            await db.rollback()
+            result = await linked_spool_result(profile_id, intent) or await find_spool_profiles(
+                question, intent, refinement, package_weight_g=package_weight_g, **search_identity,
+            )
+            if not selected_intent:
+                return result
+            for profile in result["spool_profiles"]:
+                if profile["id"] == data.selected_spool_profile_id:
+                    return spool_profile_result(profile, selected_intent)
+        if selected_intent:
+            return {"reply": "I couldn’t verify the selected spool for this question.", "action": None}
+    context = await collect_context(
+        db, data.messages[-1].content, permissions, filament_id=data.filament_id,
+        printer_id=data.printer_id, nozzle_mm=data.nozzle_mm, web_search=data.web_search,
+        previous_question=data.messages[-3].content if len(data.messages) >= 3 else "",
+    )
     await db.rollback()
+    if context and "ambiguous_weight" in context.notices:
+        return context.response("")
     endpoint, model = select_model(config, data.model_id, data.endpoint_id)
     await check_model_catalog(endpoint, model)
+    if context:
+        await lookup_live(context, config["search_url"], config["supplier_download_mib"])
     messages = [
-        {"role": "system", "content": (
+        {"role": "system", "content": context.prompt() if context else (
             "You are the FilaMan assistant. Help with general questions, especially 3D printing, "
             "filament and FilaMan workflows. You can only see this conversation. "
             "Do not claim to have searched the web, inspected inventory, opened a page, or changed records. "
@@ -181,7 +265,11 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         if not answer.strip():
             raise ValueError("Empty model response")
     except (httpx.HTTPError, TimeoutError, ValueError, KeyError, IndexError, TypeError, RuntimeError):
+        if context:
+            return context.response("")
         raise HTTPException(502, "The configured model could not answer. Try again.") from None
+    if context:
+        return context.response(answer)
     action = None
     if marker := PAGE_MARKER.search(answer):
         page, name = marker.groups()
@@ -193,6 +281,40 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     if not answer.strip():
         answer = "Select the page to continue." if action else "That page is unavailable."
     return {"reply": answer.strip()[:8000], "action": action}
+
+
+def linked_spool_question(question: str, filament: Filament) -> bool:
+    for match in PACKAGE_WEIGHT.finditer(question):
+        if (grams := grams_from_match(match)) is None or grams != filament.raw_material_weight_g:
+            return False
+    question = PACKAGE_WEIGHT.sub(" ", question)
+    if SELECTED_SPOOL.search(question):
+        question = SELECTED_SPOOL.sub(" ", question)
+    else:
+        names = [filament.manufacturer.name.strip() if filament.manufacturer else "", filament.designation.strip()]
+        if not all(names):
+            return False
+        labels = [rf"(?<!\w){re.escape(name)}(?!\w)" for name in sorted(names, key=len, reverse=True)]
+        if not all(re.search(label, question, re.I) for label in labels):
+            return False
+        question = re.sub("|".join(labels), " ", question, flags=re.I)
+    return set(re.findall(r"\w+", question.lower())) <= LOOKUP_WORDS
+
+
+async def linked_spool_result(profile_id: int | None, intent: str) -> dict | None:
+    if not (profile := await linked_spool_card(profile_id)):
+        return None
+    dimensions = [f"{profile[key]:g} mm {label}" for key, label in DIMENSION_FIELDS if key in profile]
+    specs = [f'{profile["empty_weight_g"]:g} g empty'] if "empty_weight_g" in profile else []
+    specs.extend(dimensions)
+    reply = f'The selected filament links to FilaManDB’s {profile["title"]} profile.'
+    if specs:
+        reply += f' It lists {", ".join(specs)}.'
+    if intent == "visual" and "photo" not in profile:
+        reply += " A photo of this design is unavailable."
+    if intent == "dimensions" and not dimensions:
+        reply += " The listing gives no dimensions."
+    return {"reply": reply, "action": None, "spool_profiles": [profile]}
 
 
 @router.get("/models")
@@ -255,13 +377,44 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
     ):
         raise HTTPException(409, "The SKU differs from the filament in the editor")
     target = {"mode": data.mode, "filament_id": data.filament_id, "identity": identity}
+    if data.spool_lookup:
+        if data.action != "fill" or not identity.designation.strip():
+            raise HTTPException(422, "Enter the filament product name before looking up spool designs")
+        issues = []
+        if filament is None:
+            duplicate_identity = identity.model_copy(update={"sku": identity.sku.strip() or data.sku_hint.strip()})
+            issues = [
+                {"code": "duplicate", "filament_id": duplicate_id}
+                for duplicate_id in await duplicate_ids(db, duplicate_identity)
+            ]
+        profile_id = getattr(filament, "filamentdb_spool_profile_id", None)
+        await db.rollback()
+        lookup = await linked_spool_result(profile_id, "visual")
+        if not lookup or STYLE_CUES.search(data.guidance):
+            candidates = await find_spool_profiles(
+                f"{identity.manufacturer} {identity.designation}", "visual",
+                style_hint=data.guidance, package_weight_g=identity.weight_g,
+                manufacturer_name=identity.manufacturer, product_name=identity.designation,
+                material_name=identity.material, compare_linked=bool(lookup),
+            )
+            if not lookup:
+                lookup = candidates
+            elif candidates["spool_profiles"]:
+                lookup["spool_profiles"].extend(candidates["spool_profiles"][:3])
+                lookup["reply"] += " Compare it with the listed alternatives that match your description."
+            else:
+                lookup["reply"] += " I couldn’t find another listed design matching your description."
+        return {
+            "target": target, "suggestions": [], "issues": issues,
+            "spool_profiles": lookup["spool_profiles"], "spool_reply": lookup["reply"],
+        }
     if filament is None:
         if data.action != "fill":
             raise HTTPException(422, "Standardization requires an existing filament")
         return {
             "target": target,
             **await research_products(
-                db, identity, product_url=data.product_url, sku_hint=data.sku_hint,
+                db, identity, product_url=data.product_url, reference_url=data.reference_url, sku_hint=data.sku_hint,
                 guidance=data.guidance, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
                 release_read=deadline is not None,
             ),
@@ -269,7 +422,7 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
     snapshot = filament_snapshot(filament)
     result = await batch_proposal(
         db, snapshot, data.action,
-        sku_hint=data.sku_hint, product_url=data.product_url, guidance=data.guidance,
+        sku_hint=data.sku_hint, product_url=data.product_url, reference_url=data.reference_url, guidance=data.guidance,
         release_read=deadline is not None, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
     )
     if data.action == "standardize":
@@ -357,16 +510,67 @@ async def save_research_filament(draft_id: DraftId, data: FilamentCreate, db: DB
 
 
 @router.get("/saved-filaments/{draft_id}", response_class=RedirectResponse)
-async def open_saved_filament(draft_id: DraftId, db: DBSession, principal: PrincipalDep):
+async def open_saved_filament(draft_id: DraftId, db: DBSession, principal: PrincipalDep, add_spool: bool = False):
     if principal.auth_type != "session" or principal.user_id is None:
         raise HTTPException(403, "A browser session is required")
     await ensure_any_permission(db, principal, "filaments:read", "filaments:create")
+    if add_spool:
+        await ensure_any_permission(db, principal, "spools:create")
     if not await is_enabled(db):
         raise HTTPException(404, "FilaBrain is disabled")
     receipt = await db.get(FilamentResearchSave, (principal.user_id, draft_id))
     if receipt is None or receipt.filament_id is None:
         raise HTTPException(404, "Saved filament not found")
-    return RedirectResponse(f"/filaments/{receipt.filament_id}", headers={"Cache-Control": "no-store"})
+    url = f"/spools/new?filament_id={receipt.filament_id}" if add_spool else f"/filaments/{receipt.filament_id}"
+    return RedirectResponse(url, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/spool-filaments")
+async def lookup_spool_filament(
+    db: DBSession,
+    principal: PrincipalDep,
+    exact: Annotated[str | None, Query(min_length=1, max_length=2048)] = None,
+    search: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+):
+    if principal.auth_type != "session":
+        raise HTTPException(403, "A browser session is required")
+    await ensure_any_permission(db, principal, "filaments:read")
+    await ensure_any_permission(db, principal, "spools:create")
+    if not await is_enabled(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    if (exact is None) == (search is None):
+        raise HTTPException(422, "Provide an exact SKU or URL, or search by product name.")
+    query = select(Filament).options(selectinload(Filament.manufacturer))
+    if exact is not None:
+        term = exact.strip()
+        match = Filament.shop_url == term if term.lower().startswith(("https://", "http://")) else (
+            func.lower(Filament.manufacturer_sku) == term.lower()
+        )
+        query = query.where(match)
+    else:
+        terms = (search or "").split()
+        if not 1 <= len(terms) <= 12:
+            raise HTTPException(422, "Use 1 to 12 search terms.")
+        fields = (Manufacturer.name, Filament.designation, Filament.material_type, Filament.manufacturer_color_name)
+        query = query.outerjoin(Manufacturer, Filament.manufacturer_id == Manufacturer.id).where(
+            *(or_(*(field.icontains(term, autoescape=True) for field in fields)) for term in terms)
+        )
+    result = await db.scalars(query.order_by(Filament.designation, Filament.id).limit(13))
+    items = [
+        {
+            "id": row.id,
+            "designation": row.designation,
+            "manufacturer": {"name": row.manufacturer.name} if row.manufacturer else None,
+            "material_type": row.material_type,
+            "material_subgroup": row.material_subgroup,
+            "finish_type": row.finish_type,
+            "manufacturer_color_name": row.manufacturer_color_name,
+            "diameter_mm": row.diameter_mm,
+            "raw_material_weight_g": row.raw_material_weight_g,
+        }
+        for row in result
+    ]
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/filaments/{filament_id}/research-record")

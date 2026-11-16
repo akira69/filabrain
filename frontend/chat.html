@@ -36,8 +36,34 @@
       <p data-chat-status class="fm-field-hint" role="status" data-i18n="common.loading">Loading…</p>
       <form class="message-composer" data-chat-form hidden>
         <textarea class="fm-input" name="message" rows="2" maxlength="2000" placeholder="Ask FilaBrain…" data-i18n-aria-label="filaBrain.chatQuestion" data-i18n-placeholder="filaBrain.chatPlaceholder"></textarea>
+        <details class="chat-context" data-chat-context hidden>
+          <summary data-i18n="filaBrain.chatContext">Printer and filament</summary>
+          <div class="chat-context-fields">
+            <label data-chat-printer-field>
+              <span data-i18n="filaBrain.chatPrinter">Printer</span>
+              <select class="fm-input" data-chat-printer></select>
+            </label>
+            <div>
+              <label for="chat-filament" data-i18n="filaBrain.chatFilament">Filament</label>
+              <input type="search" class="fm-input" data-chat-filament-search maxlength="200" data-i18n-placeholder="filaBrain.chatFindFilament" data-i18n-aria-label="filaBrain.chatFindFilament">
+              <select class="fm-input" id="chat-filament" data-chat-filament></select>
+            </div>
+            <label>
+              <span data-i18n="filaBrain.chatNozzle">Nozzle diameter</span>
+              <select class="fm-input" data-chat-nozzle>
+                <option value="" data-i18n="filaBrain.chatNoSelection">Not selected</option>
+                <option value="0.2">0.2 mm</option>
+                <option value="0.4">0.4 mm</option>
+                <option value="0.6">0.6 mm</option>
+                <option value="0.8">0.8 mm</option>
+              </select>
+            </label>
+          </div>
+          <p data-chat-context-status class="fm-field-hint" role="status"></p>
+        </details>
         <div class="chat-toolbar">
           <!-- model-picker -->
+          <button type="submit" class="fm-btn fm-btn-outline chat-search" data-chat-web-search data-i18n="filaBrain.chatWebSearch" hidden>Search the web</button>
           <button type="submit" class="fm-btn fm-btn-primary chat-send" disabled data-i18n-aria-label="filaBrain.chatSend">
             <svg data-send-icon aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6" /></svg>
             <svg data-stop-icon aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3" /></svg>

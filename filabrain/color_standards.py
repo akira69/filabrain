@@ -28,7 +28,10 @@ RAL_SWATCH = re.compile(
 )
 HEX = re.compile(r"background-color\s*:\s*(#[0-9a-f]{6})\b", re.I)
 URL_RAL = re.compile(r"(?:^|-)ral-?(\d{4})(?=-|$)", re.I)
-URL_PANTONE = re.compile(r"(?:^|-)pantone-?(?:[a-z]+-){0,8}(\d{2,4})(?:-)?(cp|up|c|u)(?=-|$)", re.I)
+URL_PANTONE = re.compile(
+    r"(?:^|-)pantone-?(?:(?P<name>(?:black|yellow|orange|red|green|blue)(?:-\d{1,2})?)"
+    r"|(?:[a-z]+-){0,8}(?P<number>\d{2,4}))-?(?P<stock>cp|up|c|u)(?=-|$)", re.I,
+)
 HREF = re.compile(r'\bhref="([^"]+)"')
 _previews = TTLCache()
 _ral_page = TTLCache()
@@ -45,10 +48,11 @@ def normalize_reference(value: str) -> str | None:
 
 def references_in_product_url(url: str) -> list[str]:
     slug = unquote(urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1]).lower()
-    return list(dict.fromkeys([
-        *(f"RAL {match[1]}" for match in URL_RAL.finditer(slug)),
-        *(f"Pantone {match[1]} {match[2].upper()}" for match in URL_PANTONE.finditer(slug)),
-    ]))
+    references = [f"RAL {match[1]}" for match in URL_RAL.finditer(slug)]
+    for match in URL_PANTONE.finditer(slug):
+        code = (match["name"] or match["number"]).replace("-", " ").title()
+        references.append(f"Pantone {code} {match['stock'].upper()}")
+    return list(dict.fromkeys(references))
 
 
 def references_from(issues: list[dict], manufacturer_color_name: str | None) -> dict[str, dict]:

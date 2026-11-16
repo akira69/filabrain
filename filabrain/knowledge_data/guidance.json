@@ -1,0 +1,660 @@
+[
+  {
+    "source_id": "material:asa",
+    "title": "ASA · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "ASA is a stiff, UV- and weather-resistant choice for outdoor housings and brackets. It generally keeps its shape at higher temperatures than ordinary PLA. Warping and layer splitting can be limiting, especially on large parts. Use a printer rated for enclosed printing, ventilate as the manufacturer directs, and use a plate preparation approved for the grade. Dry if stored damp.",
+    "material": "ASA",
+    "keywords": [
+      "ASA",
+      "acrylonitrile styrene acrylate"
+    ],
+    "topics": [
+      "outdoor",
+      "sun",
+      "UV",
+      "weather"
+    ]
+  },
+  {
+    "source_id": "material:petg",
+    "title": "PETG · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "PETG is a useful starting point for moderately exposed brackets and housings when easy printing, toughness and strong layer bonding matter. It is less rigid than typical PLA and can creep under prolonged load, especially in heat. Verify long-term UV and chemical resistance for the grade. Dry it when stringing or extrusion becomes inconsistent. It can grip smooth PEI strongly, so use the plate maker's recommended surface or release layer.",
+    "material": "PETG",
+    "keywords": [
+      "PETG",
+      "polyethylene terephthalate glycol"
+    ],
+    "topics": [
+      "outdoor",
+      "weather",
+      "bracket"
+    ]
+  },
+  {
+    "source_id": "material:tpu",
+    "title": "TPU · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "TPU suits bumpers, pads, seals and other parts that need elastic deformation or abrasion resistance. Shore hardness is an indentation measurement. Stretch, elastic recovery and stiffness also depend on the grade, wall thickness and infill. Check the grade for UV, chemicals and temperature. Dry it, use a short guided path and a plate or release layer suited to TPU, and reduce feed rate if soft filament buckles.",
+    "material": "TPU",
+    "keywords": [
+      "TPU",
+      "TPE",
+      "thermoplastic polyurethane"
+    ],
+    "topics": [
+      "flex",
+      "flexible",
+      "stretch",
+      "gasket",
+      "rubber"
+    ]
+  },
+  {
+    "source_id": "material:pla",
+    "title": "PLA · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "PLA gives stiff parts with fine detail and usually prints easily on an open machine. It suits prototypes, tooling aids and display models. Ordinary PLA can deform under sustained load or elevated temperatures, including hot sun or a parked car. Toughened and heat-treated grades differ. Use the recommended PEI or equivalent surface, and dry according to the supplier if extrusion shows moisture.",
+    "material": "PLA",
+    "keywords": [
+      "PLA",
+      "polylactic acid"
+    ],
+    "topics": [
+      "prototype",
+      "model",
+      "display"
+    ]
+  },
+  {
+    "source_id": "material:abs",
+    "title": "ABS · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "ABS is more heat-tolerant than ordinary PLA and is often chosen for rigid, impact-tolerant housings. Unprotected ABS can degrade in sunlight. Shrinkage, layer splitting and emissions make a suitably enclosed, ventilated printer and an approved build surface important. Keep drafts away and dry if storage or print quality indicates moisture.",
+    "material": "ABS",
+    "keywords": [
+      "ABS",
+      "acrylonitrile butadiene styrene"
+    ],
+    "topics": [
+      "solvent smoothing",
+      "impact"
+    ]
+  },
+  {
+    "source_id": "material:pa",
+    "title": "PA / nylon · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "Nylons can provide impact toughness, wear resistance and some flex in gears, bushings and clips. PA chemistry, absorbed moisture and conditioning strongly affect stiffness, dimensions and temperature response. Dry before printing, use a dry feed path, and follow the grade's hotend, chamber and adhesion guidance. Fiber-filled PA is a different case for nozzle wear.",
+    "material": "PA / nylon",
+    "keywords": [
+      "PA",
+      "nylon",
+      "PA6",
+      "PA12",
+      "polyamide"
+    ],
+    "topics": [
+      "wear",
+      "gear",
+      "bearing",
+      "hinge"
+    ]
+  },
+  {
+    "source_id": "material:pc",
+    "title": "PC · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "Polycarbonate is commonly chosen for rigid, heat-tolerant parts with good impact performance. Blends differ in heat, UV and chemical performance. Moisture, warping and interlayer separation can complicate printing. Follow the grade's drying, hotend and chamber requirements and use the surface or release layer specified by the plate maker.",
+    "material": "PC",
+    "keywords": [
+      "PC",
+      "polycarbonate"
+    ],
+    "topics": [
+      "heat resistant",
+      "high temperature"
+    ]
+  },
+  {
+    "source_id": "material:pp",
+    "title": "PP · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "Polypropylene is light and chemically resistant in many applications. Its flexibility and fatigue resistance suit living hinges and some containers. Verify the chemical, temperature and UV exposure for the grade. It tends to shrink and sticks poorly to many common surfaces, so start with a compatible PP sheet, tape or adhesive. Follow supplier storage and drying guidance for blends.",
+    "material": "PP",
+    "keywords": [
+      "PP",
+      "polypropylene"
+    ],
+    "topics": [
+      "living hinge",
+      "chemical resistance"
+    ]
+  },
+  {
+    "source_id": "material:filled",
+    "title": "Filled blends · Prusa Filament Material Guide",
+    "url": "https://help.prusa3d.com/filament-material-guide",
+    "kind": "material",
+    "text": "Carbon or glass fibers can improve stiffness and dimensional stability, but impact resistance, stretch and interlayer strength still depend on the resin and print direction. Wood and appearance fillers vary. Check the exact grade for abrasive wear, clogging and feeder limitations. Use a wear-resistant nozzle of the maker's specified diameter for abrasive grades, dry according to the base resin and grade, and follow its plate and chamber requirements.",
+    "material": "Filled blends",
+    "keywords": [
+      "filled",
+      "fiber reinforced",
+      "carbon fiber",
+      "glass fiber",
+      "CF",
+      "GF",
+      "wood filled",
+      "metal filled"
+    ],
+    "topics": [
+      "abrasion",
+      "abrasive"
+    ]
+  },
+  {
+    "source_id": "guidance:profiles",
+    "title": "Selecting a printer and filament profile · OrcaSlicer",
+    "url": "https://github.com/OrcaSlicer/OrcaSlicer/wiki/how_to_create_profiles",
+    "kind": "guidance",
+    "text": "Start with the preset for the exact printer, installed nozzle and slicer, then choose the nearest valid filament grade and actual build plate. A material family preset can be a starting point. Manufacturer settings for a different grade, nozzle, plate or machine need independent validation.",
+    "keywords": [
+      "setting",
+      "settings",
+      "profile",
+      "preset",
+      "starting point",
+      "temperature"
+    ]
+  },
+  {
+    "source_id": "guidance:first-layer",
+    "title": "First-layer calibration · Ellis' Print Tuning Guide",
+    "url": "https://ellis3dp.com/Print-Tuning-Guide/articles/first_layer_squish.html",
+    "kind": "guidance",
+    "text": "Print a small first-layer patch on the selected plate. Lines should join into a continuous surface without gaps or pronounced ridges. Use the machine's supported calibration procedure and check the right plate and nozzle selection before changing the offset.",
+    "keywords": [
+      "first layer",
+      "z offset",
+      "squish"
+    ]
+  },
+  {
+    "source_id": "guidance:adhesion",
+    "title": "Build-surface adhesion · Ellis' Print Tuning Guide",
+    "url": "https://ellis3dp.com/Print-Tuning-Guide/articles/troubleshooting/build_surface_adhesion.html",
+    "kind": "guidance",
+    "text": "Start with the build surface and cleaning method recommended by the plate maker. Handle the plate by its edges after washing. If corners lift, verify the grade's bed temperature, first layer and draft sensitivity. Consider a brim on narrow parts. A release layer can protect a surface from grades that bond too strongly.",
+    "keywords": [
+      "adhesion",
+      "warping",
+      "warps",
+      "lifting",
+      "lift",
+      "build plate",
+      "bed"
+    ]
+  },
+  {
+    "source_id": "guidance:cooling",
+    "title": "Cooling and layer times · Ellis' Print Tuning Guide",
+    "url": "https://ellis3dp.com/Print-Tuning-Guide/articles/cooling_and_layer_times.html",
+    "kind": "guidance",
+    "text": "Cooling and minimum layer time can improve small features, bridges and overhangs. Excess cooling can weaken layer bonds or worsen warping with materials that need a warm chamber. Use the profile's recommendations for the grade, change one control at a time and recheck a representative print.",
+    "keywords": [
+      "fan",
+      "cooling",
+      "bridge",
+      "bridging",
+      "overhang",
+      "minimum layer time"
+    ]
+  },
+  {
+    "source_id": "guidance:stringing",
+    "title": "Retraction and stringing · Ellis' Print Tuning Guide",
+    "url": "https://ellis3dp.com/Print-Tuning-Guide/articles/retraction.html",
+    "kind": "guidance",
+    "text": "Check whether the filament is dry and the nozzle is clean before changing retraction. Use the grade's temperature range and the extruder's retraction profile. Compare one adjustment at a time on a small test print, especially for soft grades that can buckle.",
+    "keywords": [
+      "stringing",
+      "strings",
+      "retraction",
+      "ooze"
+    ]
+  },
+  {
+    "source_id": "guidance:flow",
+    "title": "Volumetric flow · Ellis' Print Tuning Guide",
+    "url": "https://ellis3dp.com/Print-Tuning-Guide/articles/determining_max_volumetric_flow_rate.html",
+    "kind": "guidance",
+    "text": "Flow depends on the hotend, nozzle, material and temperature. If extrusion fades at speed, test maximum stable volumetric flow for that combination and leave headroom. Extrusion multiplier calibrates delivered material at a given flow. Treat those as separate adjustments.",
+    "keywords": [
+      "flow",
+      "underextrusion",
+      "under extrusion",
+      "extrusion multiplier",
+      "skipping"
+    ]
+  },
+  {
+    "source_id": "guidance:comparing-materials",
+    "title": "Comparing printed material data · Prusament PETG datasheet",
+    "url": "https://prusament.com/wp-content/uploads/2022/10/PETG_Prusament_TDS_2021_10_EN.pdf",
+    "kind": "guidance",
+    "text": "For numeric comparisons, use the same property, test method, direction, specimen type and conditioning. Keep separate the results for raw filament, printed samples, annealed samples and moisture-conditioned samples. Check notch state and test load, and use creep data for sustained loads where available. Shore hardness describes indentation and does not give stiffness, elongation or impact strength.",
+    "keywords": [
+      "compare",
+      "comparison",
+      "tensile",
+      "flexural",
+      "impact",
+      "creep",
+      "test conditions"
+    ]
+  },
+  {
+    "source_id": "hardware:bambu-a1",
+    "title": "Bambu Lab A1 · Technical specification",
+    "url": "https://store.bblcdn.com/8137fad1525a4454ac8a28502edbc919.pdf",
+    "kind": "hardware",
+    "text": "The A1 is an open-frame printer. The included nozzle is 0.4 mm stainless steel and the hotend and bed are rated to 300 °C and 100 °C. Bambu lists PLA, PETG, TPU and PVA as ideal and advises against ABS, ASA, PC, PA, PET and CF/GF reinforced polymers on the A1. Use the actual installed nozzle material and plate when judging a specific grade.",
+    "printer": "Bambu Lab A1",
+    "keywords": [
+      "A1"
+    ],
+    "exclude": [
+      "A1 mini"
+    ],
+    "hardware": {
+      "factory_nozzle_mm": 0.4,
+      "factory_nozzle_material": "stainless steel",
+      "maximum_hotend_temperature_c": 300,
+      "maximum_bed_temperature_c": 100,
+      "chamber": "open frame",
+      "listed_build_plates": [
+        "Textured PEI Plate",
+        "Smooth PEI Plate",
+        "High Temperature Plate",
+        "Cool Plate"
+      ],
+      "filament_diameter_mm": 1.75,
+      "optional_nozzle_diameters_mm": [
+        0.2,
+        0.6,
+        0.8
+      ],
+      "external_feed_path": "external spool holder"
+    }
+  },
+  {
+    "source_id": "hardware:ams2-pro",
+    "title": "Bambu Lab AMS 2 Pro · Technical specification",
+    "url": "https://bambulab-eu.myshopify.com/products/ams-2-pro",
+    "kind": "hardware",
+    "text": "AMS 2 Pro is a feeder for 1.75 mm filament. Its drying limit is 65 °C, so grades requiring a higher drying temperature need a different drying setup. The feeder fits spools 197–202 mm in diameter and 50–68 mm wide. Printer extrusion, feeder compatibility and a compatible slicer preset are separate checks.",
+    "feeder": "AMS 2 Pro",
+    "keywords": [
+      "AMS 2 Pro"
+    ],
+    "source_links": [
+      {
+        "title": "Bambu AMS 2 Pro technical specification",
+        "url": "https://csm.bblcdn.com/hub/011651bed7b4405cb2c57da72ca8300c.pdf"
+      },
+      {
+        "title": "Bambu H2D manual with AMS 2 Pro spool dimensions",
+        "url": "https://cdn1.bambulab.com/documentation/h2d/en/H2D_Laser_Full_Combo_20250305.pdf"
+      }
+    ],
+    "hardware": {
+      "filament_diameter_mm": 1.75,
+      "maximum_drying_temperature_c": 65,
+      "minimum_spool_diameter_mm": 197,
+      "maximum_spool_diameter_mm": 202,
+      "minimum_spool_width_mm": 50,
+      "maximum_spool_width_mm": 68
+    }
+  },
+  {
+    "source_id": "compatibility:bambu-a1-ams2-pro",
+    "title": "A1 series and AMS 2 Pro · Bambu Studio 2.3.0 release notes",
+    "url": "https://github.com/bambulab/BambuStudio/releases/tag/v02.03.00.70",
+    "kind": "compatibility",
+    "text": "Bambu Studio 2.3.0 introduced A1-series support for AMS 2 Pro through the A1-series AMS Hub. The release notes list printer firmware 01.06.10.33 as the minimum and call for a Studio version above 2.3.0.70 for AMS use on A1-series printers. Set the installed AMS type on the printer or in Studio. Verify current firmware and accessory requirements for the user's setup.",
+    "printer": "Bambu Lab A1 series",
+    "feeder": "AMS 2 Pro",
+    "keywords": [
+      "compatibility",
+      "A1",
+      "firmware",
+      "hub"
+    ],
+    "requires": [
+      "A1",
+      "AMS 2 Pro"
+    ],
+    "revision": "v02.03.00.70"
+  },
+  {
+    "source_id": "compatibility:ams2-pro-tpu",
+    "title": "AMS 2 Pro and generic TPU · Bambu Lab specification",
+    "url": "https://bambulab-eu.myshopify.com/products/ams-2-pro",
+    "kind": "compatibility",
+    "text": "Bambu excludes generic TPU from the AMS 2 Pro feeder. Use an external feed path if the printer and grade permit it. Bambu separately lists TPU for AMS as an exact grade supported by this feeder. Check the spool dimensions and printer setup as well.",
+    "material": "TPU",
+    "feeder": "AMS 2 Pro",
+    "keywords": [
+      "TPU"
+    ],
+    "requires": [
+      "AMS 2 Pro",
+      "TPU"
+    ],
+    "source_links": [
+      {
+        "title": "Bambu TPU for AMS",
+        "url": "https://bambulab-eu.myshopify.com/products/tpu-for-ams"
+      }
+    ]
+  },
+  {
+    "source_id": "compatibility:bambu-tpu-for-ams",
+    "title": "Bambu Lab TPU for AMS · Product and feeder documentation",
+    "url": "https://bambulab-eu.myshopify.com/products/tpu-for-ams",
+    "kind": "compatibility",
+    "text": "Bambu TPU for AMS is a 68 Shore D grade engineered for AMS feeding. The AMS 2 Pro lists this exact grade as supported. Select the matching printer preset and keep the filament dry.",
+    "maker": "Bambu Lab",
+    "product": "TPU for AMS",
+    "feeder": "AMS 2 Pro",
+    "exact": [
+      "Bambu TPU for AMS",
+      "Bambu Lab TPU for AMS"
+    ],
+    "source_links": [
+      {
+        "title": "Bambu AMS 2 Pro",
+        "url": "https://bambulab-eu.myshopify.com/products/ams-2-pro"
+      }
+    ]
+  },
+  {
+    "source_id": "compatibility:bambu-tpu-95a-hf",
+    "title": "Bambu Lab TPU 95A HF · Product guidance",
+    "url": "https://bambulab-eu.myshopify.com/products/tpu-95a-hf",
+    "kind": "compatibility",
+    "text": "Bambu TPU 95A HF is a softer grade than Bambu TPU for AMS. Bambu calls for drying before use and an external spool path. The TPU-for-AMS exception does not apply to this grade.",
+    "maker": "Bambu Lab",
+    "product": "TPU 95A HF",
+    "exact": [
+      "Bambu TPU 95A HF",
+      "Bambu Lab TPU 95A HF"
+    ]
+  },
+  {
+    "source_id": "compatibility:bambu-pla-cf",
+    "title": "Bambu Lab PLA-CF · Hotend compatibility",
+    "url": "https://bambulab-eu.myshopify.com/products/pla-cf",
+    "kind": "compatibility",
+    "text": "Bambu specifies a hardened-steel nozzle for its PLA-CF, with 0.4, 0.6 or 0.8 mm listed. The stock stainless A1 nozzle does not meet that requirement. A slicer preset or support in an AMS 2 Pro does not establish the suitability of the nozzle or printer for this grade.",
+    "maker": "Bambu Lab",
+    "product": "PLA-CF",
+    "exact": [
+      "Bambu PLA-CF",
+      "Bambu Lab PLA-CF"
+    ]
+  },
+  {
+    "source_id": "compatibility:bambu-ams-lite",
+    "title": "Bambu Lab AMS Lite · A1 quick start",
+    "url": "https://cdn1.bambulab.com/documentation/quick-start-f507128172bdf/Quick%20start%20guide%20-%20A1%20combo-EN.pdf",
+    "kind": "compatibility",
+    "text": "Use the external spool path for unsupported soft, brittle or abrasive grades on AMS Lite. Third-party reinforced grades require their own compatibility check. Bambu publishes exceptions by exact grade, including Bambu TPU for AMS.",
+    "feeder": "AMS Lite",
+    "keywords": [
+      "AMS lite"
+    ],
+    "source_links": [
+      {
+        "title": "Exact-grade exception: Bambu TPU for AMS",
+        "url": "https://bambulab-eu.myshopify.com/products/tpu-for-ams"
+      }
+    ]
+  },
+  {
+    "source_id": "measurement:prusament-petg",
+    "title": "Prusament PETG · Technical datasheet 1.1",
+    "url": "https://prusament.com/wp-content/uploads/2022/10/PETG_Prusament_TDS_2021_10_EN.pdf",
+    "kind": "measurement",
+    "text": "Prusament PETG's printed horizontal and vertical XZ samples had ISO 179-1 notched Charpy values of 6 ± 1 and 3 ± 1 kJ/m². Neither unnotched sample broke. Raw filament tensile yield was 46 ± 1 MPa under ISO 527. The datasheet separately lists Shore D 74.",
+    "maker": "Prusament",
+    "product": "PETG",
+    "exact": [
+      "Prusament PETG"
+    ],
+    "revision": "1.1",
+    "revision_date": "2022-02-16",
+    "measurements": [
+      {
+        "property": "charpy_impact",
+        "value": 6,
+        "uncertainty": 1,
+        "unit": "kJ/m²",
+        "method": "ISO 179-1",
+        "specimen": "printed",
+        "orientation": "horizontal",
+        "notched": true,
+        "conditions": "Printed on Original Prusa i3 MK3, 0.20 mm layers, 100% rectilinear infill, nozzle 250 °C, bed 80 °C, edgewise impact"
+      },
+      {
+        "property": "charpy_impact",
+        "value": 3,
+        "uncertainty": 1,
+        "unit": "kJ/m²",
+        "method": "ISO 179-1",
+        "specimen": "printed",
+        "orientation": "vertical XZ",
+        "notched": true,
+        "conditions": "Printed on Original Prusa i3 MK3, 0.20 mm layers, 100% rectilinear infill, nozzle 250 °C, bed 80 °C, edgewise impact"
+      },
+      {
+        "property": "charpy_impact",
+        "result": "no break",
+        "unit": "kJ/m²",
+        "method": "ISO 179-1",
+        "specimen": "printed",
+        "orientation": "horizontal",
+        "notched": false,
+        "conditions": "Printed on Original Prusa i3 MK3, 0.20 mm layers, 100% rectilinear infill, nozzle 250 °C, bed 80 °C, edgewise impact"
+      },
+      {
+        "property": "charpy_impact",
+        "result": "no break",
+        "unit": "kJ/m²",
+        "method": "ISO 179-1",
+        "specimen": "printed",
+        "orientation": "vertical XZ",
+        "notched": false,
+        "conditions": "Printed on Original Prusa i3 MK3, 0.20 mm layers, 100% rectilinear infill, nozzle 250 °C, bed 80 °C, edgewise impact"
+      },
+      {
+        "property": "tensile_yield_strength",
+        "value": 46,
+        "uncertainty": 1,
+        "unit": "MPa",
+        "method": "ISO 527",
+        "specimen": "raw filament",
+        "orientation": null,
+        "conditions": "Other conditions unspecified"
+      },
+      {
+        "property": "shore_hardness",
+        "value": 74,
+        "unit": "Shore D",
+        "method": "Prusa Polymers",
+        "specimen": null,
+        "orientation": null,
+        "conditions": "Specimen and conditions unspecified"
+      }
+    ]
+  },
+  {
+    "source_id": "measurement:fiberon-pa6-cf20",
+    "title": "Fiberon PA6-CF20 · Polymaker technical data",
+    "url": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/technical-data-at-a-glance",
+    "kind": "measurement",
+    "text": "Polymaker reports 11 kJ/m² notched Charpy impact in XY, 109.3 MPa XY tensile strength and heat deflection at 215 °C under 0.45 MPa. The grade's specimens were printed, annealed and moisture-conditioned. Compare only against results with matching measurement conditions.",
+    "maker": "Polymaker",
+    "product": "Fiberon PA6-CF20",
+    "exact": [
+      "Fiberon PA6-CF20"
+    ],
+    "source_links": [
+      {
+        "title": "Fiberon PA6-CF20 specimen conditioning",
+        "url": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/fiberon-tm/fiberon-tm-pa6-cf20"
+      }
+    ],
+    "measurements": [
+      {
+        "property": "charpy_impact",
+        "value": 11,
+        "unit": "kJ/m²",
+        "method": "Charpy",
+        "specimen": "printed",
+        "orientation": "XY",
+        "notched": true,
+        "conditions": "Printed specimens annealed at 100 °C for 16 h, then water-conditioned at 60 °C for 48 h per product documentation"
+      },
+      {
+        "property": "tensile_strength",
+        "value": 109.3,
+        "unit": "MPa",
+        "method": null,
+        "specimen": "printed",
+        "orientation": "XY",
+        "conditions": "Printed specimens annealed at 100 °C for 16 h, then water-conditioned at 60 °C for 48 h per product documentation"
+      },
+      {
+        "property": "heat_deflection",
+        "value": 215,
+        "unit": "°C",
+        "method": "HDT",
+        "specimen": "printed",
+        "orientation": null,
+        "load_mpa": 0.45,
+        "conditions": "Printed specimens annealed at 100 °C for 16 h, then water-conditioned at 60 °C for 48 h per product documentation"
+      }
+    ]
+  },
+  {
+    "source_id": "measurement:polymaker-asa",
+    "title": "Polymaker ASA · Technical data at a glance",
+    "url": "https://wiki.polymaker.com/polymaker-products/polymaker-filaments/technical-data-at-a-glance",
+    "kind": "measurement",
+    "text": "Polymaker reports 43.8 MPa XY tensile strength, 10.3 kJ/m² XY notched Charpy impact and heat deflection at 103 °C under 0.45 MPa for Polymaker ASA. Use the brand's full datasheet for specimen preparation before making a numeric comparison.",
+    "maker": "Polymaker",
+    "product": "ASA",
+    "exact": [
+      "Polymaker ASA"
+    ],
+    "exclude": [
+      "Polymaker ASA-CF",
+      "Polymaker ASA Pro"
+    ],
+    "measurements": [
+      {
+        "property": "tensile_strength",
+        "value": 43.8,
+        "unit": "MPa",
+        "method": null,
+        "specimen": null,
+        "orientation": "XY",
+        "conditions": "Preparation unspecified in comparison table"
+      },
+      {
+        "property": "charpy_impact",
+        "value": 10.3,
+        "unit": "kJ/m²",
+        "method": "Charpy",
+        "specimen": null,
+        "orientation": "XY",
+        "notched": true,
+        "conditions": "Preparation unspecified in comparison table"
+      },
+      {
+        "property": "heat_deflection",
+        "value": 103,
+        "unit": "°C",
+        "method": "HDT",
+        "specimen": null,
+        "orientation": null,
+        "load_mpa": 0.45,
+        "conditions": "Preparation unspecified in comparison table"
+      }
+    ]
+  },
+  {
+    "source_id": "measurement:bambu-petg-hf",
+    "title": "Bambu PETG HF · Technical data sheet 1.0",
+    "url": "https://store.bblcdn.com/s6/default/20423d7f839c4a66b9712508549c68b4/Bambu_PETG_HF_TDS.pdf",
+    "kind": "measurement",
+    "text": "Bambu PETG HF's heat deflection was 69 °C at 0.45 MPa and 62 °C at 1.8 MPa in the V1.0 datasheet. Printed XY notched impact was 6.2 ± 1.8 kJ/m². Bambu annealed and dried the test pieces. Use the matching preparation and method for direct comparisons.",
+    "maker": "Bambu Lab",
+    "product": "PETG HF",
+    "exact": [
+      "Bambu PETG HF",
+      "Bambu Lab PETG HF"
+    ],
+    "revision": "1.0",
+    "source_links": [
+      {
+        "title": "Bambu Filament Guide",
+        "url": "https://cdn1.bambulab.com/filament/filament-guide/241213/filament-guide-us.pdf"
+      }
+    ],
+    "measurements": [
+      {
+        "property": "heat_deflection",
+        "value": 69,
+        "unit": "°C",
+        "method": "ISO 75",
+        "specimen": "printed",
+        "load_mpa": 0.45,
+        "orientation": null,
+        "conditions": "Printed with 100% infill at 200 mm/s, nozzle 255 °C and bed 70 °C, then annealed and dried at 75 °C for 8 h"
+      },
+      {
+        "property": "heat_deflection",
+        "value": 62,
+        "unit": "°C",
+        "method": "ISO 75",
+        "specimen": "printed",
+        "load_mpa": 1.8,
+        "orientation": null,
+        "conditions": "Printed with 100% infill at 200 mm/s, nozzle 255 °C and bed 70 °C, then annealed and dried at 75 °C for 8 h"
+      },
+      {
+        "property": "charpy_impact",
+        "value": 6.2,
+        "uncertainty": 1.8,
+        "unit": "kJ/m²",
+        "method": "ISO 179 / GB/T 1043",
+        "specimen": "printed",
+        "orientation": "XY",
+        "notched": true,
+        "conditions": "Printed with 100% infill at 200 mm/s, nozzle 255 °C and bed 70 °C, then annealed and dried at 75 °C for 8 h"
+      }
+    ]
+  }
+]

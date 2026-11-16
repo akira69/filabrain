@@ -1,0 +1,4 @@
+[
+{"color":"Clear","color_hex":"#FFFFFF","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"Renkforce","manufacturer_sku":"1528322","material":"PETG","net_weight_g":1000,"nozzle_temperature_max_c":270,"nozzle_temperature_min_c":230,"packaging":"spool","product":"PETG","product_id":"e96c92c0-7a37-4bd0-8ab5-465fe650856b","source_id":"ofd:0bd8ac20-6c4b-493d-9c74-b887a42e04e8","source_path":"data/renkforce/PETG/petg/clear/sizes.json","variant":"Clear","variant_id":"26bb7abc-a924-4658-b09a-e324baf1826c"},
+{"color_hex":"FFFFFF","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"Renkforce","material":"PETG","net_weight_g":1000,"nozzle_temperature_max_c":270,"nozzle_temperature_min_c":230,"product":"Clear","source_id":"spoolman:renkforce_petg_clear_1000_175_n","spool_weight_g":126}
+]

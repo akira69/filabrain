@@ -25,7 +25,7 @@ from sqlalchemy import select, text
 
 from .db import FilamentResearchSettings
 from .model import request_extraction
-from .sources import DEFAULT_SUPPLIER_DOWNLOAD_MIB, Evidence, search_web
+from .sources import DEFAULT_SUPPLIER_DOWNLOAD_MIB, Evidence, search_connection_problem, search_web
 
 router = APIRouter(tags=["FilaBrain"])
 admin = RequirePermission("admin:plugins_manage")
@@ -410,7 +410,7 @@ async def test_model(data: ModelConnection, db: DBSession, _principal=admin):
         raise HTTPException(422, "Enter both a model URL and a model ID")
     try:
         key = _connection_key(data, old)
-        async with asyncio.timeout(30):
+        async with asyncio.timeout(50):
             suggestions, _ = await request_extraction(
                 data.model_url, data.model_id, key, {"designation": "Fixture PLA"},
                 [Evidence("https://example.invalid/fixture", "Fixture PLA", "Fixture PLA density: 1.24 g/cm³")],
@@ -420,12 +420,24 @@ async def test_model(data: ModelConnection, db: DBSession, _principal=admin):
             for item in suggestions
         ):
             raise ValueError("Model did not return a supported value")
-    except (httpx.HTTPError, TimeoutError, ValueError, KeyError, IndexError, TypeError, RuntimeError):
-        raise HTTPException(
-            502,
-            "The model did not return a usable sample. Check the connection and model ID.",
-        ) from None
+    except (httpx.HTTPError, TimeoutError, ValueError, KeyError, IndexError, TypeError, RuntimeError) as error:
+        raise HTTPException(502, model_connection_problem(error)) from None
     return {"ok": True}
+
+
+def model_connection_problem(error: Exception) -> str:
+    if isinstance(error, httpx.HTTPStatusError):
+        return {
+            401: "The model server rejected authentication. Check the API key.",
+            403: "The model server refused access. Check the API key permissions.",
+            404: "The model server could not find the endpoint or model. Check the base URL and model ID.",
+            429: "The model server hit a rate limit. Check the provider quota and retry later.",
+        }.get(error.response.status_code, f"The model server returned HTTP {error.response.status_code}. Check the server and try again.")
+    if isinstance(error, (httpx.TimeoutException, TimeoutError)):
+        return "The model server took too long to respond. Try again or select a faster model."
+    if isinstance(error, httpx.RequestError):
+        return "Could not reach the model server. Check the base URL and that the server is running."
+    return "The model did not return a usable sample. Check the response format and model ID."
 
 
 @router.post("/settings/test-search")
@@ -433,8 +445,9 @@ async def test_search(data: SearchTestInput, _principal=admin):
     if not data.search_url:
         raise HTTPException(422, "Enter the SearXNG URL")
     try:
-        if not await search_web(data.search_url, "3D printing filament"):
-            raise ValueError("No results returned")
-    except (httpx.HTTPError, TimeoutError, ValueError, AttributeError, TypeError):
-        raise HTTPException(502, "SearXNG returned no usable results. Check the URL, JSON output, and search engines.") from None
+        results = await search_web(data.search_url, "3D printing filament")
+    except (httpx.HTTPError, TimeoutError, ValueError, AttributeError, TypeError) as error:
+        raise HTTPException(502, search_connection_problem(error)) from None
+    if not results:
+        raise HTTPException(502, "SearXNG responded but found no usable results. Check the enabled search engines.")
     return {"ok": True}
