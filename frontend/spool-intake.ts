@@ -65,6 +65,9 @@ export function mountSpoolIntake(
   const scan = pane.querySelector<HTMLButtonElement>('#spool-read-tag')!
   const refresh = pane.querySelector<HTMLButtonElement>('#spool-refresh-readers')!
   const cancel = pane.querySelector<HTMLButtonElement>('#spool-cancel-scan')!
+  const scanChoice = pane.querySelector<HTMLElement>('#spool-scan-choice')!
+  const newSpool = pane.querySelector<HTMLButtonElement>('#spool-continue-new')!
+  const picker = pane.querySelector<HTMLAnchorElement>('#spool-picker')!
   const research = pane.querySelector<HTMLButtonElement>('#spool-research-new')!
   const message = pane.querySelector<HTMLElement>('#spool-intake-status')!
   const details = pane.querySelector<HTMLElement>('#spool-read-details')!
@@ -75,6 +78,7 @@ export function mountSpoolIntake(
 
   function setBusy(busy: boolean) {
     scan.disabled = busy || !reader.value
+    scan.textContent = label(devices.has(reader.value) ? 'readDetails' : 'checkTag')
     refresh.disabled = busy
     reader.disabled = busy || !reader.options.length
     cancel.hidden = !busy
@@ -87,7 +91,14 @@ export function mountSpoolIntake(
   }
 
   function updateResearch() {
-    research.hidden = !startResearch || !(query.value.trim() || scanned?.designation || scanned?.sku)
+    research.hidden = !scanChoice.hidden || !startResearch || !(query.value.trim() || scanned?.designation || scanned?.sku)
+  }
+
+  function showScanChoice(show: boolean) {
+    scanChoice.hidden = !show
+    form.hidden = show
+    picker.hidden = show
+    updateResearch()
   }
 
   function link(text: string, href: string) {
@@ -108,7 +119,7 @@ export function mountSpoolIntake(
     const readers = new Map<string, string>()
     if (registered.status === 'fulfilled') {
       for (const item of registered.value) {
-        if (item.reader_id) readers.set(item.reader_id, item.name || item.reader_id)
+        if (item.reader_id) readers.set('report:' + item.reader_id, label('reportedReader', { name: item.name || item.reader_id }))
       }
     }
     devices.clear()
@@ -117,12 +128,13 @@ export function mountSpoolIntake(
         if (!positiveId(item.id) || !item.name) continue
         const id = 'device-' + item.id
         devices.set(id, item)
-        readers.set(id, item.name)
+        readers.set(id, label('activeReader', { name: item.name }))
       }
     }
     reader.replaceChildren(...[...readers].map(([id, name]) => new Option(name, id)))
     if (readers.has(selected)) reader.value = selected
     setBusy(!!operation)
+    if (!scanChoice.hidden) return
     if (!readers.size) message.textContent = label(active.status === 'rejected' && registered.status === 'rejected'
       ? 'readersUnavailable' : 'noReaders')
     else if (!operation) message.textContent = ''
@@ -134,20 +146,23 @@ export function mountSpoolIntake(
       message.textContent = label('chooseManual')
       return
     }
-    const typed = typedHints(input)
-    const exact = typed.productUrl || typed.sku
     const options = { cache: 'no-store' as const, signal }
-    let candidates = { items: [] as Candidate[], total: 0 }
-    if (exact) {
-      const params = new URLSearchParams({ exact })
-      candidates = await api.get<typeof candidates>(`/filabrain/spool-filaments?${params}`, options)
-    }
-    if (!candidates.items.length && !typed.productUrl) {
-      const params = new URLSearchParams({ page_size: hints ? '200' : '12' })
-      if (hints?.manufacturer) params.set('search', hints.manufacturer)
-      else if (input) params.set('search', input.slice(0, 200))
-      if (hints?.material) params.set('type', hints.material)
+    let candidates: { items: Candidate[]; total: number }
+    if (hints) {
+      const params = new URLSearchParams({ page_size: '200' })
+      if (hints.manufacturer) params.set('search', hints.manufacturer)
+      if (hints.material) params.set('type', hints.material)
       candidates = await api.get<typeof candidates>(`/filaments?${params}`, options)
+    } else {
+      const typed = typedHints(input)
+      const exact = typed.productUrl || typed.sku
+      const search = input.slice(0, 200)
+      const searchLibrary = (params: URLSearchParams) =>
+        api.get<typeof candidates>(`/filabrain/spool-filaments?${params}`, options)
+      candidates = await searchLibrary(new URLSearchParams(exact ? { exact } : { search }))
+      if (typed.sku && !candidates.items.length && !signal.aborted) {
+        candidates = await searchLibrary(new URLSearchParams({ search }))
+      }
     }
     if (signal.aborted) return
     const { items, total } = candidates
@@ -174,9 +189,9 @@ export function mountSpoolIntake(
 
   scan.addEventListener('click', async () => {
     if (!reader.value || operation) return
-    const readerId = reader.value
-    const device = devices.get(readerId)
+    const device = devices.get(reader.value)
     const devicePath = device && `/devices/${device.id}`
+    const readerId = device ? reader.value : reader.value.slice('report:'.length)
     const reportedPath = '/tag/last-scan?' + new URLSearchParams({ reader_id: readerId })
     const controller = new AbortController()
     const { signal } = controller
@@ -185,7 +200,7 @@ export function mountSpoolIntake(
     scanned = undefined
     details.textContent = ''
     results.replaceChildren()
-    updateResearch()
+    showScanChoice(false)
     message.textContent = label('waiting')
     const timer = window.setTimeout(() => controller.abort(), 32_000)
     const readReport = () => api.get<ReportedScan>(reportedPath, { cache: 'no-store', signal })
@@ -227,8 +242,10 @@ export function mountSpoolIntake(
             scanned = tagHints(data.tag_data)
             const identity = [scanned.manufacturer, scanned.designation, scanned.sku].filter(Boolean).join(' · ')
             details.textContent = identity ? label('tagDetails', { identity }) : ''
-            updateResearch()
-            await find('', scanned, signal)
+            // The active scan has no UID tying its details or Spoolman ID to a FilaMan spool.
+            const spoolId = data.tag_data.sm_id
+            message.textContent = positiveId(spoolId) ? label('verifyTagId', { id: String(spoolId) }) : label('verifyTag')
+            showScanChoice(true)
             return
           }
           if (data.status === 'error') {
@@ -255,6 +272,7 @@ export function mountSpoolIntake(
     }
   })
 
+  reader.addEventListener('change', () => setBusy(!!operation))
   refresh.addEventListener('click', () => { void loadReaders() })
   cancel.addEventListener('click', () => {
     stop()
@@ -272,24 +290,34 @@ export function mountSpoolIntake(
     updateResearch()
   })
 
-  form.addEventListener('submit', async event => {
-    event.preventDefault()
-    if (lookup.disabled) return
+  async function runLookup(input: string, hints?: typeof scanned) {
     stop()
     const controller = new AbortController()
     operation = controller
-    scanned = undefined
-    details.textContent = ''
     setBusy(true)
-    updateResearch()
     message.textContent = label('searching')
     try {
-      await find(query.value.trim(), undefined, controller.signal)
+      await find(input, hints, controller.signal)
     } catch (error) {
       if (!controller.signal.aborted) message.textContent = error instanceof Error ? error.message : label('noMatches')
     } finally {
       if (operation === controller) stop()
     }
+  }
+
+  form.addEventListener('submit', event => {
+    event.preventDefault()
+    if (lookup.disabled || form.hidden) return
+    scanned = undefined
+    details.textContent = ''
+    updateResearch()
+    void runLookup(query.value.trim())
+  })
+
+  newSpool.addEventListener('click', () => {
+    showScanChoice(false)
+    void runLookup('', scanned)
+    message.focus()
   })
 
   research.addEventListener('click', () => {

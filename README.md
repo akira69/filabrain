@@ -12,7 +12,7 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 - Start **Add spool** with a label, SKU, product URL, or supported reader. Reuse a filament or review a new one, then save the spool through FilaMan.
 - Check catalog entries, material guidance, and selected printer presets using the built-in knowledge bundle, even when web search is unavailable.
-- Ask chat what you can print with your inventory, choose a printer and filament for settings questions, or use **Search the web** for live sources.
+- Ask chat what you can print with your inventory, choose a printer and filament for settings questions, or use **Search the web** to check known manufacturer pages and datasheets. SearXNG can find additional sources.
 - Review conflicting values and their sources. Refine one field while keeping other selections, or choose a different product and review its proposals.
 
 To build the preview ZIP from source, run the packaging script with Python 3. Published preview ZIPs appear under GitHub Releases.

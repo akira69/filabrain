@@ -1,6 +1,7 @@
 import { api, fetchAllPages } from './shared/api'
 import { getLang, t } from './shared/i18n'
 import { researchFieldLabel } from './shared/filabrain'
+import { spoolProfileCards, type SpoolProfile } from './shared/spool-profiles'
 import { mountModelPicker, type ModelSelection } from './shared/model-picker'
 import { identity, type ResearchDraft } from './research'
 
@@ -23,7 +24,7 @@ type Grounding = {
 }
 type Message = {
   role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal']; savedDraftId?: string
-  grounding?: Grounding
+  grounding?: Grounding; spoolProfiles?: SpoolProfile[]; selectedSpoolProfile?: string
 }
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
@@ -58,6 +59,7 @@ const profileFields: Record<string, string> = {
   spool_weight_g: 'default_spool_weight_g',
   bambu_k_value: 'pressure_advance_k', bambu_bed_temp: 'bed_temp_range_c',
 }
+
 
 function evidenceValue(value: unknown): string {
   if (typeof value === 'number') return new Intl.NumberFormat(getLang(), { maximumFractionDigits: 6 }).format(value)
@@ -297,6 +299,13 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     if (message.role === 'assistant' && Array.isArray(message.grounding?.evidence) && Array.isArray(message.grounding.notices)) {
       appendEvidence(paragraph, message.content, message.grounding)
     }
+    if (message.role === 'assistant' && Array.isArray(message.spoolProfiles)) {
+      const cards = spoolProfileCards(message.spoolProfiles, message.selectedSpoolProfile, profile => {
+        message.selectedSpoolProfile = profile?.id
+        remember()
+      })
+      if (cards) log.append(cards)
+    }
     if (message.action && Object.hasOwn(pageLabels, message.action.page)) {
       const { page, url } = message.action
       if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') && !url.includes('\\')) {
@@ -325,7 +334,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         log.append(spool)
       }
     }
-    if (message.grounding) transcript.scrollTop = paragraph.offsetTop - 8
+    if (message.grounding || message.spoolProfiles?.length) transcript.scrollTop = paragraph.offsetTop - 8
     else scrollToEnd()
     return paragraph
   }
@@ -362,8 +371,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         current = { ...selected, messages: [...selected.messages] }
         let lastResult = -1
         current.messages.forEach((message, index) => { if (message.proposal) lastResult = index })
-        if (selected.research && lastResult === -1) {
-          lastResult = current.messages.length - 1
+        if (selected.research) {
+          if (lastResult === -1) lastResult = current.messages.length - 1
           current.messages[lastResult] = { ...current.messages[lastResult], proposal: selected.research.proposal }
         }
         modelPicker.reset(selected.model, true)
@@ -577,9 +586,13 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     status.textContent = t('filaBrain.chatWorking')
     updateControls()
     try {
-      const { reply, action, ...grounding } = await api.post<{ reply: string; action: Action | null } & Partial<Grounding>>('/filabrain/chat', {
+      const selectedProfileId = current.messages.at(-1)?.selectedSpoolProfile
+      const { reply, action, spool_profiles, ...grounding } = await api.post<{
+        reply: string; action: Action | null; spool_profiles?: SpoolProfile[]
+      } & Partial<Grounding>>('/filabrain/chat', {
         messages: [...current.messages.slice(-10), question].map(({ role, content }) => ({ role, content })),
         ...modelPicker.selected,
+        ...(typeof selectedProfileId === 'string' ? { selected_spool_profile_id: selectedProfileId } : {}),
         ...(searchWeb ? { web_search: true } : {}),
         ...(printer.value ? { printer_id: Number(printer.value) } : {}),
         ...(filament.value ? { filament_id: Number(filament.value) } : {}),
@@ -589,6 +602,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       const answer: Message = {
         role: 'assistant', content: reply, action: action ?? undefined,
         grounding: Array.isArray(grounding.evidence) ? grounding as Grounding : undefined,
+        spoolProfiles: Array.isArray(spool_profiles) ? spool_profiles.slice(0, 4) : undefined,
       }
       current.messages.push(question, answer)
       append(answer)

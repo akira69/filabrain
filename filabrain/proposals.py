@@ -583,6 +583,15 @@ _REEL_SIZE = re.compile(
     re.IGNORECASE,
 )
 _LABELLED_SKU = re.compile(r"\b(?:sku|article number)\s*[:#]\s*([\w.+-]+(?<!\.))", re.IGNORECASE)
+_COLOR_LABEL = r"(?:colou?rs?|swatch(?:es)?)(?:\s*[:：]\s*|\s+[-–—]\s+)"
+_LABELLED_COLOR = re.compile(
+    rf"\b{_COLOR_LABEL}([^.!?;|\n]+?)(?=\s*(?:\b(?:{_COLOR_LABEL}|(?:sku|article number)\s*[:#])|[.!?;|\n]|$))",
+    re.IGNORECASE,
+)
+_VARIANT_BOUNDARY = re.compile(
+    r"\b(?:refills?|spoolless|spooled|variants?|(?:with|without|on)[ -](?:a[ -])?spool|related products?)\b",
+    re.IGNORECASE,
+)
 _COLOR_CODES = (
     ("RAL", re.compile(rf"RAL(?: Colou?r)?\s*:?\s*({RAL_NUMBER})(?:\s+(.{{1,90}}))?", re.IGNORECASE)),
     ("Pantone", re.compile(
@@ -884,8 +893,12 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
     if sku and _norm(identity.sku) and _norm(sku) != _norm(identity.sku):
         return []
     exact_official_sku = page.manufacturer_page and bool(sku and _norm(sku) == _norm(identity.sku))
+    exact_title = _tokens(title) == _tokens(identity.designation) or (
+        page.manufacturer_page and (qualified_title := _sku_color_title(identity))
+        and _sheet_title(title) == qualified_title
+    )
     if (
-        identity.designation and title and _tokens(title) != _tokens(identity.designation)
+        identity.designation and title and not exact_title
         and not (product_line or exact_official_sku)
     ):
         return []
@@ -921,7 +934,7 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
             not identity.designation
             or not identity.manufacturer
             or (not brand and not _literal_in(identity.manufacturer, text))
-            or (_tokens(title) != _tokens(identity.designation) and not _literal_in(identity.designation, text))
+            or (not exact_title and not _literal_in(identity.designation, text))
         ):
             continue
         material = "pla" if product_line else _material_family(identity.material)
@@ -967,7 +980,7 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
         (shared if universal else matches).append(text)
 
     if not matches and not (
-        brand and identity.manufacturer and (_tokens(identity.designation) == _tokens(title) or product_line)
+        brand and identity.manufacturer and (exact_title or product_line)
     ):
         return []
     # shortcut: unlabeled or multiply applicable sections are withheld until their variant can be verified.
@@ -1204,7 +1217,7 @@ def _possible_catalog_matches(identity: Identity, items: list[dict], url: str, s
     ]
 
 
-def _product_titles(identity: Identity) -> set[str]:
+def _product_titles(identity: Identity, *, include_material: bool = True) -> set[str]:
     words = _line(identity.designation, identity.color)
     color = _tokens(identity.color)
     if color and words[:len(color)] == color:
@@ -1214,7 +1227,7 @@ def _product_titles(identity: Identity) -> set[str]:
     titles = {title for title in (designation, line) if title}
     material = _norm(identity.material)
     # A generic material must not stand in for a more specific grade.
-    if len(_tokens(material)) > 1 and not _literal_in(material, line):
+    if include_material and len(_tokens(material)) > 1 and not _literal_in(material, line):
         titles.add(material)
     return titles
 
@@ -1223,6 +1236,12 @@ def _sheet_title(value: str) -> str:
     value = re.sub(r"[™®]|\btm\b", " ", value, flags=re.IGNORECASE)
     value = re.sub(r"^(?:产品名称\s*)?product name\s*[:：]\s*", "", _norm(value))
     return re.sub(r"\+\s*(?=\d)", "+", value)
+
+
+def _sku_color_title(identity: Identity) -> str:
+    if all(map(_norm, (identity.sku, identity.color, identity.designation))) and not _literal_in(identity.color, identity.designation):
+        return _sheet_title(f"{identity.designation} {identity.color}")
+    return ""
 
 
 def _sheet_variant_values(page: Evidence) -> dict[str, set]:
@@ -1389,6 +1408,12 @@ def _exact_product_page_specs(page: Evidence, titles: set[str]) -> list[dict]:
             r"(\d+\.\d+)\s*g\s*/\s*cm[³3]\b", page.text[properties.end():properties.end() + 1000], re.I,
         ):
             entries.append({"field": "density_g_cm3", "value": float(density[1]), "source": 1, "quote": density[0]})
+    if page.shared and (marker := SHARED_SPEC.search(page.text)):
+        # A shared citation must include the publisher's scope statement.
+        for entry in entries:
+            quote = entry["quote"]
+            start = page.text.index(quote)
+            entry["quote"] = page.text[min(start, marker.start()):max(start + len(quote), marker.end())]
     return extract_proposal({"suggestions": entries}, [page])[0]
 
 
@@ -2322,14 +2347,36 @@ async def research_products(
         if fetch_errors.get(url) == SUPPLIER_TOO_LARGE and url not in recovered_urls
     )
 
+    spec_titles = _product_titles(supplier_identity)
+    owner_titles = {_sheet_title(supplier_identity.designation)}
+    if qualified_title := _sku_color_title(supplier_identity):
+        spec_titles.add(qualified_title)
+        owner_titles.add(qualified_title)
+    expected_color = _norm(supplier_identity.color)
     for page, title, scopes in official_scopes:
-        if not scopes:
-            continue
         stated_sku = (page.product or {}).get("sku")
         if supplier_identity.sku and stated_sku and _norm(supplier_identity.sku) != _norm(stated_sku):
             continue
-        for result in _exact_product_page_specs(replace(page, title=title), _product_titles(supplier_identity)):
-            add(result["field"], result["value"], result["sources"], primary=True)
+        if (
+            page.product_spec_tables and not (unresolved_variants or page.selected_variant_unresolved)
+            and any(not scope.shared for scope in scopes)
+        ):
+            visible = page.scopes or (page.text,)
+            visible_skus = {_norm(sku) for text in visible for sku in _LABELLED_SKU.findall(text)}
+            visible_colors = {_norm(color) for text in visible for color in _LABELLED_COLOR.findall(text)}
+            expected_sku = _norm(supplier_identity.sku or stated_sku)
+            competing_variant = any(_VARIANT_BOUNDARY.search(text) and _sheet_title(text) not in owner_titles for text in visible)
+            if (
+                not competing_variant and visible_colors <= {expected_color}
+                and len(visible_skus) <= 1 and (not expected_sku or visible_skus <= {expected_sku})
+            ):
+                scopes = [*scopes, *(
+                    replace(page, text=table) for heading, table in page.product_spec_tables
+                    if _sheet_title(heading) in owner_titles and (not expected_color or _literal_in(expected_color, heading))
+                )]
+        for scope in scopes:
+            for result in _exact_product_page_specs(replace(scope, title=title), spec_titles):
+                add(result["field"], result["value"], result["sources"], primary=True)
 
     grade = " ".join(_line(identity.designation, identity.color))
     requested_finish = _finish(identity.designation, identity.finish_type, identity.material)

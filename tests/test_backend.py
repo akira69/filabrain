@@ -82,6 +82,27 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
     assert saved["mcp_enabled"] is False
 
 
+async def test_spool_filament_lookup_matches_full_label_across_library_fields(installed, db_session):
+    brand = Manufacturer(name="Bambu Lab")
+    db_session.add(brand)
+    await db_session.flush()
+    jade, black = [
+        Filament(manufacturer_id=brand.id, designation="Basic", material_type="PLA",
+                 manufacturer_color_name=color, diameter_mm=1.75)
+        for color in ("Jade White", "Jade Black")
+    ]
+    db_session.add_all([jade, black])
+    await db_session.commit()
+
+    response = await installed.get(f"{BASE}/spool-filaments", params={"search": "Bambu Lab PLA Basic Jade White"})
+    assert response.status_code == 200, response.text
+    assert [item["id"] for item in response.json()["items"]] == [jade.id]
+
+    response = await installed.get(f"{BASE}/spool-filaments", params={"search": "Bambu %"})
+    assert response.status_code == 200, response.text
+    assert response.json()["items"] == []
+
+
 async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
     import asyncio
 
@@ -139,9 +160,9 @@ async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
                 await open_saved_filament(draft_id, db, read_only, add_spool=True)
             assert forbidden.value.status_code == 403
             for term in ("fb-pla1", "https://fixture.example/filaments/pla"):
-                results = await lookup_spool_filament(term, db, principal)
+                results = await lookup_spool_filament(db, principal, exact=term)
                 assert [item["id"] for item in results["items"]] == [saved_id]
-            assert (await lookup_spool_filament("FB-PLA", db, principal))["items"] == []
+            assert (await lookup_spool_filament(db, principal, exact="FB-PLA"))["items"] == []
             await db.delete(records[0])
             await db.commit()
             db.add(Filament(id=saved_id, manufacturer_id=manufacturer.id, designation="Replacement", material_type="PLA", diameter_mm=1.75))

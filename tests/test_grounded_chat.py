@@ -97,6 +97,45 @@ async def test_inventory_keeps_unknown_weight_separate_from_eligible_spools(chat
     assert all(row["kind"] != "spool" for row in denied["evidence"])
 
 
+@pytest.mark.parametrize(("quantity", "required_g", "meets_required"), [
+    ("1 200 g", 1200, False),
+    ("1\u00a0200 g", 1200, False),
+    ("1\u202f200 g", 1200, False),
+    ("1 200,5 g", 1200.5, False),
+    ("1.200,5 g", 1200.5, False),
+    ("1,200.5 g", 1200.5, False),
+    ("1,200 kg", 1200, False),
+    ("0,125 g", 0.125, True),
+    ("1.25 g", 1.25, True),
+    ("1.200 g", None, None),
+])
+async def test_inventory_follow_up_resolves_localized_weight(
+    chat_db, monkeypatch, quantity, required_g, meets_required,
+):
+    db, _, research = chat_db
+    status_id = await db.scalar(select(SpoolStatus.id).where(SpoolStatus.key == "opened"))
+    filament = Filament(
+        manufacturer=Manufacturer(name="Example"), designation="PETG", material_type="PETG", diameter_mm=1.75,
+    )
+    db.add(Spool(id=27, filament=filament, status_id=status_id, remaining_weight_g=250))
+    await db.commit()
+
+    if required_g is None:
+        async def unexpected_model_check(*_args):
+            pytest.fail("Ambiguous weight clarification must not call the model endpoint")
+
+        monkeypatch.setattr(research, "check_model_catalog", unexpected_model_check)
+    result = await ask(
+        chat_db, monkeypatch, f"I need {quantity}.", "Use the available spool [spool-27].",
+        previous="Which spools could I use?",
+    )
+    spool, = [row for row in result["evidence"] if row["kind"] == "spool"]
+    assert result["required_g"] == required_g
+    assert spool["meets_required"] is meets_required
+    if required_g is None:
+        assert "without a thousands separator" in result["reply"]
+
+
 @pytest.mark.parametrize("reply", [
     "Use 999 °C [saved-profile-2].",
     "Use the matching profile [source-made-up].",
@@ -283,37 +322,120 @@ async def test_saved_catalog_uses_color_sku_diameter_and_net_weight(chat_db, mon
     }
 
 
-@pytest.mark.parametrize("verified", [True, False])
-async def test_live_product_preserves_a_verified_variant_selector_and_labels_grade_only_sources(chat_db, monkeypatch, verified):
-    from filabrain import knowledge, sources
+@pytest.mark.parametrize(("excerpt", "scope"), [
+    ("PLA Basic Jade White SKU: 10100 1.75 mm 1 kg refill", "variant"),
+    ("PLA Basic manufacturer specifications", "grade"),
+    ("PLA Basic Black SKU: 10101 1.75 mm 1 kg. Spool weight: 250 g", None),
+    ("PLA Basic Jade White SKU: 10100 1.75 mm 1 kg with spool", None),
+    ("PLA Basic Jade White SKU: 10100 1.75 mm 1 kg refill or with spool", None),
+    ("PLA Basic Jade White SKU: 10100 1.75 mm 1 kg. Refill sold separately.", None),
+    ("PLA Basic Jade White SKU: 10100 1.75 mm 1 kg refill also available separately.", None),
+    ("PLA Basic Jade White SKU: 10100 1.75 mm 1 kg. Print at 220–240 °C.", None),
+    ("PLA Basic · all variants share 240–265 °C except Jade White.", None),
+    ("PLA Basic Bambu Green Nozzle temperature: 240–265 °C.", None),
+])
+async def test_live_product_checks_catalog_refill_without_searxng(chat_db, monkeypatch, excerpt, scope):
+    from filabrain import sources
 
-    _, config, _ = chat_db
-    config["search_url"] = "http://search.test"
-    base = "https://store.bambulab.com/products/pla-basic"
-    manufacturer_url = f"{base}?variant=123456&customer=private"
-    published_url = f"{base}?variant=123456" if verified else base
-    monkeypatch.setattr(knowledge, "lookup_named_catalog", lambda *_args, **_kwargs: [{
-        "source_id": "fixture-pla", "title": "PLA Basic", "kind": "catalog", "text": "Bundled fixture.",
-        "url": "https://catalog.example/pla", "maker": "Bambu Lab", "product": "PLA Basic", "material": "PLA",
-        "manufacturer_url": manufacturer_url, "product_url": manufacturer_url, "color": "Jade White",
-        "variant": "Jade White", "diameter_mm": 1.75, "net_weight_g": 1000, "manufacturer_sku": "10100",
-        "packaging": "refill", "package_verified": verified,
-    }])
+    base = "https://us.store.bambulab.com/collections/pla/products/pla-basic-filament"
+    variant = f"{base}?variant=40475106640008"
 
     async def fetch(url, **_kwargs):
-        assert url == published_url
-        specs = "PLA Basic Jade White SKU: 10100 1.75 mm 1 kg refill" if verified else "PLA Basic manufacturer specifications"
-        return sources.Evidence(url, "PLA Basic", specs)
+        assert url == variant
+        return sources.Evidence(url, "PLA Basic", excerpt)
 
     async def search(*_args):
-        pytest.fail("Matching manufacturer page should be read first")
+        pytest.fail("A direct manufacturer lookup should work without SearXNG")
 
     monkeypatch.setattr(sources, "fetch_supplier", fetch)
     monkeypatch.setattr(sources, "search_web", search)
     result = await ask(chat_db, monkeypatch, "Verify Bambu Lab PLA Basic Jade White refill specs.")
+    live = [row for row in result["evidence"] if row["kind"] == "live"]
+    assert result["search"] == ("complete" if scope else "no_match")
+    assert [(row["url"], row["scope"]) for row in live] == (
+        [(variant if scope == "variant" else base, scope)] if scope else []
+    )
+
+
+async def test_live_catalog_variant_drops_unrelated_query_parameters(chat_db, monkeypatch):
+    from filabrain import knowledge, sources
+
+    original_lookup = knowledge.lookup_named_catalog
+
+    def catalog(*args, **kwargs):
+        rows = original_lookup(*args, **kwargs)
+        rows[0]["manufacturer_url"] += "&customer=private"
+        return rows
+
+    async def fetch(url, **_kwargs):
+        assert url.endswith("?variant=40475106640008")
+        return sources.Evidence(url, "PLA Basic", "PLA Basic Jade White SKU: 10100 1.75 mm 1 kg refill")
+
+    monkeypatch.setattr(knowledge, "lookup_named_catalog", catalog)
+    monkeypatch.setattr(sources, "fetch_supplier", fetch)
+    result = await ask(chat_db, monkeypatch, "Verify Bambu Lab PLA Basic Jade White refill specs.")
     assert result["search"] == "complete"
-    live = next(row for row in result["evidence"] if row["kind"] == "live")
-    assert (live["url"], live["scope"]) == (published_url, "variant" if verified else "grade")
+
+
+async def test_live_grade_lookup_omits_variant_specific_excerpts(chat_db, monkeypatch):
+    from filabrain import sources
+
+    async def fetch(url, **_kwargs):
+        return sources.Evidence(url, "PLA Basic", "", scopes=(
+            "PLA Basic Jade White SKU: 10100 1.75 mm 1 kg refill",
+            "PLA Basic · applies to all variants. Density: 1.24 g/cm³.",
+        ))
+
+    monkeypatch.setattr(sources, "fetch_supplier", fetch)
+    result = await ask(chat_db, monkeypatch, "Verify Bambu Lab PLA Basic Jade White specs.")
+    [live] = [row for row in result["evidence"] if row["kind"] == "live"]
+    assert live["scope"] == "grade" and "Density: 1.24" in live["text"]
+    assert "SKU" not in live["text"] and "refill" not in live["text"]
+
+
+@pytest.mark.parametrize(("product_name", "color", "scope"), [
+    ("Fixture PLA Pro", "", "grade"),
+    ("Fixture PLA Pro", "Jade White", "variant"),
+    ("Fixture PLA Pro", "Bambu Green", None),
+    ("Other PLA", "", None),
+    ("PLA Plus", "", None),
+])
+async def test_live_chat_checks_saved_manufacturer_datasheet_without_searxng(chat_db, monkeypatch, product_name, color, scope):
+    from filabrain import sources
+
+    db, _, _ = chat_db
+    url = "https://maker.example/fixture-pla.pdf"
+    filament = Filament(
+        manufacturer=Manufacturer(name="Fixture", url="https://maker.example"),
+        designation="Fixture PLA Pro", material_type="PLA Plus", diameter_mm=1.75,
+        manufacturer_color_name="Jade White", datasheet_url=url,
+    )
+    printer = Printer(name="Bambu Lab A1", driver_key="manual", driver_config={})
+    db.add_all([filament, printer])
+    await db.commit()
+    fetched = []
+
+    async def fetch(link, **_kwargs):
+        fetched.append(link)
+        variant = f"\nColor: {color}" if color else ""
+        return sources.Evidence(
+            url, "Technical data sheet", f"Technical Data Sheet\nProduct name: {product_name}{variant}\nDensity 1.24 g/cm³",
+            datasheet=True,
+        )
+
+    monkeypatch.setattr(sources, "fetch_supplier", fetch)
+    result = await ask(
+        chat_db, monkeypatch, "Verify nozzle temperatures in the datasheet.",
+        filament_id=filament.id, printer_id=printer.id, web_search=True,
+    )
+    assert fetched == [url]
+    live = [row for row in result["evidence"] if row["kind"] == "live"]
+    if scope:
+        assert result["search"] == "complete"
+        assert [(row["url"], row["scope"]) for row in live] == [(url, scope)]
+    else:
+        assert result["search"] == "no_match"
+        assert not live
 
 
 async def test_ams_comparison_retrieves_both_rules_and_allows_the_cited_device_name(chat_db, monkeypatch):

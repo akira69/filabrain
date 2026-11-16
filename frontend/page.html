@@ -84,6 +84,7 @@
                   <span>Find specifications</span>
                 </button>
                 <button class="fm-btn fm-btn-outline" type="submit" value="standardize" hidden>Standardize this filament</button>
+                <button class="fm-btn fm-btn-outline" type="submit" value="spool" data-i18n="filaBrain.findSpoolSpecs">Find spool specs</button>
               </div>
             </form>
           </details>
@@ -106,7 +107,7 @@
       <div class="fm-section-body">
         <div id="spool-reader-controls" class="actions" hidden>
           <div class="form-field"><label for="spool-reader" data-i18n="spoolIntake.reader">Reader</label><select id="spool-reader" disabled></select></div>
-          <button type="button" id="spool-read-tag" class="fm-btn fm-btn-primary" data-i18n="spoolIntake.readTag" disabled>Read spool tag</button>
+          <button type="button" id="spool-read-tag" class="fm-btn fm-btn-primary" data-i18n="spoolIntake.checkTag" disabled>Check tag for linked spool</button>
           <button type="button" id="spool-refresh-readers" class="fm-btn fm-btn-outline" data-i18n="spoolIntake.refresh">Refresh readers</button>
           <button type="button" id="spool-cancel-scan" class="fm-btn fm-btn-outline" data-i18n="spoolIntake.cancel" hidden>Cancel scan</button>
         </div>
@@ -115,11 +116,15 @@
           <button type="submit" class="fm-btn fm-btn-outline" data-i18n="spoolIntake.find" disabled>Find in library</button>
         </form>
         <p id="spool-read-details" class="fm-field-hint"></p>
-        <p id="spool-intake-status" class="fm-field-hint" role="status"></p>
+        <p id="spool-intake-status" class="fm-field-hint" role="status" tabindex="-1"></p>
+        <div id="spool-scan-choice" class="actions" hidden>
+          <a href="/spools" class="fm-btn fm-btn-outline" data-i18n="spoolIntake.checkSpools">Check existing spools</a>
+          <button type="button" id="spool-continue-new" class="fm-btn fm-btn-outline" data-i18n="spoolIntake.continueNew">Find filament for a new spool</button>
+        </div>
         <ul id="spool-intake-results"></ul>
         <div class="actions">
           <button type="button" id="spool-research-new" class="fm-btn fm-btn-outline" data-i18n="spoolIntake.research" hidden>Research new filament</button>
-          <a href="/filaments?select_for_spool=1" class="fm-btn fm-btn-outline" data-i18n="spoolIntake.openPicker">Choose in FilaMan</a>
+          <a href="/filaments?select_for_spool=1" id="spool-picker" class="fm-btn fm-btn-outline" data-i18n="spoolIntake.openPicker">Choose in FilaMan</a>
         </div>
       </div>
     </section>

@@ -273,3 +273,153 @@ async def test_verified_supplier_ranges_survive_a_model_omitting_the_other_sourc
     assert {(row["value"]["min"], row["sources"][0]["url"]) for row in options} == {
         (200, maker_url), (210, retailer_url),
     }
+
+
+@pytest.mark.parametrize("spec_source", [None, "variant", "shared"])
+async def test_official_product_specs_come_from_verified_scopes(installed, db_session, monkeypatch, spec_source):
+    from filabrain import proposals
+
+    site = "https://maker.example"
+    product_url = f"{site}/fixture-pla"
+    product = {"designation": "Fixture PLA", "manufacturer": "Fixture", "material": "PLA", "sku": "FIX-123"}
+    specs = ("Recommended Printing Settings Nozzle Temperature: 200–220 °C. "
+             "Physical Properties Density: 1.24 g/cm3.")
+    scopes = [
+        "Fixture PLA Refill SKU: FIX-REFILL. Recommended Printing Settings "
+        "Nozzle Temperature: 245–265 °C. Physical Properties Density: 1.38 g/cm3.",
+        "Fixture PLA SKU: FIX-123.",
+    ]
+    if spec_source == "variant":
+        scopes[-1] += f" {specs}"
+    elif spec_source == "shared":
+        scopes.append(f"Applies to all variants. {specs}")
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    async def fetch(url, **_kwargs):
+        if url != product_url:
+            raise TimeoutError
+        return proposals.Evidence(url, "Fixture PLA", " ".join(scopes), product, scopes=tuple(scopes))
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "fetch_supplier", fetch)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    db_session.add(Manufacturer(name="Fixture", url=site))
+    await db_session.commit()
+
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "product_url": product_url, "identity": product,
+    })
+    assert response.status_code == 200, response.text
+    reply = response.json()
+    fields = {"density_g_cm3", "extruder_temp_range_c"}
+    suggestions = {row["field"]: row for row in reply["suggestions"] if row["field"] in fields}
+    expected = {"density_g_cm3": 1.24, "extruder_temp_range_c": {"min": 200, "max": 220}}
+    assert {field: row["value"] for field, row in suggestions.items()} == (expected if spec_source else {}), reply
+    for row in suggestions.values():
+        citation, = row["sources"]
+        assert citation["url"] == product_url
+        assert citation["evidence"] in scopes[-1]
+    assert not any(issue.get("field") in fields for issue in reply["issues"]), reply
+
+
+@pytest.mark.parametrize(("layout", "expected_specs"), [
+    ("product", True), ("grade", True), ("section", True), ("refill", False),
+    ("related", False), ("sibling", False), ("refill_heading", False), ("refill_note", False), ("ambiguous", False),
+    ("color_heading", False), ("swatch_heading", False), ("color_note", False),
+    ("color_note_fullwidth", False), ("color_note_en_dash", False), ("color_note_em_dash", False),
+    ("color_note_hyphen", False), ("swatch_legend", False),
+    ("unbound_color", False), ("exact_color", True), ("separate_color", True),
+])
+async def test_official_product_specs_respect_html_table_ownership(installed, db_session, monkeypatch, layout, expected_specs):
+    from filabrain import proposals, sources
+
+    site = "https://table-maker.example"
+    product_url = f"{site}/fixture-pla"
+    sku = "" if layout == "grade" else "FIX-123"
+    color_delimiters = {
+        "color_note": ": ", "color_note_fullwidth": "：", "color_note_en_dash": " – ",
+        "color_note_em_dash": " — ", "color_note_hyphen": " - ",
+    }
+    named_color_title = layout in {"exact_color", "swatch_legend"} or layout in color_delimiters
+    color = "Jade White" if named_color_title or layout in {"color_heading", "unbound_color", "separate_color"} else ""
+    designation = "Fixture PLA Jade White" if named_color_title else "Fixture PLA"
+    heading = f"{designation} {color}" if layout == "separate_color" else designation
+    sku_details = f"<p>SKU: {sku}.</p>" if sku else ""
+    if color:
+        sku_details = f"<p>Color: {color}; SKU: {sku}.</p>"
+    if layout == "separate_color":
+        sku_details = f"<p><span>Color: {color}</span><span>SKU: {sku}.</span></p>"
+    tables = """
+        <h2>Recommended Printing Settings</h2>
+        <div><table><tr><th>Nozzle Temperature:</th><td>200–220 °C</td></tr></table></div>
+        <h2>Physical Properties</h2>
+        <div><table><tr><th>Density:</th><td>1.24 g/cm3</td></tr></table></div>
+    """
+    if layout == "refill":
+        tables = f"<p>Fixture PLA Refill SKU: FIX-REFILL.</p>{tables}"
+    elif layout == "section":
+        tables = f"<section>{tables}</section>"
+    elif layout == "related":
+        tables = f"<aside><p>Related products</p>{tables}</aside>"
+    elif layout == "sibling":
+        tables = f"<h2>Fixture PLA Refill</h2>{tables}"
+    elif layout == "refill_heading":
+        tables = f"<h3>Refill only</h3>{tables}"
+    elif layout == "refill_note":
+        tables = f"<div><p>Fixture PLA Refill</p>{tables}</div>"
+    elif layout == "color_heading":
+        tables = f"<h3>Color: Bambu Green</h3>{tables}"
+    elif layout == "swatch_heading":
+        tables = f'<section><div role="heading" aria-level="3">Bambu Green</div>{tables}</section>'
+    elif layout in color_delimiters:
+        tables = f"<section><p>Colour{color_delimiters[layout]}Bambu Green</p>{tables}</section>"
+    elif layout == "swatch_legend":
+        tables = f"<fieldset><legend>Bambu Green</legend>{tables}</fieldset>"
+    elif layout == "ambiguous":
+        tables += """
+            <script type="application/ld+json">
+                [{"@type":"Product","name":"Fixture PLA","sku":"FIX-123"},
+                 {"@type":"Product","name":"Fixture PLA Refill","sku":"FIX-REFILL"}]
+            </script>
+        """
+    html = f"""
+        <title>{heading} | Fixture</title>
+        <main><h1>{heading}</h1>{sku_details}{tables}</main>
+    """.encode()
+
+    async def catalog(_identity):
+        return [], "", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    def get_pinned(url, *_args, **_kwargs):
+        if url.path != "/fixture-pla":
+            return 404, "", "text/html", b""
+        return 200, "", "text/html", html
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(sources, "_public_address", lambda *_args: "192.0.2.1")
+    monkeypatch.setattr(sources, "_get_pinned", get_pinned)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    db_session.add(Manufacturer(name="Fixture", url=site))
+    await db_session.commit()
+
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "product_url": product_url,
+        "identity": {"manufacturer": "Fixture", "designation": designation, "material": "PLA", "sku": sku, "color": color},
+    })
+    assert response.status_code == 200, response.text
+    reply = response.json()
+    expected = {"density_g_cm3": 1.24, "extruder_temp_range_c": {"min": 200, "max": 220}}
+    specs = {row["field"]: row["value"] for row in reply["suggestions"] if row["field"] in expected}
+    assert specs == (expected if expected_specs else {}), reply

@@ -1,4 +1,5 @@
 import { t } from './i18n'
+import type { SpoolProfile } from './spool-profiles'
 
 export type ResearchIdentity = {
   manufacturer: string
@@ -35,6 +36,9 @@ export type ResearchProposal = {
     group_key: string | null
   }>
   standardization_context?: Record<string, string | null>
+  spool_profiles?: SpoolProfile[]
+  spool_profile_id?: string
+  spool_reply?: string
 }
 
 export function researchHeaders() {

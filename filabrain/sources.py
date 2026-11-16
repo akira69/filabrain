@@ -22,7 +22,10 @@ DEFAULT_SUPPLIER_DOWNLOAD_BYTES = DEFAULT_SUPPLIER_DOWNLOAD_MIB * 1024 * 1024
 SUPPLIER_TOO_LARGE = "Supplier page is too large"
 MAX_TEXT = 12_000
 MAX_SEARCH_RESPONSE_BYTES = 512 * 1024
-SHARED_SPEC = re.compile(r"\b(?:applies to all variants|same for all variants|all variants share)\b", re.IGNORECASE)
+SHARED_SPEC = re.compile(
+    r"\b(?:applies to all variants|same for all variants|all variants share)\b"
+    r"(?![^.!?\n]*\b(?:except|excluding|other than|unless)\b)", re.IGNORECASE,
+)
 DATASHEET_LABEL = re.compile(
     r"technical[ _-]*data[ _-]*sheet|(?<![^\W_])tds(?![^\W_])", re.IGNORECASE
 )
@@ -32,6 +35,8 @@ SAFETY_SHEET_LABEL = re.compile(
 )
 HTML_HEADINGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 DOCUMENT_SECTIONS = {"main", "article", "section", "aside", "nav", "footer"}
+SECONDARY_SECTIONS = {"aside", "nav", "footer"}
+PRODUCT_SPEC_HEADING = re.compile(r"(?:recommended printing settings|physical properties|mechanical properties)\s*:?", re.I)
 _supplier_cooldowns = TTLCache()
 _product_sitemaps = TTLCache()
 
@@ -119,6 +124,7 @@ class Evidence:
     origin: str = ""
     archived_at: str = ""
     selected_variant_unresolved: bool = False
+    product_spec_tables: tuple[tuple[str, str], ...] = ()
 
 
 class _ProductPage(HTMLParser):
@@ -141,8 +147,14 @@ class _ProductPage(HTMLParser):
         self._structured: list[str] | None = None
         self.scopes: list[str] = []
         self.main_scopes: list[str] = []
+        self.product_headings: list[str] = []
+        self.product_spec_tables: list[str] = []
         self._main_tag: str | None = None
         self._main_depth = 0
+        self._secondary_depth = 0
+        self._product_depth: int | None = None
+        self._spec_heading: tuple[int, str] | None = None
+        self._spec_rows: list[str] | None = None
         self._row: list[str] | None = None
         self._section: list[str] = []
         self._section_depth = 0
@@ -151,11 +163,16 @@ class _ProductPage(HTMLParser):
         if self._skip is None:
             if tag in DOCUMENT_SECTIONS:
                 self._document_depth += 1
-                if tag in ("aside", "nav", "footer"):
+                if tag in SECONDARY_SECTIONS:
+                    self._secondary_depth += 1
                     self._datasheet_depth = None
+            if tag == "legend" and not self._secondary_depth:
+                self._product_depth = None
+                self._spec_heading = None
             if tag == self._heading_tag:
                 self._heading_depth += 1
             elif tag in HTML_HEADINGS or dict(attrs).get("role") == "heading":
+                self._spec_heading = None
                 self._heading_tag = tag
                 self._heading_depth = 1
                 self._heading_text.clear()
@@ -166,6 +183,9 @@ class _ProductPage(HTMLParser):
                 self._finish_section()
                 self._main_tag = tag
                 self._main_depth = 1
+            if tag == "table" and self._spec_heading and self._document_depth == self._spec_heading[0]:
+                self._spec_rows = [self._spec_heading[1]]
+                self._spec_heading = None
         if tag == "a" and self._skip is None:
             attributes = dict(attrs)
             href = (attributes.get("href") or "").strip()
@@ -210,11 +230,30 @@ class _ProductPage(HTMLParser):
                     heading = " ".join(" ".join(self._heading_text).split())
                     if DATASHEET_HEADING.fullmatch(heading):
                         self._datasheet_depth = self._document_depth
+                    if not self._secondary_depth:
+                        if tag == "h1":
+                            self.product_headings.append(heading)
+                            self._product_depth = self._document_depth
+                        elif self._product_depth is not None:
+                            if tag == "h2" and PRODUCT_SPEC_HEADING.fullmatch(heading):
+                                self._spec_heading = self._document_depth, heading
+                            else:
+                                self._product_depth = None
                     self._heading_tag = None
             if tag in DOCUMENT_SECTIONS and self._document_depth:
                 if self._datasheet_depth == self._document_depth:
                     self._datasheet_depth = None
+                if self._product_depth == self._document_depth:
+                    self._product_depth = None
+                if self._spec_heading and self._spec_heading[0] == self._document_depth:
+                    self._spec_heading = None
+                if tag in SECONDARY_SECTIONS:
+                    self._secondary_depth = max(0, self._secondary_depth - 1)
                 self._document_depth -= 1
+            if tag == "table" and self._spec_rows:
+                if len(self._spec_rows) > 1:
+                    self.product_spec_tables.append(". ".join(self._spec_rows))
+                self._spec_rows = None
         if tag == self._skip:
             self._skip = None
             if self._structured is not None:
@@ -226,7 +265,9 @@ class _ProductPage(HTMLParser):
         elif tag == "title":
             self._in_title = False
         elif tag == "tr" and self._row is not None:
-            self._save_scope(self._row)
+            row = self._save_scope(self._row)
+            if self._spec_rows is not None:
+                self._spec_rows.append(row)
             self._row = None
         elif self._skip is None and self._row is None:
             if tag in ("section", "div", "article", "li", "option") or tag == "p" and not self._section_depth:
@@ -249,6 +290,7 @@ class _ProductPage(HTMLParser):
         self.scopes.append(text)
         if self._main_tag is not None:
             self.main_scopes.append(text)
+        return text
 
     def _finish_section(self):
         if self._section:
@@ -337,6 +379,8 @@ class _ProductPage(HTMLParser):
         elif self._skip is None and data.strip():
             if self._heading_tag:
                 self._heading_text.append(data.strip())
+            else:
+                self._spec_heading = None
             if self._pdf_link:
                 self._link_text.append(data.strip())
             self.words.append(data.strip())
@@ -496,6 +540,12 @@ def _fetch_supplier(
         product, selected_variant_unresolved = parser.product_for_url(archived_product_url or url)
         scopes = list(dict.fromkeys([*parser.main_scopes, *parser.scopes])) if parser.main_scopes else parser.scopes
         visible = " ".join(" ".join(scopes if parser.main_scopes else parser.words).split())
+        # shortcut: detached tables require one product heading and a complete scope list for the variant check.
+        spec_tables = (
+            tuple((parser.product_headings[0], table[:MAX_TEXT]) for table in parser.product_spec_tables[:8])
+            if len(parser.product_headings) == 1 and len(parser.products) <= 1 and len(scopes) <= 100
+            and all(len(scope) <= MAX_TEXT for scope in scopes) else ()
+        )
         # Put structured identity first so evidence still contains it on long pages.
         prefix = " ".join(product.values()) + " " if product else ""
         return Evidence(
@@ -509,6 +559,7 @@ def _fetch_supplier(
             ))[:4],
             origin="openfilamentdatabase.org" if re.search(r"open filament database", visible, re.IGNORECASE) else "",
             selected_variant_unresolved=selected_variant_unresolved,
+            product_spec_tables=spec_tables,
         )
     raise ValueError("Too many supplier redirects")
 

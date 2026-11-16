@@ -15,9 +15,11 @@ from sqlalchemy.orm import selectinload
 
 from . import knowledge, sources
 from .proposals import (
-    Identity, _literal_in, _on_manufacturer_site, _site_host, _supplier_scopes,
+    Identity, _known_variant_fields, _literal_in, _on_manufacturer_site, _product_titles,
+    _sheet_matches, _sheet_variant_values, _site_host, _supplier_scopes,
     filament_identity, manufacturer_site_url, same_variant,
 )
+from .weights import AMBIGUOUS_WEIGHT_REPLY, WEIGHT_EXPRESSION, grams_from_match
 
 INVENTORY = re.compile(
     r"\b(?:what do i have|do i have|(?:what|which|my|our|in) (?:spools?|inventory|stock)|"
@@ -32,11 +34,10 @@ SETTINGS = re.compile(
     r"\b(?:(?:what|which|print|printing|starting) settings|settings (?:for|should)|"
     r"(?:nozzle|bed) temp(?:eratures?)?|paramètres d.impression|druckeinstellungen)\b", re.I
 )
-LOOKUP = re.compile(r"\b(?:specs?|specifications?|datasheet|latest|recent|current|newest|verify|conflict|unverified)\b", re.I)
+LOOKUP = re.compile(r"\b(?:specs?|specifications?|data\s*sheet|latest|recent|current|newest|verify|conflict|unverified)\b", re.I)
 WEIGHT = re.compile(
     r"(?:(?P<required>\b(?:need(?:ed|s)?|require(?:d|s)?|at least|minimum(?: of)?))\s+(?:about |around )?)?"
-    r"(?<![\d.,/\-])(?P<weight>\d{1,3}(?:,\d{3}){1,2}(?:\.\d{1,3})?|\d{1,6}(?:[.,]\d{1,3})?)"
-    r"\s*(?P<unit>kg|g|grams?|kilograms?)\b", re.I,
+    + WEIGHT_EXPRESSION, re.I,
 )
 MATERIAL = re.compile(r"\b(?:PLA|PETG|PET|ASA|ABS|TPU|TPE|PCTG|PA|Nylon|PC|PP|PVA|HIPS)\b", re.I)
 OUTDOOR = re.compile(r"\b(?:outdoors?|weatherproof|uv|extérieur|außen)\b", re.I)
@@ -44,6 +45,15 @@ BAMBU_MODELS = r"A1 Mini|A1|P1S|P1P|P2S|X1 Carbon|X1C|X1E|X1|H2D|H2S|H2C"
 BAMBU_MODEL = re.compile(rf"\bBambu(?:\s+Lab)?\s+({BAMBU_MODELS})\b", re.I)
 DEVICE_NAME = re.compile(rf"\b(?:{BAMBU_MODELS}|AMS 2 Pro)\b", re.I)
 CATALOG_BRANDS = {"Bambu Lab": "bambulab.com", "Polymaker": "polymaker.com", "Paramount 3D": "paramount-3d.com"}
+PACKAGE_LABELS = {
+    "refill": re.compile(r"\b(?:refill|spoolless|without (?:a )?spool)\b", re.I),
+    "spool": re.compile(r"\b(?:with (?:a )?spool|spooled|on (?:a )?spool)\b", re.I),
+}
+VARIANT_DETAILS = re.compile(
+    r"\b(?:sku|article number|product code|barcode|colou?r)\s*[:#]|"
+    r"\b(?:spool|reel)\s+(?:weight|tare|width|outer diameter|dimensions|material)\b|"
+    r"\b\d+(?:[.,]\d+)?\s*(?:kg|g)\b(?!\s*/)", re.I,
+)
 CITATION = re.compile(r"\[([^\[\]\r\n]{1,128})\]")
 EXACT_SETTING = re.compile(
     r"\d|°|https?://|www\.|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|"
@@ -102,7 +112,9 @@ class ChatContext:
             for name in DEVICE_NAME.findall(f"{row['title']} {row.get('text', '')}")
         }
         plain = DEVICE_NAME.sub(lambda match: "" if match[0].casefold() in names else match[0], plain)
-        if (
+        if "ambiguous_weight" in self.notices:
+            answer = AMBIGUOUS_WEIGHT_REPLY
+        elif (
             not answer.strip() or citations - allowed or (allowed and not citations)
             or EXACT_SETTING.search(plain) or any(char in plain for char in "[]")
         ):
@@ -150,20 +162,11 @@ def _fields(record, fields) -> dict:
     return {key: value for key in fields if (value := getattr(record, key)) is not None}
 
 
-def _required_weight(question: str) -> float | None:
+def _required_weight_match(question: str) -> re.Match[str] | None:
     matches = list(WEIGHT.finditer(question))
     qualified = [match for match in matches if match["required"]]
     candidates = qualified or matches
-    if len(candidates) != 1:
-        return None
-    match = candidates[0]
-    raw = match["weight"]
-    kilos = match["unit"].lower().startswith("k")
-    # Retain decimal commas for kilograms and for fractional gram values like 0,125 g.
-    grouped = re.fullmatch(r"[1-9]\d{0,2},\d{3}", raw)
-    if raw.count(",") > 1 or ("," in raw and "." in raw) or (grouped and not kilos):
-        raw = raw.replace(",", "")
-    return float(raw.replace(",", ".")) * (1000 if kilos else 1)
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _catalog_identity(item: dict, *, exact: bool) -> Identity:
@@ -270,7 +273,10 @@ async def collect_context(
     context = ChatContext(search_requested=web_search or lookup)
     materials = set()
     if inventory:
-        context.required_g = _required_weight(question)
+        if weight := _required_weight_match(question):
+            context.required_g = grams_from_match(weight)
+            if context.required_g is None:
+                context.notices.append("ambiguous_weight")
         if "spools:read" not in permissions:
             context.notices.append("spools_forbidden")
         else:
@@ -363,7 +369,7 @@ async def collect_context(
             seen.add(row["source_id"])
 
     if context.search_requested:
-        context.search_target = _search_target(filament, catalog, printer_model, settings)
+        context.search_target = _search_target(filament, catalog, printer_model, settings, question)
     return context
 
 
@@ -376,14 +382,43 @@ def _publication_link(value, *, variant: bool) -> str | None:
     return urlunsplit(parsed._replace(query=query, fragment=""))
 
 
-def _search_target(filament: Filament | None, catalog: list[dict], printer_model: str, settings: bool) -> dict:
+def _packages(text: str) -> set[str]:
+    return {package for package, pattern in PACKAGE_LABELS.items() if pattern.search(text)}
+
+
+def _verified_package(text: str, package: str) -> bool:
+    label = PACKAGE_LABELS[package].pattern
+    return _packages(text) == {package} and bool(re.search(
+        rf"(?:\b(?:package|packaging|spool type)\s*:\s*|\b\d+(?:[.,]\d+)?\s*(?:kg|g)[ ,]+){label}"
+        r"(?=\s*(?:[.;|]|$))", text, re.I,
+    ))
+
+
+def _grade_excerpt(text: str, identity: Identity, colors: tuple[str, ...]) -> bool:
+    return bool(re.match(
+        rf"^(?:{re.escape(identity.manufacturer)}\s+)?{re.escape(identity.designation)}[\s:·–—-]+"
+        r"(?:(?:manufacturer|technical|printing)\s+)?(?:specifications?|specs|property|properties|"
+        r"recommended printing settings|nozzle temperature|bed temperature|density)\b", text, re.I,
+    )) and not (
+        _packages(text) or VARIANT_DETAILS.search(text) or any(_literal_in(color, text) for color in colors)
+        or re.search(r"\b(?:except|excluding|other than|unless)\b", text, re.I)
+    )
+
+
+def _search_target(
+    filament: Filament | None, catalog: list[dict], printer_model: str, settings: bool, question: str,
+) -> dict:
     # Only terms from public catalog data or the printer whitelist can reach the search engine.
     # A saved supplier URL can supply new products without sending the saved designation to search.
-    product = next((row for row in catalog if row.get("package_verified")), catalog[0] if catalog else {})
+    requested = _packages(question)
+    package = next(iter(requested)) if len(requested) == 1 else None
+    product = catalog[0] if catalog else {}
+    if package:
+        product = next((row for row in catalog if row.get("packaging") == package and row.get("manufacturer_url")), product)
     maker, designation = product.get("maker"), product.get("product")
     site = manufacturer_site_url(filament.manufacturer.url) if filament else None
-    exact = bool(product.get("package_verified"))
-    vendor_url = product.get("manufacturer_url") or (product.get("product_url") if exact else None)
+    exact = bool(package and product.get("packaging") == package)
+    vendor_url = product.get("manufacturer_url")
     public_domain = CATALOG_BRANDS.get(maker, "")
     if not public_domain and vendor_url and manufacturer_site_url(vendor_url):
         public_domain = _site_host(vendor_url)
@@ -399,17 +434,24 @@ def _search_target(filament: Filament | None, catalog: list[dict], printer_model
                 _on_manufacturer_site(url, candidate) for candidate in (domain, public_domain)
             ):
                 direct_urls.append(url)
-    if printer_model and (settings or not (direct_urls or designation)):
+    product_lookup = package or re.search(r"\bdata\s*sheet\b", question, re.I)
+    if printer_model and (not (direct_urls or designation) or settings and not product_lookup):
         return {"query": f"Bambu Lab {printer_model} Bambu Studio print settings site:bambulab.com",
                 "domain": "bambulab.com", "printer": printer_model, "urls": []}
     if not (direct_urls or (maker and designation and public_domain)):
         return {}
+    identity = filament_identity(filament) if filament else _catalog_identity(product, exact=False)
+    variant = identity if filament else None
+    if not filament and exact:
+        variant = _catalog_identity(product, exact=True)
     return {
         "query": f'{maker} "{designation}" filament datasheet site:{public_domain}'
         if maker and designation and public_domain else "",
         "domains": (domain, public_domain),
-        "identity": filament_identity(filament) if filament else _catalog_identity(product, exact=exact),
-        "package": product.get("packaging") if exact else None,
+        "identity": identity,
+        "variant": variant,
+        "color": identity.color or product.get("color") or product.get("variant") or "",
+        "package": package,
         "urls": direct_urls,
     }
 
@@ -417,10 +459,10 @@ def _search_target(filament: Filament | None, catalog: list[dict], printer_model
 async def lookup_live(context: ChatContext, search_url: str, supplier_download_mib: int) -> None:
     if not context.search_requested:
         return
-    if not search_url:
+    target = context.search_target
+    if not search_url and not target.get("urls"):
         context.search_status = "disabled"
         return
-    target = context.search_target
     if not target:
         context.search_status = "no_terms"
         return
@@ -430,23 +472,42 @@ async def lookup_live(context: ChatContext, search_url: str, supplier_download_m
         if not any(_on_manufacturer_site(url, domain) for domain in domains):
             return None
         page = await sources.fetch_supplier(url, max_bytes=supplier_download_mib * 1024 * 1024)
-        if not any(_on_manufacturer_site(page.url, domain) for domain in domains):
+        if page.manual or not any(_on_manufacturer_site(page.url, domain) for domain in domains):
             return None
         scope = None
         if model := target.get("printer"):
             text = page.text if _canonical_printer(f"Bambu {page.title}") == model else ""
         else:
-            text = " ".join(
-                item.text for item in _supplier_scopes(target["identity"], replace(page, manufacturer_page=True))
-            )
+            identity = target["identity"]
+            variant = target.get("variant")
             package = target.get("package")
-            package_label = {"refill": r"\b(?:refill|spoolless|without (?:a )?spool)\b",
-                             "spool": r"\b(?:with (?:a )?spool|spooled|on spool)\b"}.get(package)
-            variant_link = _publication_link(page.url, variant=bool(package))
-            scope = "variant" if package and not page.selected_variant_unresolved and (
-                variant_link and urlsplit(variant_link).query
-                or package_label and re.search(package_label, text, re.I)
-            ) else "grade"
+            scope = "grade"
+            if page.datasheet:
+                sheet_identity = variant or identity
+                titles = _product_titles(sheet_identity, include_material=False)
+                if not _sheet_matches(page, titles, sheet_identity):
+                    return None
+                sheet_fields = _sheet_variant_values(page)
+                variant_fields = [key for key in ("sku", "color", "weight_g") if sheet_fields[key]]
+                if variant_fields:
+                    known = _known_variant_fields(sheet_identity, None)
+                    if any(sheet_fields[key] != {known[key]} for key in variant_fields):
+                        return None
+                    scope = "variant"
+                text = page.text
+            else:
+                page = replace(page, manufacturer_page=True)
+                text = ""
+                if package and variant and not page.selected_variant_unresolved:
+                    matched = " ".join(item.text for item in _supplier_scopes(variant, page) if not item.shared)
+                    if _verified_package(matched, package):
+                        text, scope = matched, "variant"
+                if not text:
+                    colors = (target.get("color", ""), (page.product or {}).get("color", ""))
+                    text = " ".join(
+                        item.text for item in _supplier_scopes(identity, page)
+                        if item.shared or _grade_excerpt(item.text, identity, colors)
+                    )
         if text and (link := _publication_link(page.url, variant=scope == "variant")):
             return fact("live", "web-" + sha256(link.encode()).hexdigest()[:16],
                         page.title or _site_host(link), link, text=text[:850], scope=scope)
@@ -466,7 +527,7 @@ async def lookup_live(context: ChatContext, search_url: str, supplier_download_m
     try:
         async with asyncio.timeout(12):
             match = await scan(target["urls"])
-            if not match and target["query"]:
+            if not match and search_url and target["query"]:
                 match = await scan(await sources.search_web(search_url, target["query"]))
     except (httpx.HTTPError, ValueError, OSError, TimeoutError):
         match = None
