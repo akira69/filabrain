@@ -90,7 +90,7 @@ async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
     from app.models import User
     from app.models.base import Base as HostBase
     from filabrain.db import Base as PluginBase
-    from filabrain.research import open_saved_filament, save_research_filament
+    from filabrain.research import lookup_spool_filament, open_saved_filament, save_research_filament
 
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'drafts.db'}")
 
@@ -114,7 +114,8 @@ async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
         draft_id = "a" * 32
         data = FilamentCreate(
             manufacturer_id=manufacturer.id, designation="Fixture PLA", material_type="PLA",
-            diameter_mm=1.75, density_g_cm3=1.24,
+            diameter_mm=1.75, density_g_cm3=1.24, manufacturer_sku="FB-PLA1",
+            shop_url="https://fixture.example/filaments/pla",
         )
 
         async def save():
@@ -131,6 +132,16 @@ async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
             assert records[0].density_g_cm3 == 1.24
             assert records[0].default_spool_weight_g == 180
             assert (await open_saved_filament(draft_id, db, principal)).headers["location"] == f"/filaments/{saved_id}"
+            spool_link = await open_saved_filament(draft_id, db, principal, add_spool=True)
+            assert spool_link.headers["location"] == f"/spools/new?filament_id={saved_id}"
+            read_only = Principal(auth_type="session", user_id=owner.id, is_superadmin=True, scopes=["filaments:read"])
+            with pytest.raises(HTTPException) as forbidden:
+                await open_saved_filament(draft_id, db, read_only, add_spool=True)
+            assert forbidden.value.status_code == 403
+            for term in ("fb-pla1", "https://fixture.example/filaments/pla"):
+                results = await lookup_spool_filament(term, db, principal)
+                assert [item["id"] for item in results["items"]] == [saved_id]
+            assert (await lookup_spool_filament("FB-PLA", db, principal))["items"] == []
             await db.delete(records[0])
             await db.commit()
             db.add(Filament(id=saved_id, manufacturer_id=manufacturer.id, designation="Replacement", material_type="PLA", diameter_mm=1.75))

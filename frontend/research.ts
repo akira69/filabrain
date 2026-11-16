@@ -4,10 +4,12 @@ import { researchFieldLabel, researchOptionValue, type ResearchIdentity, type Re
 import { t } from './shared/i18n'
 import type { Chat } from './chat'
 import type { ExpectedFilament } from './shared/filabrain-batches'
+import type { SpoolResearchInput } from './spool-intake'
 
 type Value = ResearchOption['value'] | boolean | null
 type Fields = Record<string, Value>
 type Unit = Record<string, { old: Value; value: Value }>
+
 export type EditorContext = {
   mode: 'create' | 'edit'; filament_id: number | null; fields: Fields; record_token?: string | null
 }
@@ -129,12 +131,12 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   let lastAction = 'fill'
   let formRevision = 0
 
-  function showInChat(movePicker = true, reveal = true) {
+  function showInChat(movePicker = true, reveal = true, newDraft = false) {
     if (reveal) openChat()
     if (movePicker) document.querySelector('[data-chat-form] .chat-toolbar')!.prepend(chat.picker)
     if (inputs.parentElement !== chatInput) chatInput.append(inputs)
     if (conversation.parentElement !== chatResults) chatResults.append(conversation)
-    chat.startResearch()
+    return chat.startResearch(newDraft)
   }
 
   let pendingOptions: Promise<unknown> = Promise.resolve()
@@ -811,5 +813,17 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     }
   })
   if (editor) showInChat(false)
-  return showInChat
+  return (input?: SpoolResearchInput) => {
+    if (!showInChat(true, true, !!input) || !input) return
+    manufacturer.value = input.manufacturer || ''
+    for (const [name, value] of Object.entries({
+      designation: input.designation,
+      material_type: input.material,
+      sku_hint: input.sku,
+      product_url: input.productUrl,
+    })) {
+      if (value) form.querySelector<HTMLInputElement>(`[name="${name}"]`)!.value = value
+    }
+    if (input.material || input.sku) advanced.open = true
+  }
 }

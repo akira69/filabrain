@@ -10,7 +10,7 @@ from app.core.cache import response_cache
 from app.core.db_utils import get_next_available_id
 from app.core.event_bus import event_bus
 from app.models import Filament, FilamentColor, InstalledPlugin, Manufacturer
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy import func, or_, select, update
@@ -111,6 +111,8 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "filaments:update",
                 "filaments:read",
                 "manufacturers:update",
+                "spools:create",
+                "spools:read",
                 "admin:plugins_manage",
             )
         except HTTPException as exc:
@@ -129,6 +131,9 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         "enabled": enabled,
         "mcp_enabled": enabled and await mcp_access_enabled(db),
         "can_create": enabled and "filaments:create" in permissions,
+        "can_add_spool": enabled and principal.auth_type == "session"
+        and {"filaments:read", "spools:create"} <= permissions,
+        "can_read_spools": enabled and principal.auth_type == "session" and "spools:read" in permissions,
         "can_update": "filaments:update" in permissions,
         "can_update_manufacturer": enabled and principal.auth_type == "session"
         and {"filaments:update", "manufacturers:update"} <= permissions,
@@ -359,16 +364,56 @@ async def save_research_filament(draft_id: DraftId, data: FilamentCreate, db: DB
 
 
 @router.get("/saved-filaments/{draft_id}", response_class=RedirectResponse)
-async def open_saved_filament(draft_id: DraftId, db: DBSession, principal: PrincipalDep):
+async def open_saved_filament(draft_id: DraftId, db: DBSession, principal: PrincipalDep, add_spool: bool = False):
     if principal.auth_type != "session" or principal.user_id is None:
         raise HTTPException(403, "A browser session is required")
     await ensure_any_permission(db, principal, "filaments:read", "filaments:create")
+    if add_spool:
+        await ensure_any_permission(db, principal, "spools:create")
     if not await is_enabled(db):
         raise HTTPException(404, "FilaBrain is disabled")
     receipt = await db.get(FilamentResearchSave, (principal.user_id, draft_id))
     if receipt is None or receipt.filament_id is None:
         raise HTTPException(404, "Saved filament not found")
-    return RedirectResponse(f"/filaments/{receipt.filament_id}", headers={"Cache-Control": "no-store"})
+    url = f"/spools/new?filament_id={receipt.filament_id}" if add_spool else f"/filaments/{receipt.filament_id}"
+    return RedirectResponse(url, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/spool-filaments")
+async def lookup_spool_filament(
+    exact: Annotated[str, Query(min_length=1, max_length=2048)],
+    db: DBSession,
+    principal: PrincipalDep,
+):
+    if principal.auth_type != "session":
+        raise HTTPException(403, "A browser session is required")
+    await ensure_any_permission(db, principal, "filaments:read")
+    await ensure_any_permission(db, principal, "spools:create")
+    if not await is_enabled(db):
+        raise HTTPException(404, "FilaBrain is disabled")
+    term = exact.strip()
+    match = Filament.shop_url == term if term.lower().startswith(("https://", "http://")) else (
+        func.lower(Filament.manufacturer_sku) == term.lower()
+    )
+    result = await db.scalars(
+        select(Filament).options(selectinload(Filament.manufacturer)).where(match)
+        .order_by(Filament.designation, Filament.id).limit(13)
+    )
+    items = [
+        {
+            "id": row.id,
+            "designation": row.designation,
+            "manufacturer": {"name": row.manufacturer.name} if row.manufacturer else None,
+            "material_type": row.material_type,
+            "material_subgroup": row.material_subgroup,
+            "finish_type": row.finish_type,
+            "manufacturer_color_name": row.manufacturer_color_name,
+            "diameter_mm": row.diameter_mm,
+            "raw_material_weight_g": row.raw_material_weight_g,
+        }
+        for row in result
+    ]
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/filaments/{filament_id}/research-record")

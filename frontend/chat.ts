@@ -26,7 +26,7 @@ type Research = {
   followUp(prompt: string): Promise<void>
 }
 
-export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined) {
+export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined) {
   let model = statusModel.chat_model
   const form = document.querySelector<HTMLFormElement>('[data-chat-form]')!
   const input = form.querySelector('textarea')!
@@ -109,6 +109,12 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       link.rel = 'noopener noreferrer'
       link.textContent = t('filaBrain.openSavedFilament')
       log.append(link)
+      if (statusModel.can_add_spool && editorScope === undefined) {
+        const spool = link.cloneNode() as HTMLAnchorElement
+        spool.href += '?add_spool=1'
+        spool.textContent = t('spoolIntake.title')
+        log.append(spool)
+      }
     }
     scrollToEnd()
     return paragraph
@@ -384,9 +390,9 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     void modelPicker.setDefault(model, detail.chat_endpoint_id)
     updateControls()
   })
-  function startResearch() {
-    if (busyResearch) return
-    if (!researching && (current.messages.length || input.value || request)) reset(true)
+  function startResearch(fresh = false) {
+    if (busyResearch || staging) return false
+    if (fresh || !researching && (current.messages.length || input.value || request)) reset(true)
     else if (!researching) {
       researching = true
       document.dispatchEvent(new CustomEvent('filabrain:chat-mode', { detail: true }))
@@ -394,6 +400,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     updateControls()
     const field = researchInput.querySelector<HTMLElement>('input[name="designation"]:not([type="hidden"])')
     if (field?.getClientRects().length) field.focus()
+    return true
   }
 
   updateControls()

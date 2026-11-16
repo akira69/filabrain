@@ -45,6 +45,12 @@ try {
   let defaultEndpoint = null
   let canConfigure = true
   let canUseFilaments = true
+  let canAddSpool = false
+  let scaleRequested = false
+  let stockRequested = false
+  let scaleResultReads = 0
+  let passiveScanReads = 0
+  const scanWrites = []
   let modelsUnavailable = false
   let hostPicker = false
   let account = 7
@@ -115,8 +121,67 @@ try {
         })
       </script>` })
     if (path.endsWith('/me')) return route.fulfill({ json: { id: account } })
+    if (path === '/api/v1/devices/active') return route.fulfill({ json: [
+      { id: 4, name: 'SpoolmanScale' }, { id: 8, name: 'FilaMan ESP32' },
+    ] })
+    if (path === '/api/v1/tag/readers') return route.fulfill({ json: [
+      { reader_id: 'device-4', name: 'SpoolmanScale' },
+      { reader_id: 'usb-nfc', name: 'NFC reader' },
+    ] })
+    if (path === '/api/v1/tag/last-scan') {
+      const reader = new URL(req.url()).searchParams.get('reader_id')
+      if (reader === 'usb-nfc') {
+        passiveScanReads++
+        return route.fulfill({ json: passiveScanReads < 3
+          ? { reader_id: reader, seq: 100, uid: '0101', spool_id: 12 }
+          : { reader_id: reader, seq: 101, uid: '0102', spool_id: 17 },
+        })
+      }
+      return route.fulfill({ json: { seq: 0 } })
+    }
+    if (path === '/api/v1/devices/8/request-tag-scan') {
+      stockRequested = true
+      scanWrites.push(path)
+      return route.fulfill({ json: { success: true } })
+    }
+    if (path === '/api/v1/devices/8/tag-scan-result') {
+      return route.fulfill({ json: stockRequested ? {
+        status: 'success', timestamp: '2026-11-16T12:02:00Z',
+        tag_data: { protocol: 'filaman', brand: 'Fixture Brand', type: 'PLA', color_hex: '#33AA55' },
+      } : { status: 'none' } })
+    }
+    if (path === '/api/v1/devices/4/request-tag-scan') {
+      scaleRequested = true
+      scanWrites.push(path)
+      return route.fulfill({ json: { success: true } })
+    }
+    if (path === '/api/v1/devices/4/tag-scan-result') {
+      const fresh = scaleRequested && ++scaleResultReads > 1
+      return route.fulfill({ json: {
+        status: 'success',
+        timestamp: fresh ? '2026-11-16T12:01:00Z' : '2026-11-16T12:00:00Z',
+        tag_data: fresh
+          ? { brand: 'Fixture Brand', type: 'PLA', color_hex: '33AA55', min_temp: '200', max_temp: '220' }
+          : { brand: 'Old result', type: 'PETG', color_hex: 'FF0000', sm_id: 99 },
+      } })
+    }
+    if (path === '/api/v1/filaments' && new URL(req.url()).searchParams.get('search') === 'FIX-123') {
+      return route.fulfill({ json: { items: [], total: 0 } })
+    }
+    if (path === '/api/v1/filabrain/spool-filaments') {
+      const term = new URL(req.url()).searchParams.get('exact')
+      assert.equal(term, 'FIX-123')
+      return route.fulfill({ json: { items: [filament], total: 1 } })
+    }
+    if (path === '/api/v1/filaments' && new URL(req.url()).searchParams.get('type') === 'PLA') {
+      assert.equal(new URL(req.url()).searchParams.get('search'), 'Fixture Brand')
+      return route.fulfill({ json: { items: [
+        { ...filament, colors: [{ color: { hex_code: '#33AA55' } }] },
+        { ...filament, id: 11, designation: 'Other Color', colors: [{ color: { hex_code: '#112233' } }] },
+      ], total: 2 } })
+    }
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: canUseFilaments, chat_model: chatModelId, chat_endpoint_id: chatModelId ? defaultEndpoint : null,
-      can_create: canUseFilaments, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
+      can_create: canUseFilaments, can_add_spool: canAddSpool, can_read_spools: canAddSpool, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure, mcp_enabled: mcpEnabled } })
     if (path.endsWith('/filaments/10/research-record')) return recordUnavailable
       ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { record_token: editorRecordToken } })
@@ -283,6 +348,44 @@ try {
     return route.fulfill({ status: 404, json: {} })
   })
 
+  canAddSpool = true
+  const intake = await context.newPage()
+  intake.setDefaultTimeout(5_000)
+  await intake.goto(`${url}?tab=spool`)
+  const readerChoice = intake.getByRole('combobox', { name: 'Reader', exact: true })
+  await readerChoice.locator('option', { hasText: 'FilaMan ESP32' }).waitFor({ state: 'attached' })
+  assert.equal(await readerChoice.locator('option', { hasText: 'SpoolmanScale' }).count(), 1)
+  await readerChoice.selectOption({ label: 'SpoolmanScale' })
+  const readTag = intake.getByRole('button', { name: 'Read spool tag' })
+  await readTag.click()
+  const useFilament = intake.getByRole('link', { name: 'Use this filament' })
+  await useFilament.waitFor()
+  assert.equal(await useFilament.getAttribute('href'), '/spools/new?filament_id=10')
+  assert.equal(await intake.getByText('Old result').isVisible(), false)
+  assert.equal(await intake.getByText('Other Color').isVisible(), false)
+  await intake.getByRole('button', { name: 'Research new filament' }).click()
+  assert.equal(await intake.locator('#draft-manufacturer').inputValue(), 'Fixture Brand')
+  assert.equal(await intake.locator('#product-research input[name="material_type"]').inputValue(), 'PLA')
+  await intake.getByRole('button', { name: 'Add spool' }).click()
+  await readerChoice.selectOption({ label: 'NFC reader' })
+  await readTag.click()
+  const openSpool = intake.getByRole('link', { name: 'Open existing spool' })
+  await openSpool.waitFor()
+  assert.equal(await openSpool.getAttribute('href'), '/spools/17')
+  await readerChoice.selectOption({ label: 'FilaMan ESP32' })
+  await readTag.click()
+  await useFilament.waitFor()
+  assert.equal(await useFilament.getAttribute('href'), '/spools/new?filament_id=10')
+  assert.deepEqual(scanWrites, ['/api/v1/devices/4/request-tag-scan', '/api/v1/devices/8/request-tag-scan'])
+  await intake.getByLabel('Product name, SKU, or URL').fill('FIX-123')
+  await intake.getByRole('button', { name: 'Find in library' }).click()
+  await useFilament.waitFor()
+  assert.equal(await useFilament.getAttribute('href'), '/spools/new?filament_id=10')
+  await intake.setViewportSize({ width: 320, height: 700 })
+  assert.equal(await intake.evaluate(() => document.documentElement.scrollWidth), 320)
+  await intake.close()
+  canAddSpool = false
+
   chatModelId = ''
   await page.goto(url)
   const setupModel = page.getByRole('button', { name: 'Set up a model' })
@@ -303,7 +406,7 @@ try {
   await page.getByRole('textbox', { name: 'Your question' }).waitFor()
   assert.equal(await setupModel.isVisible(), false)
   assert.equal(await page.getByRole('button', { name: 'Guide', exact: true }).count(), 1)
-  assert.equal(await page.locator('#plugin-header [data-tab] svg[aria-hidden="true"]').count(), 5)
+  assert.equal(await page.locator('#plugin-header [data-tab]:not(:has(svg[aria-hidden="true"]))').count(), 0)
 
   chatModelId = ''
   canConfigure = false
@@ -1086,7 +1189,7 @@ try {
   await page.goto(url)
   await page.getByRole('region', { name: 'Model settings' }).waitFor()
   assert.equal(await page.getByRole('navigation', { name: 'FilaBrain' }).count(), 0)
-  console.log('FilaBrain plugin page: chat, selected create, batch approve/apply, MCP, linked editor staging and host selection passed')
+  console.log('FilaBrain plugin page: both scales, NFC reader, spool lookup, chat, research, batches and MCP passed')
 } finally {
   await browser.close()
 }
