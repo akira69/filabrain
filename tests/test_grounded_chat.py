@@ -135,6 +135,25 @@ async def test_inventory_follow_up_resolves_localized_weight(
     if required_g is None:
         assert "without a thousands separator" in result["reply"]
 
+        async def check_model(*_args):
+            pass
+
+        monkeypatch.setattr(research, "check_model_catalog", check_model)
+        for correction in ("1200 g", "I meant 1200 g", "Sorry, I meant 1200 g."):
+            corrected = await research.research_chat(
+                research.ChatRequest(messages=[
+                    {"role": "user", "content": "Which spools could I use?"},
+                    {"role": "assistant", "content": "Here are the available spools."},
+                    {"role": "user", "content": f"I need {quantity}."},
+                    {"role": "assistant", "content": result["reply"]},
+                    {"role": "user", "content": correction},
+                ]),
+                db, Principal(auth_type="session", user_id=1, is_superadmin=True),
+            )
+            assert corrected["required_g"] == 1200
+            spool, = [row for row in corrected["evidence"] if row["kind"] == "spool"]
+            assert spool["meets_required"] is False
+
 
 @pytest.mark.parametrize("reply", [
     "Use 999 °C [saved-profile-2].",

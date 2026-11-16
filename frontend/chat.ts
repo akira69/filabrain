@@ -24,7 +24,8 @@ type Grounding = {
 }
 type Message = {
   role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal']; savedDraftId?: string
-  grounding?: Grounding; spoolProfiles?: SpoolProfile[]; selectedSpoolProfile?: string
+  grounding?: Grounding; spoolProfiles?: SpoolProfile[]; selectedSpoolProfile?: string; confirmedSpoolProfile?: string
+  activeSpoolChoice?: true; spoolLookupFilamentId?: number | null; spoolLookupId?: string
 }
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
@@ -36,6 +37,29 @@ type Research = {
   resume(draft: ResearchDraft): Promise<boolean>
   archive(proposal: ResearchDraft['proposal']): HTMLElement
   followUp(prompt: string): Promise<void>
+}
+
+function spoolLookupMessage(messages: Message[], selection: Message): Message {
+  const profile = selection.confirmedSpoolProfile
+  if (!profile) return selection
+  if (selection.spoolLookupId) {
+    return messages.find(message => message.spoolLookupId === selection.spoolLookupId && !message.confirmedSpoolProfile)
+      ?? selection
+  }
+  // Older saved conversations only recorded the consecutive confirmations.
+  let index = messages.indexOf(selection)
+  while (index >= 3 && messages[index].confirmedSpoolProfile === profile) index -= 2
+  const lookup = messages[index]
+  return lookup?.spoolProfiles?.some(card => card.id === profile) ? lookup : selection
+}
+
+function chatHistoryWindow(messages: Message[], limit: number, spoolChoice?: Message) {
+  const end = spoolChoice ? messages.indexOf(spoolChoice) + 1 : 0
+  // Keep the original lookup and up to two refinements when the choice predates the chat window.
+  const start = Math.max(0, end - 6)
+  if (!end || start >= messages.length - limit) return messages.slice(-limit)
+  const tailStart = Math.max(end, messages.length - (limit - (end - start)))
+  return [...messages.slice(start, end), ...messages.slice(tailStart)]
 }
 
 const evidenceLabels: Record<string, string> = {
@@ -301,7 +325,11 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     }
     if (message.role === 'assistant' && Array.isArray(message.spoolProfiles)) {
       const cards = spoolProfileCards(message.spoolProfiles, message.selectedSpoolProfile, profile => {
-        message.selectedSpoolProfile = profile?.id
+        const activeChoice = current.messages.find(item => item.activeSpoolChoice)
+        if (activeChoice) activeChoice.activeSpoolChoice = undefined
+        const lookup = spoolLookupMessage(current.messages, message)
+        lookup.activeSpoolChoice = true
+        lookup.selectedSpoolProfile = message.selectedSpoolProfile = profile?.id
         remember()
       })
       if (cards) log.append(cards)
@@ -466,8 +494,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       current.id = newId()
       current.title = current.messages[0].content.slice(0, 100)
     }
-    const messages = current.messages.slice(-60)
-    const earlierReceipts = current.messages.slice(0, -60).filter(message => message.savedDraftId)
+    const selection = current.messages.find(message => message.activeSpoolChoice) ?? current.messages.at(-1)
+    const lookup = selection?.selectedSpoolProfile ? spoolLookupMessage(current.messages, selection) : undefined
+    const messages = chatHistoryWindow(current.messages, 60, lookup)
+    const earlierReceipts = current.messages.slice(0, -60).filter(message => message.savedDraftId && !messages.includes(message))
     messages.unshift(...earlierReceipts)
     const snapshot = { ...current, model: modelPicker.selected, updatedAt: Date.now(), messages }
     saved = [snapshot, ...saved.filter(item => item.id !== snapshot.id)].slice(0, 20)
@@ -586,23 +616,46 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     status.textContent = t('filaBrain.chatWorking')
     updateControls()
     try {
-      const selectedProfileId = current.messages.at(-1)?.selectedSpoolProfile
-      const { reply, action, spool_profiles, ...grounding } = await api.post<{
-        reply: string; action: Action | null; spool_profiles?: SpoolProfile[]
+      const choice = current.messages.find(message => message.activeSpoolChoice)
+      const selection = choice ?? current.messages.at(-1)
+      const selectedProfileId = selection?.selectedSpoolProfile
+      const lookup = selection && selectedProfileId ? spoolLookupMessage(current.messages, selection) : undefined
+      const lookupFilamentId = lookup?.spoolLookupFilamentId
+      const filamentId = filament.value ? Number(filament.value) : null
+      const history = chatHistoryWindow(current.messages, 10, lookup)
+      const lookupMessageIndex = lookup ? history.indexOf(lookup) : -1
+      const { reply, action, spool_profiles, selected_spool_profile_id, ...grounding } = await api.post<{
+        reply: string; action: Action | null; spool_profiles?: SpoolProfile[]; selected_spool_profile_id?: string
       } & Partial<Grounding>>('/filabrain/chat', {
-        messages: [...current.messages.slice(-10), question].map(({ role, content }) => ({ role, content })),
+        messages: [...history, question].map(({ role, content, confirmedSpoolProfile }) => ({
+          role, content, ...(confirmedSpoolProfile ? { confirmed_spool_profile_id: confirmedSpoolProfile } : {}),
+        })),
         ...modelPicker.selected,
         ...(typeof selectedProfileId === 'string' ? { selected_spool_profile_id: selectedProfileId } : {}),
+        ...(lookupMessageIndex >= 0 ? { spool_lookup_message_index: lookupMessageIndex } : {}),
+        ...(lookupFilamentId !== undefined ? { spool_lookup_filament_id: lookupFilamentId } : {}),
         ...(searchWeb ? { web_search: true } : {}),
         ...(printer.value ? { printer_id: Number(printer.value) } : {}),
-        ...(filament.value ? { filament_id: Number(filament.value) } : {}),
+        ...(filamentId !== null ? { filament_id: filamentId } : {}),
         ...(nozzle.value ? { nozzle_mm: Number(nozzle.value) } : {}),
       }, { signal: controller.signal })
       if (request !== controller) return
+      if (choice?.activeSpoolChoice && choice.selectedSpoolProfile === selectedProfileId &&
+          (selectedProfileId === undefined || selected_spool_profile_id !== selectedProfileId)) {
+        choice.activeSpoolChoice = undefined
+      }
+      const spoolProfiles = Array.isArray(spool_profiles) ? spool_profiles.slice(0, 4) : undefined
+      if (selected_spool_profile_id && lookup && !lookup.spoolLookupId) lookup.spoolLookupId = newId()
       const answer: Message = {
         role: 'assistant', content: reply, action: action ?? undefined,
         grounding: Array.isArray(grounding.evidence) ? grounding as Grounding : undefined,
-        spoolProfiles: Array.isArray(spool_profiles) ? spool_profiles.slice(0, 4) : undefined,
+        spoolProfiles,
+        spoolLookupFilamentId: spoolProfiles?.length
+          ? (selected_spool_profile_id && lookupFilamentId !== undefined ? lookupFilamentId : filamentId)
+          : undefined,
+        selectedSpoolProfile: selected_spool_profile_id,
+        confirmedSpoolProfile: selected_spool_profile_id,
+        spoolLookupId: spoolProfiles?.length ? (selected_spool_profile_id && lookup?.spoolLookupId || newId()) : undefined,
       }
       current.messages.push(question, answer)
       append(answer)

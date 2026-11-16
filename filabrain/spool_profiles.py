@@ -17,6 +17,7 @@ ONLY = "https://www.onlyspoolz.com"
 CATALOGS = (EMPTY + "/", ONLY + "/portfolio/")
 CATALOG_CACHE_PREFIX = "filabrain.spool_profiles."
 PACKAGE_WEIGHT = re.compile(WEIGHT_EXPRESSION, re.I)
+CATALOG_WEIGHT = re.compile(rf"{WEIGHT_EXPRESSION}(?:\s+\([^)]*\))?", re.I)
 SPOOL = re.compile(r"\b(?:spools?|reels?|bobbins?)\b", re.I)
 TARE = re.compile(
     r"\btare\b|\bempty (?:weight|spool mass)\b|\b(?:spool|reel|bobbin) (?:weight|mass)\b|"
@@ -84,7 +85,11 @@ SPEC_FIELDS = {
 
 
 def _mass_or_length(text: str, unit: str):
-    match = re.fullmatch(rf"(\d{{1,6}}(?:\.\d{{1,6}})?)\s*({unit})(?:\s+\([^)]*\))?", text, re.I)
+    if unit == "g" and (match := CATALOG_WEIGHT.fullmatch(text)):
+        if (grams := grams_from_match(match)) is not None:
+            return grams
+    units = "kg|g" if unit == "g" else unit
+    match = re.fullmatch(rf"(\d{{1,6}}(?:\.\d{{1,6}})?)\s*({units})(?:\s+\([^)]*\))?", text, re.I)
     if match and (value := float(match[1])) > 0:
         return value * (1000 if match[2].lower() == "kg" else 1)
     return None
@@ -165,7 +170,7 @@ class _CatalogPage(HTMLParser):
             if tag == "h4":
                 self.entry["title"] = text
             elif tag == "td":
-                if net := _mass_or_length(text, "kg|g"):
+                if net := _mass_or_length(text, "g"):
                     self.entry["net_weight_g"] = net
             else:
                 label, _, value = text.partition(":")
@@ -308,7 +313,8 @@ def _filamandb_identity(words: list[str], manufacturer: str, product: str) -> tu
 async def find_spool_profiles(
     question: str, intent: str, refinement: str = "", *,
     style_hint: str = "", package_weight_g: float | None = None, manufacturer_name: str = "",
-    product_name: str = "", material_name: str = "", compare_linked: bool = False,
+    product_name: str = "", material_name: str = "", sku: str = "", strict_package: bool = False,
+    linked_profile_id: str | None = None,
 ):
     query = question + " " + refinement
     query_words = _words(query)
@@ -323,22 +329,33 @@ async def find_spool_profiles(
     if None in sizes:
         return {"reply": AMBIGUOUS_WEIGHT_REPLY, "action": None, "spool_profiles": []}
     sizes.discard(0)
-    lookups = [_catalog(url) for url in CATALOGS]
-    if not compare_linked:
-        search = " ".join(dict.fromkeys(word for word in query_words if word in terms))[:200].strip()
-        manufacturer, product = _filamandb_identity(
-            _words(question + " " + " ".join(
-                word for word in _words(refinement) if word not in REFINEMENT_WORDS
-            )),
-            manufacturer_name.strip(), product_name.strip(),
-        )
-        families = _materials(set(_words(material_name))) or materials
-        material = " ".join(sorted(families)) or material_name
-        lookups.append(search_spool_cards(search, manufacturer, product, material, sizes))
-    catalogs = await asyncio.gather(*lookups)
+    search = " ".join(dict.fromkeys(word for word in query_words if word in terms))[:200].strip()
+    manufacturer, product = _filamandb_identity(
+        _words(question + " " + " ".join(
+            word for word in _words(refinement) if word not in REFINEMENT_WORDS
+        )),
+        manufacturer_name.strip(), product_name.strip(),
+    )
+    families = _materials(set(_words(material_name))) or materials
+    material = " ".join(sorted(families)) or material_name
+    catalogs = await asyncio.gather(
+        *(_catalog(url) for url in CATALOGS),
+        search_spool_cards(search, manufacturer, product, material, sizes, sku=sku),
+    )
+
+    def package_weights(profile):
+        weight = profile.get("net_weight_g")
+        return profile.get("package_weights_g") or (() if weight is None else (weight,))
+
     ranked = []
     for entries in catalogs:
         for profile, label, style in entries:
+            weights = package_weights(profile)
+            size_matches = not sizes.isdisjoint(weights)
+            if profile["id"] == linked_profile_id or (
+                strict_package and sizes and weights and not size_matches
+            ):
+                continue
             name = _words(f'{label} {profile["title"]}')
             if not name or name[0] not in words:
                 continue
@@ -350,12 +367,11 @@ async def find_spool_profiles(
             if materials and named_materials and materials.isdisjoint(named_materials):
                 continue
             design = _styles(style)
-            if compare_linked and not styles <= design:
+            if linked_profile_id and not styles <= design:
                 continue
-            net_weight_g = profile.get("net_weight_g")
             # FilaManDB profiles can describe a reel without specifying its filament capacity.
             size_compatible = bool(sizes) and (
-                net_weight_g in sizes or (profile["source"] == "FilaManDB" and net_weight_g is None)
+                size_matches or (profile["source"] == "FilaManDB" and not weights)
             )
             rank = (
                 len(terms.intersection(name)),
@@ -380,7 +396,7 @@ async def find_spool_profiles(
             reply = "The spool catalogs are unavailable right now. Try again later."
     elif term_matches < len(terms):
         reply = "I couldn’t verify that exact product. I found possible spool designs. " + STYLE_QUESTION
-    elif sizes and not any(profile.get("net_weight_g") in sizes for profile in profiles):
+    elif sizes and all(sizes.isdisjoint(package_weights(profile)) for profile in profiles):
         reply = "I found possible spool designs, but could not verify that package size. " + STYLE_QUESTION
     elif len(profiles) > 1 or style_matches < len(styles):
         reply = "I found possible spool designs. " + STYLE_QUESTION

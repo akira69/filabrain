@@ -46,7 +46,7 @@ const draftFields = [
 ]
 const productFields = [
   'manufacturer_id', 'manufacturer_sku', 'designation', 'material_type', 'diameter_mm',
-  'manufacturer_color_name', 'raw_material_weight_g', 'finish_type', 'material_subgroup',
+  'manufacturer_color_name', 'raw_material_weight_g', 'finish_type', 'material_subgroup', 'color_id', 'color_mode',
 ]
 const numericDraft = new Set(['manufacturer_id', 'color_id', 'diameter_mm'])
 const spoolFields = [
@@ -72,15 +72,59 @@ export const identity = (fields: Fields): ResearchIdentity => ({
 const valueText = (value: Value) => value == null || value === '' ? '—'
   : typeof value === 'boolean' ? String(value) : researchOptionValue(value)
 
-function sameResolvedProduct(previous: ResearchProposal, fresh: ResearchProposal, known?: Fields) {
+function acceptedFields(fields: Fields, selection: Unit[]): Fields {
+  const accepted = { ...fields }
+  for (const unit of selection) {
+    for (const [field, change] of Object.entries(unit)) accepted[field] = change.value
+  }
+  return accepted
+}
+
+function packageWeight(fields: Fields) {
+  const weight = fields.raw_material_weight_g
+  return typeof weight === 'number' && Number.isFinite(weight) && weight > 0 ? weight : null
+}
+
+function spoolLookupKey(fields: Fields, hint: string) {
+  const { manufacturer, designation, material, sku } = identity(fields)
+  return JSON.stringify([manufacturer, designation, material, sku || hint].map(value => value.trim().toLowerCase()))
+}
+
+function matchesSpoolPackage(profile: SpoolProfile, weight?: Value) {
+  if (typeof weight !== 'number') return true
+  const weights = profile.package_weights_g
+  if (Array.isArray(weights)) return !weights.length || weights.includes(weight)
+  if (typeof profile.net_weight_g === 'number') return profile.net_weight_g === weight
+  // Older FilaManDB cards could omit a known package weight.
+  return profile.source !== 'FilaManDB'
+}
+
+function sameResolvedProduct(previous: ResearchProposal, fresh: ResearchProposal, accepted: Fields, known?: Fields) {
   const values = (proposal: ResearchProposal) => new Map(proposal.suggestions.map(item => [item.field, item.value]))
   const before = values(previous)
   const after = values(fresh)
   return productFields.every(field => {
-    const old = before.get(field) ?? known?.[field]
-    const value = after.get(field)
+    const old = accepted[field] ?? before.get(field) ?? known?.[field]
+    const value = fresh.issues.some(issue => issue.field === field &&
+      issue.options?.some(option => equal(accepted[field], option.value))) ? accepted[field] : after.get(field)
     return known && (blank(old) || blank(value)) || equal(old, value)
   })
+}
+
+function carryAcceptedProductFields(previous: ResearchProposal, fresh: ResearchProposal, selection: Unit[]) {
+  const accepted = acceptedFields({}, selection)
+  const reported = new Set([
+    ...fresh.suggestions.map(item => item.field),
+    ...fresh.issues.flatMap(issue => issue.field ? [issue.field] : []),
+  ])
+  const carried = previous.suggestions.filter(item => !reported.has(item.field) &&
+    equal(accepted[item.field], item.value))
+  for (const { field, options } of previous.issues) {
+    if (!field || reported.has(field) || carried.some(item => item.field === field)) continue
+    const acceptedOption = options?.find(option => equal(accepted[field], option.value))
+    if (acceptedOption) carried.push({ field, ...acceptedOption })
+  }
+  return { ...fresh, suggestions: [...fresh.suggestions, ...carried] }
 }
 
 function keepSpoolMeasurements(selection: Unit[], profile: SpoolProfile, fresh: ResearchProposal) {
@@ -101,6 +145,7 @@ function mergeFollowUp(previous: ResearchProposal, fresh: ResearchProposal, fiel
     ...fresh,
     spool_profiles: previous.spool_profiles,
     spool_profile_id: previous.spool_profile_id,
+    spool_lookup_key: previous.spool_lookup_key,
     suggestions: [...previous.suggestions.filter(item => item.field !== field), ...fresh.suggestions.filter(item => item.field === field)],
     proposals: [...(previous.proposals || []).filter(unit => !affects(unit)), ...(fresh.proposals || []).filter(affects)],
     issues: [...previous.issues.filter(issue => issue.field && issue.field !== field),
@@ -169,10 +214,13 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   const chatResults = document.querySelector('[data-chat-research-results]')!
   const proposalTarget = (context: EditorContext) => ({
     mode: context.mode, filament_id: context.filament_id, identity: identity(context.fields),
+    ...(context.mode === 'create' && typeof context.fields.color_id === 'number'
+      ? { palette_color_id: context.fields.color_id } : {}),
   })
   let choices = new Map<HTMLInputElement, Unit>()
   let bound: EditorContext | undefined
   let boundProposal: ResearchProposal | undefined
+  let refreshSpoolProfiles: (() => void) | undefined
   let draft: Fields | undefined
   let busy = false
   let saving = false
@@ -222,6 +270,13 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     ])
   }
 
+  function spoolLookupFields(fields: Fields, selection: Unit[]) {
+    const accepted = acceptedFields(fields, selection)
+    const maker = manufacturers.find(item => item.id === accepted.manufacturer_id)
+    if (maker) accepted.manufacturer_name = maker.name
+    return accepted
+  }
+
   function localFields() {
     const formData = new FormData(form)
     const fields: Fields = {}
@@ -269,6 +324,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     results.replaceChildren()
     bound = undefined
     boundProposal = undefined
+    refreshSpoolProfiles = undefined
     followUpControls.hidden = true
     updateSave()
     reply.hidden = true
@@ -300,6 +356,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       control.checked = match >= 0
       if (match >= 0) remaining.splice(match, 1)
     }
+    refreshSpoolProfiles?.()
     updateSave()
   }
 
@@ -307,11 +364,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     const count = editor ? selected().reduce((total, unit) => total + Object.keys(unit).length, 0) : 0
     save.disabled = !bound || duplicate || busy || saving || (!!editor && count === 0)
     followUpScope.disabled = busy || saving
-    for (const control of results.querySelectorAll<HTMLButtonElement>('.chat-spool-picker button')) control.disabled = busy || saving
+    for (const control of results.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
+      '.chat-spool-picker button, input[type=checkbox], input[type=radio]',
+    )) control.disabled = busy || saving
     if (editor) {
-      for (const control of results.querySelectorAll<HTMLInputElement>('input[type=checkbox], input[type=radio]')) {
-        control.disabled = saving
-      }
       save.textContent = t(count === 0 ? 'filaBrain.stageFields' : count === 1 ? 'filaBrain.stageOne' : 'filaBrain.stageMany', { count })
     }
   }
@@ -330,6 +386,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         if (field in unit) clearMeasurementChoices(field, control)
       }
     }
+    refreshSpoolProfiles?.()
     updateSave()
     chat.saveSelection(selected())
   })
@@ -371,9 +428,13 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     return row
   }
 
-  function renderSpoolProfiles(proposal: ResearchProposal, fields: Fields) {
+  function renderSpoolProfiles(proposal: ResearchProposal, fields: Fields, selection: Unit[]) {
     if (!Array.isArray(proposal.spool_profiles)) return
+    const pickerHost = document.createElement('div')
     const measurements = document.createElement('div')
+    let previousWeight: number | null | undefined
+    let previousKey: string | undefined
+    const lookupKey = proposal.spool_lookup_key ?? spoolLookupKey(fields, lastSku)
     function show(profile?: SpoolProfile, fromClick = false) {
       for (const control of measurements.querySelectorAll<HTMLInputElement>('input')) choices.delete(control)
       measurements.replaceChildren()
@@ -396,18 +457,35 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         chat.saveSelection(selected())
       }
     }
-    const picker = spoolProfileCards(proposal.spool_profiles, proposal.spool_profile_id, profile => show(profile, true))
-    if (!picker) return
-    show(proposal.spool_profiles.find(profile => profile.id === proposal.spool_profile_id))
-    results.append(picker, measurements)
+    function refresh(selection: Unit[]) {
+      const accepted = spoolLookupFields(fields, selection)
+      const weight = packageWeight(accepted)
+      const key = spoolLookupKey(editor ? fields : accepted, lastSku)
+      if (weight === previousWeight && key === previousKey) return
+      const profiles = key === lookupKey
+        ? (proposal.spool_profiles || []).filter(profile => profile && matchesSpoolPackage(profile, weight))
+        : []
+      const active = profiles.find(profile => profile?.id === proposal.spool_profile_id)
+      if (previousWeight === undefined || !active) show(active)
+      proposal.spool_profile_id = active?.id
+      previousWeight = weight
+      previousKey = key
+      const picker = spoolProfileCards(profiles, active?.id, profile => show(profile, true))
+      pickerHost.replaceChildren(...(picker ? [picker] : []))
+      pickerHost.hidden = !picker
+      measurements.hidden = !picker
+    }
+    results.append(pickerHost, measurements)
+    refresh(selection)
+    refreshSpoolProfiles = () => refresh(selected())
   }
 
-  function render(proposal: ResearchProposal, context: EditorContext, action = 'fill', field = '') {
+  function render(proposal: ResearchProposal, context: EditorContext, action = 'fill', field = '', selection: Unit[] = []) {
     clearResults()
     bound = context
     boundProposal = proposal
     const fields = context.fields
-    renderSpoolProfiles(proposal, fields)
+    renderSpoolProfiles(proposal, fields, selection)
     const unitFor = (field: string, value: Value): Unit => ({ [field]: { old: fields[field] ?? null, value } })
     duplicate = proposal.issues.some(issue => issue.code === 'duplicate')
     const alternatives = new Set<string>()
@@ -563,9 +641,19 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       context.fields.manufacturer_id === bound.fields.manufacturer_id && context.fields.color_id === bound.fields.color_id &&
       JSON.stringify(product) === JSON.stringify(identity(bound.fields))
     const focusing = scope && sameContext && action === lastAction
+    const currentSelection = sameContext ? selected() : []
+    const acceptedProduct = context.mode === 'create'
+      ? currentSelection.filter(unit => Object.keys(unit).every(field => productFields.includes(field)))
+      : []
+    const acceptedProductValues = acceptedFields({}, acceptedProduct)
+    const lookupContext = acceptedProduct.length
+      ? { ...context, fields: spoolLookupFields(context.fields, acceptedProduct) }
+      : context
+    const lookupProduct = identity(lookupContext.fields)
+    const lookupHint = !product.sku && lookupProduct.sku ? '' : sku
     const actionLabel = spoolLookup ? t('filaBrain.findSpoolSpecs') : buttons[action === 'standardize' ? 1 : 0].textContent?.trim() || ''
-    const proposalTitle = [product.manufacturer, product.designation].filter(Boolean).join(' ') || productUrl || sku
-    if (!product.designation && !product.sku && !productUrl && !sku) {
+    const proposalTitle = [lookupProduct.manufacturer, lookupProduct.designation].filter(Boolean).join(' ') || productUrl || lookupHint
+    if (!lookupProduct.designation && !lookupProduct.sku && !productUrl && !lookupHint) {
       conversation.hidden = false
       notice.textContent = t('filaBrain.chatResearchStart')
       return
@@ -589,44 +677,62 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       await chat.researchTurn(prompt || label || (proposalTitle && !editor ? `${actionLabel} · ${proposalTitle}` : actionLabel), async () => {
         try {
           let proposal = await api.post<ResearchProposal>(route + '/proposals', {
-            ...proposalTarget(context),
+            ...proposalTarget(lookupContext),
             record_token: context.record_token,
             action,
             product_url: productUrl || undefined,
             reference_url: referenceUrl,
-            sku_hint: sku,
+            sku_hint: lookupHint,
             guidance: referenceUrl ? prompt.replace(/https?:\/\/[^\s<>()]+/gi, '').trim() : prompt,
-            ...(spoolLookup ? { spool_lookup: true } : action === 'fill' ? chat.model : undefined),
+            ...(spoolLookup ? {
+              spool_lookup: true,
+              spool_package_weight_g: packageWeight(acceptedFields({}, currentSelection)) ?? undefined,
+            } : action === 'fill' ? chat.model : undefined),
           })
           if (revision !== formRevision) return { reply: t('filaBrain.identityChanged') }
           const unsafeToMerge = proposal.issues.some(issue => issue.code === 'duplicate' ||
             ((issue.code === 'ambiguous_match' || issue.requires_product_choice) &&
               !previous?.issues.some(prior => JSON.stringify(prior) === JSON.stringify(issue))))
-          const keep = focusing && !unsafeToMerge && sameResolvedProduct(previous, proposal)
-          let selection = keep ? selected().filter(unit => !(scope in unit)) : spoolLookup && sameContext ? selected() : []
-          if (keep) proposal = mergeFollowUp(previous, proposal, scope)
+          if (previous && !spoolLookup && !unsafeToMerge && acceptedProduct.length) {
+            proposal = carryAcceptedProductFields(previous, proposal, acceptedProduct)
+          }
+          const keep = focusing && !unsafeToMerge && sameResolvedProduct(previous, proposal, acceptedProductValues)
+          let selection = []
+          if (keep) {
+            selection = currentSelection.filter(unit => !(scope in unit))
+            proposal = mergeFollowUp(previous, proposal, scope)
+          } else if (spoolLookup) {
+            selection = currentSelection
+          } else if (!unsafeToMerge) {
+            selection = acceptedProduct
+          }
           const profile = !keep && !spoolLookup && !unsafeToMerge && sameContext && action === 'fill' &&
             previous.spool_profiles?.find(item => item.id === previous.spool_profile_id)
-          if (profile && sameResolvedProduct(previous, proposal, {
+          const proposedWeight = proposal.suggestions.find(item => item.field === 'raw_material_weight_g')?.value
+          if (profile && matchesSpoolPackage(profile, proposedWeight) && sameResolvedProduct(previous, proposal, acceptedProductValues, {
             ...context.fields,
             manufacturer_sku: product.sku || sku,
-            raw_material_weight_g: product.weight_g ?? profile.net_weight_g ?? null,
+            raw_material_weight_g: product.weight_g ?? null,
           })) {
-            selection = keepSpoolMeasurements(selected().filter(unit => !(scope in unit)), profile, proposal)
-            proposal = { ...proposal, spool_profiles: previous.spool_profiles, spool_profile_id: profile.id }
+            selection.push(...keepSpoolMeasurements(currentSelection.filter(unit => !(scope in unit)), profile, proposal))
+            proposal = {
+              ...proposal, spool_profiles: previous.spool_profiles, spool_profile_id: profile.id,
+              spool_lookup_key: previous.spool_lookup_key,
+            }
           }
           if (spoolLookup && sameContext) proposal = {
             ...previous, spool_profiles: proposal.spool_profiles, spool_reply: proposal.spool_reply,
             spool_profile_id: previous.spool_profile_id,
             issues: [...previous.issues.filter(issue => issue.code !== 'duplicate'), ...proposal.issues],
           }
+          if (spoolLookup) proposal.spool_lookup_key = spoolLookupKey(lookupContext.fields, lookupHint)
           if (correctedUrl) {
             productInput.value = correctedUrl
             formData.set('product_url', correctedUrl)
           }
           lastProductUrl = productUrl
           lastSku = sku
-          render(proposal, context, action, keep ? scope : '')
+          render(proposal, context, action, keep ? scope : '', selection)
           restoreSelection(selection)
           lastAction = action
           return {
@@ -759,8 +865,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       lastSku = (draft.fields.sku_hint || '').trim()
       optionsSummary.hidden = false
       searchOptions.open = false
-      render(draft.proposal, context, draft.action)
-      restoreSelection(draft.selection || [])
+      const selection = draft.selection || []
+      render(draft.proposal, context, draft.action, '', selection)
+      restoreSelection(selection)
       return true
     },
     followUp(prompt) {
@@ -792,7 +899,6 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       return
     }
     const snapshot = bound
-    const units = selected()
     saving = true
     if (editor) chat.setStaging(true)
     updateSave()
@@ -803,6 +909,8 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         clearResults()
         throw new Error(t('filaBrain.identityChanged'))
       }
+      refreshSpoolProfiles?.()
+      const units = selected()
       if (editor) {
         const { staged, skipped } = await hostRequest<{ staged: string[]; skipped: string[] }>('filaman:filament-stage', { units })
         if (bound !== snapshot) return
@@ -822,9 +930,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
           + (skipped.length ? ' ' + t('filaBrain.stagedSkipped', { count: skipped.length }) : '')
         return
       }
-      const data: Fields = Object.fromEntries(draftFields.filter(field => !blank(context.fields[field]))
+      const base = Object.fromEntries(draftFields.filter(field => !blank(context.fields[field]))
         .map(field => [field, context.fields[field]]))
-      for (const unit of units) for (const [field, change] of Object.entries(unit)) data[field] = change.value
+      const data = acceptedFields(base, units)
       if (!Number(data.manufacturer_id) || !data.designation || !data.material_type || !(Number(data.diameter_mm) > 0)) {
         optionsSummary.hidden = false
         searchOptions.open = advanced.open = true

@@ -106,6 +106,82 @@ async def test_follow_up_fetches_reference_for_the_saved_product(installed, db_s
     assert filament.density_g_cm3 is None
 
 
+@pytest.mark.parametrize(("mode", "hint", "listed_sku", "url_field", "expected"), [
+    ("create", "FIX-SPOOL", "FIX-REFILL", "product_url", False),
+    ("edit", "FIX-SPOOL", "FIX-REFILL", "product_url", False),
+    ("edit", "FIX-SPOOL", "FIX-REFILL", "reference_url", False),
+    ("edit", "FIX-SPOOL", "FIX-SPOOL", "product_url", True),
+    ("create", "0001234567890", "FIX-SPOOL", None, True),
+])
+async def test_supplier_evidence_respects_explicit_sku_hint(
+    installed, db_session, monkeypatch, mode, hint, listed_sku, url_field, expected,
+):
+    from filabrain import proposals
+
+    site = "https://fixture.example"
+    product = f"{site}/fixture-pla"
+    datasheet = f"{site}/fixture-pla.pdf"
+
+    async def catalog(_identity):
+        if hint != "0001234567890":
+            return [], "", True
+        return [{
+            "name": "Fixture PLA", "manufacturer": {"name": "Fixture"}, "material": {"key": "PLA"},
+            "sku": "FIX-SPOOL", "catalog_barcode": "0001234567890", "diameter_mm": 1.75, "shop_url": product,
+        }], "https://catalog.example/fixture-pla", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    async def supplier(url, **_):
+        if url == datasheet:
+            return proposals.Evidence(
+                url, "Fixture PLA technical data sheet",
+                "Technical Data Sheet\nProduct name: Fixture PLA\nDensity 1.23 g/cm³", datasheet=True,
+            )
+        if url != product:
+            raise ValueError("Fixture has no other pages")
+        return proposals.Evidence(
+            url, "Fixture PLA",
+            f"Fixture PLA SKU: {listed_sku}. Diameter: 1.75 mm. Recommended Printing Settings Nozzle Temperature 230–250 °C. "
+            "Physical Properties Density 1.27 g/cm³",
+            product={"manufacturer": "Fixture", "designation": "Fixture PLA", "material": "PLA"}
+            | ({"sku": listed_sku} if url_field != "reference_url" else {}),
+            datasheets=(datasheet,) if not expected else (),
+        )
+
+    async def empty_sitemap(*_args):
+        return ()
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "fetch_supplier", supplier)
+    monkeypatch.setattr(proposals, "supplier_sitemap_urls", empty_sitemap)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="Fixture", url=site)
+    db_session.add(maker)
+    if mode == "edit":
+        filament = Filament(manufacturer=maker, designation="Fixture PLA", material_type="PLA", diameter_mm=1.75)
+        db_session.add(filament)
+    await db_session.commit()
+
+    target = {"filament_id": filament.id} if mode == "edit" else {
+        "identity": {"manufacturer": "Fixture", "designation": "Fixture PLA", "material": "PLA"},
+    }
+    response = await installed.post(f"{BASE}/proposals", json={
+        **target, "mode": mode, "sku_hint": hint,
+        **({url_field: product} if url_field else {}),
+    })
+    assert response.status_code == 200, response.text
+    values = {item["field"]: item for item in response.json()["suggestions"]}
+    if expected:
+        assert values["density_g_cm3"]["value"] == 1.27
+        assert values["density_g_cm3"]["sources"][0]["url"] == product
+    else:
+        assert not {"density_g_cm3", "extruder_temp_range_c", "shop_url", "datasheet_url"} & values.keys()
+
+
 @pytest.mark.parametrize(("status", "message"), [(401, "key"), (429, "rate limit"), (404, "could not find")])
 async def test_model_connection_reports_the_action_to_take(installed, monkeypatch, status, message):
     from filabrain import settings

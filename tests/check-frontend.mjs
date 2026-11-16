@@ -63,6 +63,7 @@ try {
   let chatRequests = 0
   let proposalRequests = 0
   let duplicateSpoolLookup = false
+  let supplierDefaultSku = 'FIX-123'
   let conflictingSpoolWidth = false
   let differentSpoolPackage = false
   let heldModelList
@@ -245,9 +246,24 @@ try {
         spool_profiles: [{ id: 'example-spool', title: 'Fixture Brand PLA 1 kg', source: 'OnlySpoolz',
           url: 'https://www.onlyspoolz.com/portfolio/spool-fixture/', empty_weight_g: 233,
           outer_diameter_mm: 200, width_mm: 66, hole_diameter_mm: 58, net_weight_g: 1000 },
-        { id: 'filamandb-735', title: '170g Spool', source: 'FilaManDB',
+        ...(target.identity?.sku === 'FIX-123' ? [] : [{
+          id: 'filamandb-735', title: '170g Spool', source: 'FilaManDB',
           url: 'https://db.filaman.app/api/v1/spool-profiles/735',
-          photo: '/api/v1/filamentdb/spool-profile-image?image_file=735.png', empty_weight_g: 170 }],
+          photo: '/api/v1/filamentdb/spool-profile-image?image_file=735.png', empty_weight_g: 170,
+          ...(differentSpoolPackage ? { net_weight_g: 1000 } : { package_weights_g: [] }) }]),
+        ...(differentSpoolPackage ? [{
+          id: 'filamandb-736', title: 'Shared Reel', source: 'FilaManDB',
+          url: 'https://db.filaman.app/api/v1/spool-profiles/736', empty_weight_g: 175,
+          package_weights_g: [1000, 2000],
+        }, {
+          id: 'filamandb-737', title: 'Unlisted Package Weight Reel', source: 'FilaManDB',
+          url: 'https://db.filaman.app/api/v1/spool-profiles/737', empty_weight_g: 181,
+          ...(target.spool_package_weight_g ? { package_weights_g: [] } : {}),
+        }] : []),
+        ...(target.identity?.weight_g === 1000 ? [{
+          id: 'other-package', title: 'Fixture Brand PLA 3 kg', source: 'OnlySpoolz',
+          url: 'https://www.onlyspoolz.com/portfolio/spool-fixture-3kg/', empty_weight_g: 322, net_weight_g: 3000,
+        }] : [])],
       } })
       if (target.guidance === 'Recheck this density') return route.fulfill({ json: { target, issues: [], suggestions: [
         { field: 'density_g_cm3', value: 1.27, sources: evidence },
@@ -261,9 +277,9 @@ try {
         { field: 'manufacturer_sku', value: 'FIX-REFILL', sources: [{ title: 'Refill specifications', url: refillUrl, evidence: 'FIX-REFILL' }] },
       ] } })
       if (target.product_url === rotatingVariantUrl) {
-        const refill = target.guidance === 'Check the density again'
+        const refill = !target.identity.sku && target.guidance === 'Check the density again'
         return route.fulfill({ json: { target, issues: [], suggestions: [
-          { field: 'manufacturer_sku', value: refill ? 'NEW-PACKAGE' : 'OLD-PACKAGE', sources: evidence },
+          ...(!target.identity.sku ? [{ field: 'manufacturer_sku', value: refill ? 'NEW-PACKAGE' : 'OLD-PACKAGE', sources: evidence }] : []),
           { field: 'raw_material_weight_g', value: refill ? 500 : 1000, sources: evidence },
           { field: 'density_g_cm3', value: refill ? 1.22 : 1.24, sources: evidence },
         ] } })
@@ -297,7 +313,7 @@ try {
       } })
       return route.fulfill({ json: { target, suggestions: [
         { field: 'density_g_cm3', value: 1.24, sources: evidence },
-        { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
+        ...(!target.identity?.sku ? [{ field: 'manufacturer_sku', value: supplierDefaultSku, sources: evidence }] : []),
         ...(conflictingSpoolWidth ? [{ field: 'spool_width_mm', value: 72, sources: evidence }] : []),
         ...(differentSpoolPackage ? [{ field: 'raw_material_weight_g', value: 500, sources: evidence }] : []),
         ...(!chatModelId ? [{ field: 'drying_temp_c', value: 50, sources: evidence }] : []),
@@ -1158,7 +1174,9 @@ try {
     await otherDraft.getByText('Search options', { exact: true }).click()
   }
   await otherDraft.getByLabel('FilaMan palette color').selectOption('1')
+  const swatchResearch = otherDraft.waitForRequest(req => req.url().endsWith('/proposals'))
   await otherDraft.getByRole('button', { name: 'Find specifications' }).click()
+  assert.equal((await swatchResearch).postDataJSON().palette_color_id, 1)
   await otherDraft.getByRole('checkbox', { name: /Density/ }).check()
   await otherDraft.getByRole('button', { name: 'Save new filament' }).click()
   const otherConfirm = otherDraft.getByRole('dialog').getByRole('button', { name: 'Create filament' })
@@ -1280,17 +1298,28 @@ try {
   await urlDraft.getByRole('combobox', { name: 'Follow-up field' }).selectOption('density_g_cm3')
   const urlFollowUp = urlDraft.getByRole('textbox', { name: 'Follow up on this search' })
   await urlFollowUp.fill('Check the density again')
+  const scopedReference = urlDraft.waitForResponse(response =>
+    response.url().endsWith('/proposals') && response.request().postDataJSON().guidance === 'Check the density again')
   await urlFollowUp.press('Enter')
+  assert.equal((await scopedReference).request().postDataJSON().identity.sku, 'OLD-PACKAGE')
+  await urlDraft.locator('#save-filament:enabled').waitFor()
+  assert.equal(await oldPackage.isChecked(), true, 'a follow-up keeps the accepted SKU even when the source does not repeat it')
+  const changedProduct = urlDraft.waitForResponse(response =>
+    response.url().endsWith('/proposals') && response.request().postDataJSON().product_url === refillUrl)
+  await urlFollowUp.fill(`Use the refill at ${refillUrl}`)
+  await urlFollowUp.press('Enter')
+  assert.equal((await changedProduct).request().postDataJSON().identity.sku, '')
   await urlResults.getByRole('checkbox', { name: /Density.*1\.22/ }).waitFor()
-  assert.equal(await oldPackage.count(), 0, 'a scoped follow-up cannot carry the old URL-only variant')
-  assert.equal(await urlResults.getByRole('checkbox', { name: /NEW-PACKAGE/ }).isChecked(), false)
+  assert.equal(await oldPackage.count(), 0)
+  assert.equal(await urlResults.getByRole('checkbox', { name: /FIX-REFILL/ }).isChecked(), false)
   await urlDraft.close()
 
   await page.reload()
-  await page.evaluate(() => { window.editorEdits = { spool_width_mm: 62 } })
+  await page.evaluate(() => { window.editorEdits = { spool_width_mm: 62, raw_material_weight_g: 1000 } })
   await frame.getByRole('button', { name: 'Find spool specs' }).click()
   await frame.getByText('Which spool matches yours?', { exact: true }).waitFor()
   await frame.getByRole('img', { name: 'Photo of 170g Spool' }).waitFor()
+  assert.equal(await frame.getByRole('button', { name: 'This matches: Fixture Brand PLA 3 kg' }).count(), 0)
   const styleReply = 'It is clear plastic with no slots.'
   const styleRequest = page.waitForRequest(req => req.url().endsWith('/proposals') && req.postDataJSON().guidance === styleReply)
   await followUp.fill(styleReply)
@@ -1362,8 +1391,41 @@ try {
   differentSpoolPackage = true
   await spoolDraft.locator('#research-options > summary').click()
   await spoolDraft.getByRole('button', { name: 'Find specifications' }).click()
-  await spoolDraft.getByRole('checkbox', { name: /Filament weight.*500/i }).waitFor()
+  const packageWeight = spoolDraft.getByRole('checkbox', { name: /Filament weight.*500/i })
+  await packageWeight.waitFor()
   assert.equal(await selectedSpool.count(), 0, 'specs for a different package weight require another spool choice')
+  await spoolDraft.locator('#research-options > summary').click()
+  await spoolDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  const chooseSharedReel = spoolDraft.getByRole('button', { name: 'This matches: Shared Reel' })
+  await chooseSharedReel.waitFor()
+  await spoolDraft.getByRole('button', { name: 'This matches: 170g Spool' }).click()
+  await packageWeight.check()
+  assert.equal(await spoolDraft.getByRole('button', { name: 'Selected: 170g Spool' }).count(), 0,
+    'a FilaManDB reel linked to a 1 kg listing is cleared when the draft selects 500 g')
+  assert.equal(await spoolDraft.getByRole('checkbox', { name: /Spool Weight.*170/i }).count(), 0)
+  assert.equal(await chooseSharedReel.count(), 0, 'an unlisted package cannot use a shared reel')
+  const chooseUnlistedReel = spoolDraft.getByRole('button', { name: 'This matches: Unlisted Package Weight Reel' })
+  await packageWeight.uncheck()
+  await chooseUnlistedReel.click()
+  await packageWeight.check()
+  assert.equal(await spoolDraft.getByRole('button', { name: /Unlisted Package Weight Reel/ }).count(), 0,
+    'a legacy FilaManDB card needs a fresh lookup once the package weight is known')
+  assert.equal(await spoolDraft.getByRole('checkbox', { name: /Spool Weight.*181/i }).count(), 0)
+  await spoolDraft.locator('#research-options > summary').click()
+  const weightedLookup = spoolDraft.waitForRequest(req => req.url().endsWith('/proposals') && req.postDataJSON().spool_lookup)
+  await spoolDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  assert.equal((await weightedLookup).postDataJSON().spool_package_weight_g, 500)
+  await chooseUnlistedReel.waitFor()
+  assert.equal(await chooseSpool.count(), 0)
+  await spoolDraft.getByRole('button', { name: 'Save new filament' }).click()
+  await spoolDraft.locator('#create-preview').getByText('500', { exact: true }).waitFor()
+  assert.equal(await spoolDraft.locator('#create-preview').getByText('170', { exact: true }).count(), 0)
+  await spoolDraft.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await reopenSpoolDraft()
+  await packageWeight.waitFor()
+  assert.equal(await packageWeight.isChecked(), true)
+  assert.equal(await chooseSpool.count(), 0, 'resuming the draft preserves its package filter')
+  await packageWeight.uncheck()
   differentSpoolPackage = false
   await spoolDraft.locator('#research-options > summary').click()
   await spoolDraft.getByRole('button', { name: 'Find spool specs' }).click()
@@ -1393,6 +1455,60 @@ try {
   await spoolDraft.getByText('Earlier findings', { exact: true }).last().click()
   await spoolDraft.locator('.research-history-value').filter({ hasText: '170' }).waitFor()
   await spoolDraft.close()
+
+  const skuDraft = await context.newPage()
+  skuDraft.setDefaultTimeout(5_000)
+  await skuDraft.goto(`${url}?tab=new`)
+  await skuDraft.getByLabel('Manufacturer', { exact: true }).fill('Fixture Brand')
+  await skuDraft.getByLabel('Product name', { exact: true }).fill('Fixture SKU PLA')
+  await skuDraft.locator('#research-advanced-fields summary').click()
+  await skuDraft.getByLabel('Material', { exact: true }).fill('PLA')
+  await skuDraft.getByLabel('Diameter (mm)').fill('1.75')
+  await skuDraft.getByRole('button', { name: 'Find specifications' }).click()
+  const acceptedSku = skuDraft.getByRole('checkbox', { name: /FIX-123/ })
+  await acceptedSku.waitFor()
+  await skuDraft.locator('#research-options > summary').click()
+  await skuDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  await skuDraft.getByRole('button', { name: 'This matches: 170g Spool' }).click()
+  await acceptedSku.check()
+  assert.equal(await skuDraft.getByRole('button', { name: /170g Spool/ }).count(), 0)
+  assert.equal(await skuDraft.getByRole('checkbox', { name: /Spool Weight.*170/i }).count(), 0)
+  await skuDraft.locator('#research-options > summary').click()
+  const scopedLookup = skuDraft.waitForRequest(req => req.url().endsWith('/proposals') && req.postDataJSON().spool_lookup)
+  await skuDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  assert.equal((await scopedLookup).postDataJSON().identity.sku, 'FIX-123')
+  const correctReel = skuDraft.getByRole('button', { name: 'This matches: Fixture Brand PLA 1 kg' })
+  await correctReel.click()
+  assert.equal(await skuDraft.getByRole('button', { name: /170g Spool/ }).count(), 0)
+  await skuDraft.getByRole('button', { name: 'Save new filament' }).click()
+  await skuDraft.locator('#create-preview').getByText('FIX-123', { exact: true }).waitFor()
+  await skuDraft.locator('#create-preview').getByText('233', { exact: true }).waitFor()
+  await skuDraft.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await skuDraft.reload()
+  await skuDraft.locator('.chat-header').getByText('History', { exact: true }).click()
+  await skuDraft.getByRole('button', { name: 'Find specifications · Fixture Brand Fixture SKU PLA', exact: true }).click()
+  const scopedReel = skuDraft.getByRole('button', { name: 'Selected: Fixture Brand PLA 1 kg' })
+  await scopedReel.waitFor()
+  assert.equal(await acceptedSku.isChecked(), true)
+  await skuDraft.locator('#research-options > summary').click()
+  supplierDefaultSku = 'FIX-REFILL'
+  const refreshedSpecs = skuDraft.waitForResponse(response =>
+    response.url().endsWith('/proposals') && !response.request().postDataJSON().spool_lookup)
+  await skuDraft.getByRole('button', { name: 'Find specifications' }).click()
+  assert.equal((await refreshedSpecs).request().postDataJSON().identity.sku, 'FIX-123')
+  await skuDraft.locator('#save-filament:enabled').waitFor()
+  assert.equal(await acceptedSku.isChecked(), true, 'refreshing unchanged specifications preserves the accepted SKU')
+  assert.equal(await scopedReel.count(), 1, 'refreshing unchanged specifications preserves its scoped reel')
+  assert.equal(await skuDraft.getByRole('checkbox', { name: /FIX-REFILL/ }).count(), 0)
+  await skuDraft.getByRole('button', { name: 'Save new filament' }).click()
+  await skuDraft.locator('#create-preview').getByText('FIX-123', { exact: true }).waitFor()
+  await skuDraft.locator('#create-preview').getByText('233', { exact: true }).waitFor()
+  await skuDraft.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await acceptedSku.uncheck()
+  supplierDefaultSku = 'FIX-123'
+  assert.equal(await skuDraft.getByRole('button', { name: /Fixture Brand PLA 1 kg/ }).count(), 0)
+  assert.equal(await skuDraft.getByRole('checkbox', { name: /Spool Weight.*233/i }).count(), 0)
+  await skuDraft.close()
 
   canUseFilaments = false
   await page.goto(url)

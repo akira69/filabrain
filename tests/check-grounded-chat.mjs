@@ -34,7 +34,10 @@ try {
       items: [{ id: 21, name: 'Workshop A1', is_active: true }], total: 1,
     } })
     if (pathname === '/api/v1/filaments' && searchParams.get('search') === 'PETG HF') return route.fulfill({ json: {
-      items: [{ id: 37, designation: 'PETG HF', manufacturer: { name: 'Bambu Lab' } }], total: 1,
+      items: [
+        { id: 37, designation: 'PETG HF', manufacturer: { name: 'Bambu Lab' } },
+        { id: 38, designation: 'PETG HF Red', manufacturer: { name: 'Bambu Lab' } },
+      ], total: 2,
     } })
     if (pathname === '/api/v1/filabrain/chat') {
       requests.push(request.postDataJSON())
@@ -53,6 +56,23 @@ try {
             url: 'https://theemptyspool.cc/brand/elegoo', photo: catalogPhoto, empty_weight_g: 158 },
         ],
       } })
+      const question = requests.at(-1).messages.at(-1).content
+      if (question === 'How wide is it?' && requests.at(-1).selected_spool_profile_id === 'onlyspoolz:elegoo-rapid') {
+        return route.fulfill({ json: {
+          reply: 'The newly selected spool is 56 mm wide.', action: null,
+          selected_spool_profile_id: 'onlyspoolz:elegoo-rapid',
+          spool_profiles: [{ id: 'onlyspoolz:elegoo-rapid', title: 'Elegoo Rapid PLA+', source: 'OnlySpoolz',
+            url: 'https://www.onlyspoolz.com/portfolio/spool-elegoo-rapid-pla-plus/', empty_weight_g: 156, width_mm: 56 }],
+        } })
+      }
+      if (question === 'What is the tare of the one I selected?' || question === 'How wide is it?') {
+        return route.fulfill({ json: {
+          reply: question.startsWith('What') ? 'The selected spool weighs 233 g.' : 'The selected spool is 66 mm wide.',
+          action: null, selected_spool_profile_id: 'onlyspoolz:elegoo-basic',
+          spool_profiles: [{ id: 'onlyspoolz:elegoo-basic', title: 'Elegoo PLA Basic 1 kg', source: 'OnlySpoolz',
+            url: 'https://www.onlyspoolz.com/portfolio/spool-elegoo-pla-basic/', photo, empty_weight_g: 233, width_mm: 66 }],
+        } })
+      }
       return route.fulfill({ json: {
         reply: 'This spool is suitable [spool-9]. Read the reference [source:uv].',
         action: null, search: 'failed', required_g: 80, notices: [],
@@ -128,7 +148,46 @@ try {
     page.getByRole('button', { name: 'Send' }).click(),
   ])
   assert.equal(requests.at(-1).selected_spool_profile_id, 'onlyspoolz:elegoo-basic')
+  assert.equal(requests.at(-1).spool_lookup_filament_id, 37)
+  assert.equal(requests.at(-1).filament_id, undefined)
   assert.ok(requests.at(-1).messages.every(message => Object.keys(message).length === 2))
+  await page.getByText('The selected spool weighs 233 g.', { exact: true }).waitFor()
+
+  for (let index = 0; index < 6; index++) {
+    await page.getByRole('textbox', { name: 'Your question' }).fill('How wide is it?')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await page.getByText('The selected spool is 66 mm wide.', { exact: true }).nth(index).waitFor()
+    assert.equal(requests.at(-1).selected_spool_profile_id, 'onlyspoolz:elegoo-basic')
+    assert.ok(requests.at(-1).messages.some(message => message.content === 'What does my Elegoo spool weigh empty?'))
+    assert.equal(requests.at(-1).messages.at(-2).confirmed_spool_profile_id, 'onlyspoolz:elegoo-basic')
+  }
+  await page.getByRole('button', { name: 'Selected: Elegoo PLA Basic 1 kg' }).nth(5).click()
+  await page.getByRole('button', { name: 'This matches: Elegoo PLA Basic 1 kg' }).click()
+  await page.reload()
+  await page.locator('[data-chat-history] summary').click()
+  await page.getByRole('button', { name: 'What do I have for an outdoor bracket?' }).click()
+  await page.getByRole('textbox', { name: 'Your question' }).fill('How wide is it?')
+  await page.getByRole('button', { name: 'Send' }).click()
+  await page.getByText('The selected spool is 66 mm wide.', { exact: true }).nth(6).waitFor()
+  const reselected = requests.at(-1)
+  assert.equal(reselected.messages[reselected.spool_lookup_message_index].content, 'Which spool matches yours?')
+  assert.equal(reselected.messages[reselected.spool_lookup_message_index - 1].content, 'What does my Elegoo spool weigh empty?')
+  assert.equal(reselected.spool_lookup_filament_id, 37)
+  await page.getByText('Printer and filament', { exact: true }).click()
+  await page.getByRole('searchbox', { name: 'Find a filament' }).fill('PETG HF')
+  await page.locator('[data-chat-filament]').selectOption('38')
+  await page.getByRole('button', { name: 'This matches: Elegoo Rapid PLA+' }).click()
+  for (let index = 0; index < 2; index++) {
+    await page.getByRole('textbox', { name: 'Your question' }).fill('How wide is it?')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await page.getByText('The newly selected spool is 56 mm wide.', { exact: true }).nth(index).waitFor()
+    const payload = requests.at(-1)
+    assert.equal(payload.selected_spool_profile_id, 'onlyspoolz:elegoo-rapid')
+    assert.equal(payload.spool_lookup_filament_id, 37)
+    assert.equal(payload.filament_id, 38)
+    assert.equal(payload.messages[payload.spool_lookup_message_index].content, 'Which spool matches yours?')
+    assert.ok(payload.messages.length <= 11)
+  }
   console.log('Grounded chat renders inventory, citations, search, and selectable spool matches.')
 } finally {
   await browser.close()

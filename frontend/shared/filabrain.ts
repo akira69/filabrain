@@ -38,6 +38,7 @@ export type ResearchProposal = {
   standardization_context?: Record<string, string | null>
   spool_profiles?: SpoolProfile[]
   spool_profile_id?: string
+  spool_lookup_key?: string
   spool_reply?: string
 }
 

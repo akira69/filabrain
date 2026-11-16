@@ -184,6 +184,119 @@ async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
         await engine.dispose()
 
 
+async def test_create_research_draft_rechecks_final_package_for_duplicates(installed, db_session):
+    maker = Manufacturer(name="Package Review")
+    existing = Filament(
+        manufacturer=maker, designation="Slate Gray", material_type="PLA",
+        diameter_mm=1.75, raw_material_weight_g=1000,
+    )
+    db_session.add(existing)
+    await db_session.commit()
+    manufacturer_id = maker.id
+    route = f"{BASE}/saved-filaments/package-weight-draft"
+    values = {
+        "manufacturer_id": manufacturer_id, "designation": "Slate Gray", "material_type": "PLA",
+        "diameter_mm": 1.75, "raw_material_weight_g": 1000,
+    }
+    duplicate = await installed.post(route, json=values)
+    assert duplicate.status_code == 409, duplicate.text
+    assert "matching filament" in duplicate.json()["detail"].lower()
+    await db_session.rollback()
+
+    values["raw_material_weight_g"] = 500
+    created = await installed.post(route, json=values)
+    assert created.status_code == 200, created.text
+    assert created.json()["already_saved"] is False
+    retry = await installed.post(route, json=values)
+    assert retry.json() == {"id": created.json()["id"], "already_saved": True}
+    weights = await db_session.scalars(select(Filament.raw_material_weight_g).where(
+        Filament.manufacturer_id == manufacturer_id,
+    ))
+    assert sorted(weights) == [500, 1000]
+
+
+async def test_create_research_draft_distinguishes_known_palette_colors(installed, db_session, monkeypatch):
+    from filabrain import proposals
+    from app.models import Color, FilamentColor
+
+    maker = Manufacturer(name="Fixture Palette")
+    red = Color(name="Fixture Red", hex_code="#CC3311")
+    blue = Color(name="Fixture Blue", hex_code="#2244BB")
+    existing = Filament(
+        manufacturer=maker, designation="PLA", material_type="PLA", diameter_mm=1.75, finish_type="Matte",
+    )
+    db_session.add_all([existing, red, blue])
+    await db_session.flush()
+    db_session.add(FilamentColor(filament_id=existing.id, color_id=red.id, position=1))
+    await db_session.commit()
+    manufacturer_id, red_id, blue_id = maker.id, red.id, blue.id
+    values = {
+        "manufacturer_id": manufacturer_id, "designation": "PLA", "material_type": "PLA",
+        "diameter_mm": 1.75, "finish_type": "Matte",
+    }
+
+    async def catalog(_identity):
+        return [{
+            "name": "PLA", "manufacturer": {"name": "Fixture Palette"}, "material": {"key": "PLA"},
+            "diameter_mm": 1.75, "finish_type": "Matte", "density_g_cm3": 1.24,
+        }], "https://catalog.example/pla", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    async def website(_manufacturer):
+        return None
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "manufacturer_website", website)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    request = {"mode": "create", "identity": {
+        "manufacturer": "Fixture Palette", "designation": "PLA", "material": "PLA",
+        "diameter_mm": 1.75, "finish_type": "Matte",
+    }}
+    for spool_lookup in (False, True):
+        if spool_lookup:
+            from filabrain import research
+
+            async def empty_spool_lookup(*_args, **_kwargs):
+                return {"spool_profiles": [], "reply": "No reel listed."}
+
+            monkeypatch.setattr(research, "find_spool_profiles", empty_spool_lookup)
+        for color_id, duplicate in ((red_id, True), (blue_id, False), (None, True)):
+            proposal = await installed.post(f"{BASE}/proposals", json=request | {
+                "spool_lookup": spool_lookup, "palette_color_id": color_id,
+            })
+            assert proposal.status_code == 200, proposal.text
+            result = proposal.json()
+            assert any(issue["code"] == "duplicate" for issue in result["issues"]) is duplicate, result
+            if not duplicate and not spool_lookup:
+                assert any(item["field"] == "density_g_cm3" for item in result["suggestions"]), result
+            await db_session.rollback()
+
+    same_swatch = await installed.post(f"{BASE}/saved-filaments/palette-duplicate", json={
+        **values, "colors": [{"color_id": red_id}],
+    })
+    assert same_swatch.status_code == 409, same_swatch.text
+    await db_session.rollback()
+
+    different_swatch = await installed.post(f"{BASE}/saved-filaments/palette-variant", json={
+        **values, "colors": [{"color_id": blue_id}],
+    })
+    assert different_swatch.status_code == 200, different_swatch.text
+
+    different_finish = await installed.post(f"{BASE}/saved-filaments/finish-variant", json={
+        **values, "finish_type": "Glossy", "colors": [{"color_id": red_id}],
+    })
+    assert different_finish.status_code == 200, different_finish.text
+
+    expanded_palette = await installed.post(f"{BASE}/saved-filaments/palette-expansion", json={
+        **values, "colors": [{"color_id": red_id}, {"color_id": blue_id, "position": 2}],
+    })
+    assert expanded_palette.status_code == 200, expanded_palette.text
+
+
 async def test_search_connection_checks_unsaved_url_and_reports_no_results(installed, monkeypatch):
     from filabrain import settings
 

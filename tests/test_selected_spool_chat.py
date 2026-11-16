@@ -45,3 +45,36 @@ async def test_chat_verifies_selected_spool_in_latest_lookup(
     if selected == "emptyspool-101":
         assert "couldn’t verify the selected spool" in result["reply"]
     assert "9999" not in result["reply"]
+
+
+    if follow_up == "What is the tare of the one I selected?" and expected:
+        assert result["selected_spool_profile_id"] == selected
+        response = await installed.post(f"{BASE}/chat", json={
+            "messages": [
+                *messages, {"role": "assistant", "content": first["reply"]},
+                {"role": "user", "content": follow_up},
+                {"role": "assistant", "content": result["reply"], "confirmed_spool_profile_id": selected},
+                {"role": "user", "content": "How wide is it?"},
+            ],
+            "selected_spool_profile_id": selected,
+        })
+        assert response.status_code == 200, response.text
+        answer = response.json()
+        assert [card["id"] for card in answer["spool_profiles"]] == [selected]
+        assert answer["selected_spool_profile_id"] == selected
+        assert "dimensions are unavailable" in answer["reply"]
+
+        response = await installed.post(f"{BASE}/chat", json={
+            "messages": [
+                *messages, {"role": "assistant", "content": first["reply"]},
+                {"role": "user", "content": follow_up},
+                {"role": "assistant", "content": result["reply"], "confirmed_spool_profile_id": selected},
+                {"role": "user", "content": "What is the tare of the one I selected?"},
+            ],
+            "selected_spool_profile_id": "emptyspool-263",
+            "spool_lookup_message_index": 1,
+        })
+        assert response.status_code == 200, response.text
+        answer = response.json()
+        assert answer["selected_spool_profile_id"] == "emptyspool-263"
+        assert "208 g empty" in answer["reply"]

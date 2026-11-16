@@ -11,13 +11,13 @@ import httpx
 from app.api.deps import DBSession
 from app.api.v1.schemas_filament import FilamentUpdate
 from app.core.config import settings
-from app.models import Color, Filament, Manufacturer
+from app.models import Color, Filament, FilamentColor, Manufacturer
 from app.services.extra_field_validation import normalize_numeric_range
 from app.services.filamentdb_field_mapping import standard_filamentdb_fields
 from app.utils.colors import normalize_hex_color
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, tuple_
 
 from .catalog import linked_spool_profile, lookup_filaments, manufacturer_website
 from .color_standards import RAL_NUMBER, normalize_reference, references_in_product_url
@@ -851,7 +851,15 @@ def _paramount_url_identity(page: Evidence) -> Identity | None:
     return None
 
 
+def _conflicting_supplier_sku(identity: Identity, page: Evidence) -> bool:
+    expected = _norm(identity.sku)
+    stated = _norm((page.product or {}).get("sku"))
+    return bool(expected and stated and expected != stated)
+
+
 def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[Evidence]:
+    if _conflicting_supplier_sku(identity, page):
+        return []
     product = page.product or {}
     title = product.get("designation") or re.split(r"\s*[|–]\s*", page.title, maxsplit=1)[0]
     if package := _packaged_product(identity, page, snapshot):
@@ -889,8 +897,6 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
     context = _variant_context(identity, snapshot)
     finish = _finish(identity.designation, context.get("finish_type"), identity.material)
     if brand and identity.manufacturer and _norm(brand) != _norm(identity.manufacturer):
-        return []
-    if sku and _norm(identity.sku) and _norm(sku) != _norm(identity.sku):
         return []
     exact_official_sku = page.manufacturer_page and bool(sku and _norm(sku) == _norm(identity.sku))
     exact_title = _tokens(title) == _tokens(identity.designation) or (
@@ -1146,17 +1152,18 @@ def catalog_values(item: dict) -> dict:
     return values
 
 
-async def duplicate_ids(db: DBSession, identity: Identity) -> list[int]:
+async def duplicate_ids(
+    db: DBSession, identity: Identity, *, palette: list[tuple[int, int]] | None = None, sku_hint: str = "",
+) -> list[int]:
+    sku = (identity.sku.strip() or sku_hint.strip()).lower()
     terms = []
-    if identity.sku:
-        terms.append(
-            func.lower(Filament.manufacturer_sku) == identity.sku.strip().lower()
-        )
+    if sku:
+        terms.append(func.lower(Filament.manufacturer_sku) == sku)
     if identity.designation:
         name_match = (
             func.lower(Filament.designation) == identity.designation.strip().lower()
         )
-        if identity.sku:
+        if sku:
             name_match = name_match & or_(
                 Filament.manufacturer_sku.is_(None), Filament.manufacturer_sku == ""
             )
@@ -1170,6 +1177,9 @@ async def duplicate_ids(db: DBSession, identity: Identity) -> list[int]:
         )
     for value, column in (
         (identity.material, func.lower(Filament.material_type)),
+        (identity.material_subgroup, func.lower(Filament.material_subgroup)),
+        (identity.finish_type, func.lower(Filament.finish_type)),
+        (identity.color_mode, func.lower(Filament.color_mode)),
         (identity.color, func.lower(Filament.manufacturer_color_name)),
         (identity.diameter_mm, Filament.diameter_mm),
         (identity.weight_g, Filament.raw_material_weight_g),
@@ -1182,6 +1192,15 @@ async def duplicate_ids(db: DBSession, identity: Identity) -> list[int]:
                     == (value.strip().lower() if isinstance(value, str) else value),
                 )
             )
+    if palette:
+        swatch = tuple_(FilamentColor.position, FilamentColor.color_id)
+        swatch_count = select(func.count()).select_from(FilamentColor).where(
+            FilamentColor.filament_id == Filament.id,
+        ).correlate(Filament).scalar_subquery()
+        query = query.where(
+            swatch_count.in_((0, len(palette))),
+            ~Filament.filament_colors.any(swatch.not_in(palette)),
+        )
     return list(await db.scalars(query.order_by(Filament.id).limit(5)))
 
 
@@ -1420,14 +1439,15 @@ def _exact_product_page_specs(page: Evidence, titles: set[str]) -> list[dict]:
 async def research_products(
     db: DBSession, identity: Identity, *, product_url=None, reference_url=None, sku_hint="", snapshot=None,
     guidance="", release_read=False, model_id: str | None = None, endpoint_id: str | None = None,
-    deadline: float | None = None,
+    deadline: float | None = None, palette: list[tuple[int, int]] | None = None,
 ) -> dict:
     proposal = {"suggestions": [], "issues": []}
     issues = proposal["issues"]
     guidance = guidance.strip()
-    if snapshot is None and not (identity.sku.strip() or identity.designation.strip()) and sku_hint.strip():
-        identity = identity.model_copy(update={"sku": sku_hint.strip()})
-    if snapshot is None and (duplicates := await duplicate_ids(db, identity)):
+    sku_hint = sku_hint.strip()
+    if snapshot is None and not (identity.sku.strip() or identity.designation.strip()) and sku_hint:
+        identity = identity.model_copy(update={"sku": sku_hint})
+    if snapshot is None and (duplicates := await duplicate_ids(db, identity, palette=palette, sku_hint=sku_hint)):
         issues.extend({"code": "duplicate", "filament_id": ident} for ident in duplicates)
         return proposal
     _, config = await config_record(db)
@@ -1503,7 +1523,7 @@ async def research_products(
             primary_fields.add(field)
 
     async def add_draft_identity(candidate: Identity, cite, *, include_color=True):
-        if duplicates := await duplicate_ids(db, candidate):
+        if duplicates := await duplicate_ids(db, candidate, palette=palette, sku_hint=sku_hint):
             issues.extend(
                 {"code": "duplicate", "filament_id": ident} for ident in duplicates
             )
@@ -1724,14 +1744,15 @@ async def research_products(
         else:
             evidence.extend(_supplier_scopes(identity, pasted_page))
     imported_sku = _imported_article_hint(snapshot)
-    lookup_sku = identity.sku.strip() or sku_hint.strip() or imported_sku
+    lookup_sku = identity.sku.strip() or sku_hint or imported_sku
+    supplier_identity = identity.model_copy(update={"sku": sku_hint}) if sku_hint and not identity.sku.strip() else identity
     initial_query = search_terms(lookup_sku)
     early_web = not search_domain and bool(identity.manufacturer and initial_query)
     web_urls = []
     def official_match():
         return any(
             page and not (page.manual or page.datasheet) and _on_manufacturer_site(page.url, manufacturer_domain)
-            and _supplier_scopes(identity, replace(page, manufacturer_page=True), snapshot)
+            and _supplier_scopes(supplier_identity, replace(page, manufacturer_page=True), snapshot)
             for page in first_pages.values()
         )
 
@@ -1772,18 +1793,24 @@ async def research_products(
 
     async def check_datasheets(pages):
         linked = []
+        expected_sku = _norm(supplier_identity.sku)
         for page in pages.values():
-            if not page or not _on_manufacturer_site(page.url, document_domain):
+            if (not page or not _on_manufacturer_site(page.url, document_domain)
+                    or _conflicting_supplier_sku(supplier_identity, page)):
                 continue
-            if _sheet_matches(page, titles, identity, snapshot):
+            if _sheet_matches(page, titles, supplier_identity, snapshot):
                 authoritative_docs[page.url] = replace(page, manufacturer_page=True)
+            if expected_sku and page.datasheets:
+                visible_skus = {_norm(sku) for text in page.scopes or (page.text,) for sku in _LABELLED_SKU.findall(text)}
+                if visible_skus and expected_sku not in visible_skus:
+                    continue
             linked.extend(link for url in page.datasheets if (link := public_link(url)))
         links = list(dict.fromkeys(linked))[:3]
         await check_pages(links)
         for link in links:
             sheet = checked_pages[link]
             linked_sheets[link] = sheet
-            if sheet and _sheet_matches(sheet, titles, identity, snapshot):
+            if sheet and _sheet_matches(sheet, titles, supplier_identity, snapshot):
                 authoritative_docs[sheet.url] = replace(sheet, manufacturer_page=True)
 
     await check_datasheets(first_pages)
@@ -2006,11 +2033,9 @@ async def research_products(
                 }
                 if issue not in issues:
                     issues.append(issue)
-            if (not sku_hint or _norm(sku_hint) == _norm(variant.sku)) and (
-                source_url := public_link(row.get("shop_url"))
-            ):
+            if source_url := public_link(row.get("shop_url")):
                 catalog_urls.append(source_url)
-    supplier_query = search_terms(identity.sku.strip() or variant_sku or sku_hint.strip() or imported_sku)
+    supplier_query = search_terms(identity.sku.strip() or variant_sku or sku_hint or imported_sku)
     if release_read and db.in_transaction():
         await db.rollback()
     if not early_web:
@@ -2026,8 +2051,7 @@ async def research_products(
         if link := public_link(url):
             different_sites.setdefault(_site_host(link), supplier_page_url(link))
 
-    supplier_identity = identity
-    if snapshot is not None and variant_sku and not _norm(identity.sku):
+    if variant_sku and not _norm(identity.sku) and (snapshot is not None or sku_hint):
         proven = next(candidate for candidate in candidates if _norm(candidate.sku) == variant_sku)
         supplier_identity = identity.model_copy(update={
             "sku": proven.sku,
@@ -2254,8 +2278,8 @@ async def research_products(
     if not any(
         page and _on_manufacturer_site(page.url, manufacturer_domain)
         and (
-            _supplier_scopes(identity, replace(page, manufacturer_page=True), snapshot)
-            or _bundle_temperatures(identity, page, snapshot)
+            _supplier_scopes(supplier_identity, replace(page, manufacturer_page=True), snapshot)
+            or _bundle_temperatures(supplier_identity, page, snapshot)
         )
         for page in pages.values()
     ):
@@ -2279,9 +2303,9 @@ async def research_products(
                     pages[archived.url] = archived
                     if official:
                         archived_official_urls.add(archived.url)
-                        if _sheet_matches(archived, titles, identity, snapshot):
+                        if _sheet_matches(archived, titles, supplier_identity, snapshot):
                             authoritative_docs[archived.url] = archived
-                    if archived.url in authoritative_docs or _supplier_scopes(identity, archived, snapshot):
+                    if archived.url in authoritative_docs or _supplier_scopes(supplier_identity, archived, snapshot):
                         break
         except TimeoutError:
             pass
@@ -2354,9 +2378,9 @@ async def research_products(
         owner_titles.add(qualified_title)
     expected_color = _norm(supplier_identity.color)
     for page, title, scopes in official_scopes:
-        stated_sku = (page.product or {}).get("sku")
-        if supplier_identity.sku and stated_sku and _norm(supplier_identity.sku) != _norm(stated_sku):
+        if _conflicting_supplier_sku(supplier_identity, page):
             continue
+        stated_sku = (page.product or {}).get("sku")
         if (
             page.product_spec_tables and not (unresolved_variants or page.selected_variant_unresolved)
             and any(not scope.shared for scope in scopes)
@@ -2557,7 +2581,7 @@ async def research_products(
                 if field in suggestions and field not in conflict
             }
         )
-        if duplicates := await duplicate_ids(db, resolved):
+        if duplicates := await duplicate_ids(db, resolved, palette=palette, sku_hint=sku_hint):
             issues.extend(
                 {"code": "duplicate", "filament_id": ident} for ident in duplicates
             )

@@ -3,7 +3,7 @@ import { getLang, t } from './i18n'
 export type SpoolProfile = {
   id: string; title: string; source: string; url: string; photo?: string
   empty_weight_g?: number; outer_diameter_mm?: number; width_mm?: number
-  hole_diameter_mm?: number; net_weight_g?: number
+  hole_diameter_mm?: number; net_weight_g?: number; package_weights_g?: number[]
 }
 
 const spoolMeasures = [
@@ -79,12 +79,15 @@ export function spoolProfileCards(
     heading.textContent = profile.title
     const measures = document.createElement('dl')
     for (const [key, label, unit] of spoolMeasures) {
-      const value = profile[key]
-      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue
+      const values = key === 'net_weight_g' && Array.isArray(profile.package_weights_g)
+        ? profile.package_weights_g : [profile[key]]
+      const formatted = values.flatMap(value => typeof value === 'number' && Number.isFinite(value) && value > 0
+        ? [`${number.format(value)} ${unit}`] : [])
+      if (!formatted.length) continue
       const term = document.createElement('dt')
       term.textContent = t(`filaBrain.${label}`)
       const detail = document.createElement('dd')
-      detail.textContent = `${number.format(value)} ${unit}`
+      detail.textContent = formatted.join(', ')
       measures.append(term, detail)
     }
     const button = document.createElement('button')
