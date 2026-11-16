@@ -12,7 +12,7 @@ from app.core.event_bus import event_bus
 from app.models import Filament, FilamentColor, InstalledPlugin, Manufacturer
 from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field, StrictBool, StringConstraints
+from pydantic import BaseModel, Field, StrictBool, StringConstraints, ValidationError
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -31,6 +31,7 @@ from .proposals import (
     identity_matches,
     manufacturer_site_url,
     research_products,
+    snapshot_identity,
 )
 from .settings import (
     EndpointId,
@@ -62,6 +63,7 @@ CHAT_PAGES = {
 PAGE_MARKER = re.compile(r"(?m)^\[\[open:([a-z_]+)(?:\|([^\]\r\n]{1,255}))?\]\][ \t]*$")
 SELECTED_SPOOL = re.compile(r"\b(?:my|this|(?:the\s+)?selected)\s+(?:spool|reel|bobbin|filament)\b", re.I)
 SELECTED_SPOOL_WORDS = LOOKUP_WORDS | {"chose", "chosen", "its", "picked", "selected"}
+SpoolProfileId = Annotated[str, StringConstraints(min_length=1, max_length=256)]
 RecordToken = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
 DraftId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9-]+$")]
 
@@ -70,6 +72,7 @@ class ProposalRequest(BaseModel):
     mode: Literal["create", "edit"]
     filament_id: Annotated[int, Field(gt=0)] | None = None
     identity: Identity | None = None
+    palette_color_id: Annotated[int, Field(gt=0, le=2_147_483_647, strict=True)] | None = None
     record_token: RecordToken | None = None
     product_url: Annotated[str, Field(max_length=2048)] | None = None
     reference_url: Annotated[str, Field(max_length=2048)] | None = None
@@ -77,12 +80,14 @@ class ProposalRequest(BaseModel):
     guidance: Annotated[str, Field(max_length=400)] = ""
     action: Literal["fill", "standardize"] = "fill"
     spool_lookup: StrictBool = False
+    spool_package_weight_g: Annotated[float, Field(ge=1, le=50_000)] | None = None
     model_id: ModelId | None = None
     endpoint_id: EndpointId | None = None
 
 
 class ChatMessage(BaseModel):
     role: Literal["user", "assistant"]
+    confirmed_spool_profile_id: SpoolProfileId | None = None
     content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=8000)]
 
 
@@ -95,7 +100,9 @@ class ManufacturerWebsite(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: Annotated[list[ChatMessage], Field(min_length=1, max_length=11)]
-    selected_spool_profile_id: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
+    selected_spool_profile_id: SpoolProfileId | None = None
+    spool_lookup_message_index: Annotated[int, Field(ge=1, le=9, strict=True)] | None = None
+    spool_lookup_filament_id: Annotated[int, Field(gt=0, le=2_147_483_647, strict=True)] | None = None
     model_id: ModelId | None = None
     endpoint_id: EndpointId | None = None
     filament_id: Annotated[int, Field(gt=0, le=2_147_483_647)] | None = None
@@ -161,6 +168,12 @@ async def research_status(db: DBSession, principal: PrincipalDep):
     }
 
 
+def selected_spool_intent(question: str) -> str | None:
+    if set(re.findall(r"\w+", question.lower())) <= SELECTED_SPOOL_WORDS:
+        return spool_intent(question + " spool")
+    return None
+
+
 @router.post("/chat")
 async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDep):
     if not await is_enabled(db):
@@ -179,20 +192,30 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         for index, message in enumerate(data.messages)
     ):
         raise HTTPException(422, "Expected a conversation ending in a user question")
+    lookup_index = data.spool_lookup_message_index
+    if lookup_index is not None and (lookup_index >= len(data.messages) - 1 or lookup_index % 2 == 0):
+        raise HTTPException(422, "The spool selection must reference an assistant message")
     _, config = await config_record(db)
     if not data.endpoint_id and not (config["model_url"] and config["model_id"]):
         raise HTTPException(503, "Configure a model in FilaBrain settings")
     question = data.messages[-1].content
     if not NAVIGATION.search(question):
-        selected_intent = None
+        selected_id = data.selected_spool_profile_id
+        selected_intent = selected_spool_intent(question) if selected_id and len(data.messages) >= 3 else None
         lookup_messages = data.messages
-        if data.selected_spool_profile_id and len(data.messages) >= 3 and (
-            set(re.findall(r"\w+", question.lower())) <= SELECTED_SPOOL_WORDS
-        ):
-            selected_intent = spool_intent(question + " spool")
-            if selected_intent:
-                lookup_messages = data.messages[:-2]
-                question = lookup_messages[-1].content
+        filament_id = data.filament_id
+        if selected_intent:
+            if "spool_lookup_filament_id" in data.model_fields_set:
+                filament_id = data.spool_lookup_filament_id
+            lookup_end = lookup_index if lookup_index is not None else len(data.messages) - 2
+            while (
+                lookup_end >= 3
+                and data.messages[lookup_end].confirmed_spool_profile_id == selected_id
+                and selected_spool_intent(data.messages[lookup_end - 1].content)
+            ):
+                lookup_end -= 2
+            lookup_messages = data.messages[:lookup_end]
+            question = lookup_messages[-1].content
         intent = spool_intent(question)
         refinements = []
         for previous in (-3, -5):
@@ -208,13 +231,13 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
             profile_id = None
             package_weight_g = None
             search_identity = {}
-            if data.filament_id is not None:
-                filament = await db.get(Filament, data.filament_id, options=(selectinload(Filament.manufacturer),))
+            if filament_id is not None:
+                filament = await db.get(Filament, filament_id, options=(selectinload(Filament.manufacturer),))
                 if filament and linked_spool_question(question, filament):
                     saved = filament_identity(filament)
                     search_identity = {
                         "manufacturer_name": saved.manufacturer, "product_name": saved.designation,
-                        "material_name": saved.material,
+                        "material_name": saved.material, "sku": saved.sku,
                     }
                     question = f"{saved.manufacturer} {saved.designation} {question}"
                     if not PACKAGE_WEIGHT.search(refinement):
@@ -227,14 +250,14 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
             if not selected_intent:
                 return result
             for profile in result["spool_profiles"]:
-                if profile["id"] == data.selected_spool_profile_id:
-                    return spool_profile_result(profile, selected_intent)
+                if profile["id"] == selected_id:
+                    return {**spool_profile_result(profile, selected_intent), "selected_spool_profile_id": selected_id}
         if selected_intent:
             return {"reply": "I couldn’t verify the selected spool for this question.", "action": None}
     context = await collect_context(
         db, data.messages[-1].content, permissions, filament_id=data.filament_id,
         printer_id=data.printer_id, nozzle_mm=data.nozzle_mm, web_search=data.web_search,
-        previous_question=data.messages[-3].content if len(data.messages) >= 3 else "",
+        previous_questions=[message.content for message in reversed(data.messages[:-1:2])],
     )
     await db.rollback()
     if context and "ambiguous_weight" in context.notices:
@@ -255,7 +278,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
             "with the supplied name. The marker gives the user a link to open the page. "
             "Leave out the marker for ordinary questions."
         )},
-        *(message.model_dump() for message in data.messages),
+        *({"role": message.role, "content": message.content} for message in data.messages),
     ]
     try:
         async with asyncio.timeout(50):
@@ -372,20 +395,22 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
         ):
             raise HTTPException(422, "Enter a product name, SKU or URL")
 
-    if data.sku_hint.strip() and identity.sku.strip() and (
-        identity.sku.strip().casefold() != data.sku_hint.strip().casefold()
-    ):
+    sku_hint = data.sku_hint.strip()
+    sku = identity.sku.strip()
+    if sku_hint and sku and sku.casefold() != sku_hint.casefold():
         raise HTTPException(409, "The SKU differs from the filament in the editor")
+    palette = [(1, data.palette_color_id)] if data.palette_color_id is not None else None
     target = {"mode": data.mode, "filament_id": data.filament_id, "identity": identity}
     if data.spool_lookup:
         if data.action != "fill" or not identity.designation.strip():
             raise HTTPException(422, "Enter the filament product name before looking up spool designs")
         issues = []
+        package_weight = identity.weight_g or data.spool_package_weight_g
         if filament is None:
-            duplicate_identity = identity.model_copy(update={"sku": identity.sku.strip() or data.sku_hint.strip()})
+            duplicate_identity = identity.model_copy(update={"weight_g": package_weight})
             issues = [
                 {"code": "duplicate", "filament_id": duplicate_id}
-                for duplicate_id in await duplicate_ids(db, duplicate_identity)
+                for duplicate_id in await duplicate_ids(db, duplicate_identity, palette=palette, sku_hint=sku_hint)
             ]
         profile_id = getattr(filament, "filamentdb_spool_profile_id", None)
         await db.rollback()
@@ -393,9 +418,10 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
         if not lookup or STYLE_CUES.search(data.guidance):
             candidates = await find_spool_profiles(
                 f"{identity.manufacturer} {identity.designation}", "visual",
-                style_hint=data.guidance, package_weight_g=identity.weight_g,
+                style_hint=data.guidance, package_weight_g=package_weight,
                 manufacturer_name=identity.manufacturer, product_name=identity.designation,
-                material_name=identity.material, compare_linked=bool(lookup),
+                material_name=identity.material, sku=sku or sku_hint, strict_package=True,
+                linked_profile_id=lookup["spool_profiles"][0]["id"] if lookup else None,
             )
             if not lookup:
                 lookup = candidates
@@ -414,8 +440,9 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
         return {
             "target": target,
             **await research_products(
-                db, identity, product_url=data.product_url, reference_url=data.reference_url, sku_hint=data.sku_hint,
-                guidance=data.guidance, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
+                db, identity, product_url=data.product_url, reference_url=data.reference_url, sku_hint=sku_hint,
+                palette=palette, guidance=data.guidance, model_id=data.model_id, endpoint_id=data.endpoint_id,
+                deadline=deadline,
                 release_read=deadline is not None,
             ),
         }
@@ -482,6 +509,13 @@ async def save_research_filament(draft_id: DraftId, data: FilamentCreate, db: DB
     if manufacturer is None:
         raise HTTPException(404, "Manufacturer not found")
     values = data.model_dump(exclude={"colors"})
+    try:
+        identity = snapshot_identity({**values, "manufacturer_name": manufacturer.name})
+    except ValidationError as exc:
+        raise HTTPException(422, "The filament identity contains an invalid value.") from exc
+    palette = [(color.position, color.color_id) for color in data.colors or ()]
+    if await duplicate_ids(db, identity, palette=palette):
+        raise HTTPException(409, "A matching filament already exists. Review this draft before saving.")
     for field, default in (
         ("default_spool_weight_g", manufacturer.empty_spool_weight_g),
         ("spool_outer_diameter_mm", manufacturer.spool_outer_diameter_mm),

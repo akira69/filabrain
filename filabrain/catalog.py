@@ -154,7 +154,7 @@ async def linked_spool_card(profile_id: int | None) -> dict | None:
 
 
 async def search_spool_cards(
-    search: str, manufacturer: str, product: str, material: str, sizes: set[float],
+    search: str, manufacturer: str, product: str, material: str, sizes: set[float], *, sku: str = "",
 ) -> list[tuple[dict, str, str]]:
     path = FILAMANDB_SPOOL_PATH
     if not search or upstream._api_url(path) != FILAMANDB_API_URL + path:
@@ -167,12 +167,18 @@ async def search_spool_cards(
         except (TimeoutError, HTTPException, httpx.HTTPError, AttributeError, KeyError, TypeError, ValueError):
             return []
 
-    direct = items(upstream.search_spool_profiles(None, search=search, page=1, page_size=50))
-    filaments, profiles = await asyncio.gather(
-        items(lookup_filaments(product, manufacturer_name=manufacturer)), direct,
-    ) if manufacturer and product else ([], await direct)
+    sku = sku.strip()
+    lookups = [items(upstream.search_spool_profiles(None, search=search, page=1, page_size=50))]
+    if manufacturer and product:
+        if sku and sku.casefold() != product.strip().casefold():
+            lookups.append(items(lookup_filaments(sku, manufacturer_name=manufacturer)))
+        lookups.append(items(lookup_filaments(product, manufacturer_name=manufacturer)))
+    profiles, *filament_pages = await asyncio.gather(*lookups)
 
     cards = {}
+    package_weights = {}
+    mismatched_profile_ids = set()
+    sku = sku.casefold()
     low, high = LIMITS["raw_material_weight_g"]
 
     def add(profile, label="", net_weight_g=None):
@@ -181,15 +187,16 @@ async def search_spool_cards(
         ):
             return
         style = profile.get("spool_material")
-        if type(net_weight_g) in (int, float) and low <= net_weight_g <= high and net_weight_g in sizes:
+        if type(net_weight_g) in (int, float) and low <= net_weight_g <= high:
             card["net_weight_g"] = net_weight_g
+            package_weights.setdefault(card["id"], set()).add(net_weight_g)
         existing = cards.get(card["id"])
         if not existing or ("net_weight_g" in card and "net_weight_g" not in existing[0]):
             cards[card["id"]] = (card, label, style[:200] if isinstance(style, str) else "")
 
     product_words = set(_words(product).split())
     material_words = set(_words(material).split())
-    for item in filaments:
+    for item in (item for page in filament_pages for item in page):
         maker = item.get("manufacturer")
         name = maker.get("name") if isinstance(maker, dict) else item.get("manufacturer_name")
         if not isinstance(name, str) or _words(name).replace(" ", "") != _words(manufacturer).replace(" ", ""):
@@ -204,14 +211,32 @@ async def search_spool_cards(
         profile_id = item.get("spool_profile_id")
         if not isinstance(profile, dict) or type(profile_id) is not int or profile.get("id") != profile_id:
             continue
-        weight = item.get("nominal_weight_g")
-        if sizes and type(weight) in (int, float) and weight > 0 and weight not in sizes:
+        catalog_sku = item.get("sku")
+        if sku and isinstance(catalog_sku, str) and catalog_sku.strip() and catalog_sku.strip().casefold() != sku:
+            mismatched_profile_ids.add(profile_id)
             continue
-        add(profile, f"{manufacturer} {label}", weight)
+        add(profile, f"{manufacturer} {label}", item.get("nominal_weight_g"))
 
     for profile in profiles:
-        add(profile)
-    return list(cards.values())
+        profile_id = profile.get("id")
+        # The generic reel listing cannot restore a known SKU conflict.
+        if type(profile_id) is int and profile_id not in mismatched_profile_ids:
+            add(profile)
+
+    matches = []
+    for card, label, style in cards.values():
+        weights = package_weights.get(card["id"])
+        if weights:
+            if sizes and weights.isdisjoint(sizes):
+                continue
+            if len(weights) == 1:
+                card.pop("package_weights_g", None)
+                card["net_weight_g"] = next(iter(weights))
+            else:
+                card.pop("net_weight_g", None)
+                card["package_weights_g"] = sorted(weights)
+        matches.append((card, label, style))
+    return matches
 
 
 def _spool_card(profile: dict) -> dict | None:
@@ -236,6 +261,8 @@ def _spool_card(profile: dict) -> dict | None:
         value = profile.get(key)
         if type(value) in (int, float) and low <= value <= high:
             card[key] = value
+    if "net_weight_g" not in card:
+        card["package_weights_g"] = []
 
     try:
         image_file = normalize_spool_image_file(profile.get("image_file"))

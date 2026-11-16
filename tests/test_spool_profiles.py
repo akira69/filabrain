@@ -378,6 +378,141 @@ async def test_filamandb_uses_the_spool_linked_to_a_matching_filament(
     assert card["photo"] == "/api/v1/filamentdb/spool-profile-image?image_file=735.png"
 
 
+@pytest.mark.parametrize(("weights", "package_evidence", "matching_weight"), [
+    ((1000, 1000), {"net_weight_g": 1000}, 1000),
+    ((1000, 500), {"package_weights_g": [500, 1000]}, 500),
+    ((None, 0), {"package_weights_g": []}, 500),
+])
+async def test_filamandb_preserves_the_package_weights_associated_with_a_reel(
+    installed, catalog_requests, monkeypatch, weights, package_evidence, matching_weight,
+):
+    profile = {"id": 735, "name": "eSUN PLA Spool", "empty_weight_g": 170}
+
+    async def lookup(path, params):
+        if path == "/manufacturers":
+            return {"items": [{"id": 276, "name": "eSUN"}]}
+        if path == "/filaments":
+            return {"items": [{
+                "designation": "Cold White", "manufacturer": {"name": "eSUN"}, "material": {"name": "PLA"},
+                "nominal_weight_g": weight, "spool_profile_id": 735, "spool_profile": profile,
+            } for weight in weights]}
+        assert path == "/spool-profiles"
+        return {"items": [profile]}
+
+    monkeypatch.setattr(filamentdb_proxy, "_proxy_get", lookup)
+    request = {"mode": "create", "spool_lookup": True, "identity": {
+        "manufacturer": "eSUN", "designation": "Cold White", "material": "PLA",
+    }}
+    for selected_weight in (None, matching_weight):
+        response = await installed.post(f"{BASE}/proposals", json=request | {"spool_package_weight_g": selected_weight})
+        assert response.status_code == 200, response.text
+        card, = response.json()["spool_profiles"]
+        assert card["id"] == "filamandb-735"
+        assert {key: card[key] for key in ("net_weight_g", "package_weights_g") if key in card} == package_evidence
+
+    response = await installed.post(f"{BASE}/proposals", json=request | {"spool_package_weight_g": 250})
+    assert response.status_code == 200, response.text
+    assert [card["id"] for card in response.json()["spool_profiles"]] == (
+        ["filamandb-735"] if package_evidence == {"package_weights_g": []} else []
+    )
+
+
+@pytest.mark.parametrize("source", ["empty", "only"])
+@pytest.mark.parametrize(("advertised", "expected"), [
+    ("3000 g", []), ("3,000 g", []), ("3 000 g", []), ("3 kg", []), ("1,000 g", [1000]),
+])
+async def test_catalog_weight_formats_respect_the_filament_package(
+    installed, catalog_requests, monkeypatch, source, advertised, expected,
+):
+    empty = empty_row(133, "/brand/fixture", "Fixture Special PLA", 322, net=advertised)
+    only = only_card(
+        "spool-fixture-pla", "Fixture Special PLA",
+        ["Empty spool weight: 322 g", f"Advertised filament weight: {advertised}"],
+        "/img/portfolio/spool_fixture_plastic.webp",
+    )
+    monkeypatch.setitem(PAGES, ("theemptyspool.cc", "/"), empty if source == "empty" else "")
+    monkeypatch.setitem(PAGES, ("www.onlyspoolz.com", "/portfolio/"), only if source == "only" else "")
+    result = await installed.post(f"{BASE}/proposals", json={
+        "mode": "create", "spool_lookup": True,
+        "identity": {"manufacturer": "Fixture", "designation": "Special PLA", "material": "PLA", "weight_g": 1000},
+    })
+    assert result.status_code == 200, result.text
+    assert [card.get("net_weight_g") for card in result.json()["spool_profiles"]] == expected
+
+
+async def test_explicit_sku_drives_catalog_search(monkeypatch):
+    from filabrain import catalog
+
+    seen = []
+    profile = {"id": 1, "name": "eSUN Cold White PLA Spool", "empty_weight_g": 322}
+    matching = dict(manufacturer={"name": "eSUN"}, designation="Cold White", material={"name": "PLA"},
+                    nominal_weight_g=1000, sku="FIX-SPOOL", spool_profile_id=1, spool_profile=profile)
+    alternate = dict(matching, sku="FIX-REFILL")
+
+    async def find_filaments(search, **kwargs):
+        seen.append(search)
+        if search == "FIX-SPOOL":
+            return {"items": [matching], "total": 1}
+        return {"items": [alternate] * 20, "total": 21}
+
+    async def find_profiles(*args, **kwargs):
+        return {"items": []}
+
+    monkeypatch.setattr(catalog, "lookup_filaments", find_filaments)
+    monkeypatch.setattr(catalog.upstream, "search_spool_profiles", find_profiles)
+    matches = await catalog.search_spool_cards("esun cold white", "eSUN", "Cold White", "PLA", {1000}, sku="FIX-SPOOL")
+    assert [card["id"] for card, _, _ in matches] == ["filamandb-1"], seen
+
+
+@pytest.mark.parametrize("mode", ["create-hint", "edit", "chat"])
+@pytest.mark.parametrize(("catalog_sku", "expected"), [
+    (" fix-spool ", ["filamandb-735"]), ("FIX-REFILL", []), (None, ["filamandb-735"]),
+])
+async def test_spool_lookup_filters_known_conflicting_skus(
+    installed, db_session, catalog_requests, monkeypatch, mode, catalog_sku, expected,
+):
+    profile = {"id": 735, "name": "eSUN Cold White PLA Spool", "image_file": "735.png", "empty_weight_g": 322}
+
+    async def catalog(path, params=None):
+        if path == "/manufacturers":
+            return {"items": [{"id": 276, "name": "eSUN"}], "total": 1}
+        if path == "/filaments":
+            return {"items": [{
+                "manufacturer": {"name": "eSUN"}, "designation": "Cold White", "material": {"name": "PLA"},
+                "nominal_weight_g": 1000, "sku": catalog_sku, "spool_profile_id": 735, "spool_profile": profile,
+            }], "total": 1}
+        assert path == "/spool-profiles"
+        return {"items": [profile], "total": 1}
+
+    monkeypatch.setattr(filamentdb_proxy, "_proxy_get", catalog)
+    if mode == "create-hint":
+        result = await installed.post(f"{BASE}/proposals", json={
+            "mode": "create", "spool_lookup": True, "sku_hint": "FIX-SPOOL",
+            "identity": {"manufacturer": "eSUN", "designation": "Cold White", "material": "PLA", "weight_g": 1000},
+        })
+    else:
+        filament = Filament(manufacturer=Manufacturer(name="eSUN"), designation="Cold White",
+                            material_type="PLA", diameter_mm=1.75, raw_material_weight_g=1000,
+                            manufacturer_sku="FIX-SPOOL")
+        db_session.add(filament)
+        await db_session.commit()
+        filament_id = filament.id
+        if mode == "edit":
+            result = await installed.post(f"{BASE}/proposals", json={
+                "mode": "edit", "filament_id": filament_id, "spool_lookup": True,
+            })
+        else:
+            assert (await installed.put(f"{BASE}/settings", json={
+                "model_url": "http://model.test", "model_id": "example",
+            })).is_success
+            result = await installed.post(f"{BASE}/chat", json={
+                "filament_id": filament_id,
+                "messages": [{"role": "user", "content": "What does my spool look like?"}],
+            })
+    assert result.status_code == 200, result.text
+    assert [card["id"] for card in result.json()["spool_profiles"]] == expected
+
+
 async def test_edit_proposal_checks_the_record_before_reading_public_catalogs(installed, db_session, catalog_requests):
     filament = Filament(manufacturer=Manufacturer(name="Paramount 3D"), designation="PLA", material_type="PLA",
                         diameter_mm=1.75, raw_material_weight_g=1000, manufacturer_sku="PM-PLA")
@@ -464,3 +599,53 @@ async def test_identification_question_accepts_a_manufacturer_label(chat, label)
     first = await ask(question)
     result = await ask(label, prior=(question, first["reply"]))
     assert {card["empty_weight_g"] for card in result["spool_profiles"]} == {208, 232}
+
+
+@pytest.mark.parametrize("hint,is_duplicate", [("FIX-REFILL", False), ("FIX-SPOOL", True)])
+async def test_sku_hint_agrees_between_research_spool_lookup_and_save(
+    installed, db_session, catalog_requests, monkeypatch, hint, is_duplicate,
+):
+    from filabrain import proposals
+
+    async def catalog(_identity):
+        return [{
+            "name": "Cold White", "manufacturer": {"name": "eSUN"}, "material": {"key": "PLA"},
+            "sku": hint, "diameter_mm": 1.75, "nominal_weight_g": 1000, "density_g_cm3": 1.24,
+        }], "https://catalog.example/pla", True
+
+    async def ofd(_manufacturer):
+        return [], ""
+
+    async def no_website(_manufacturer):
+        return None
+
+    monkeypatch.setattr(proposals, "catalog_candidates", catalog)
+    monkeypatch.setattr(proposals, "ofd_candidates", ofd)
+    monkeypatch.setattr(proposals, "manufacturer_website", no_website)
+    monkeypatch.delenv("FILABRAIN_MODEL_URL", raising=False)
+    monkeypatch.delenv("FILABRAIN_SEARCH_URL", raising=False)
+    maker = Manufacturer(name="eSUN")
+    db_session.add(Filament(
+        manufacturer=maker, designation="Cold White", material_type="PLA", diameter_mm=1.75,
+        manufacturer_sku="FIX-SPOOL", raw_material_weight_g=1000,
+    ))
+    await db_session.commit()
+    manufacturer_id = maker.id
+    request = {"mode": "create", "sku_hint": hint, "identity": {
+        "manufacturer": "eSUN", "designation": "Cold White", "material": "PLA", "diameter_mm": 1.75,
+    }}
+    spool = await installed.post(f"{BASE}/proposals", json=request | {"spool_lookup": True})
+    assert spool.status_code == 200, spool.text
+    assert any(issue["code"] == "duplicate" for issue in spool.json()["issues"]) is is_duplicate
+    await db_session.rollback()
+
+    specs = await installed.post(f"{BASE}/proposals", json=request)
+    assert specs.status_code == 200, specs.text
+    await db_session.rollback()
+
+    saved = await installed.post(f"{BASE}/saved-filaments/review-hint", json={
+        "manufacturer_id": manufacturer_id, "designation": "Cold White", "material_type": "PLA",
+        "diameter_mm": 1.75, "raw_material_weight_g": 1000, "manufacturer_sku": hint,
+    })
+    assert saved.status_code == (409 if is_duplicate else 200), saved.text
+    assert any(issue["code"] == "duplicate" for issue in specs.json()["issues"]) is is_duplicate, specs.text

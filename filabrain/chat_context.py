@@ -248,17 +248,26 @@ def _canonical_printer(text: str, *, saved: bool = False) -> str:
     return {"X1C": "X1 Carbon", "X1 CARBON": "X1 Carbon", "A1 MINI": "A1 Mini"}.get(model, model)
 
 
+def _weight_only(question: str) -> bool:
+    weight = re.sub(
+        r"^(?:(?:sorry|actually),?\s+)?(?:i\s+(?:(?:meant|mean)\s+)?)?",
+        "", question.rstrip(" .!?"), flags=re.I,
+    )
+    return bool(WEIGHT.fullmatch(weight))
+
+
 async def collect_context(
     db: DBSession, question: str, permissions: set[str], *,
     filament_id: int | None = None, printer_id: int | None = None,
-    nozzle_mm: float | None = None, web_search: bool = False, previous_question: str = "",
+    nozzle_mm: float | None = None, web_search: bool = False, previous_questions: list[str] | None = None,
 ) -> ChatContext | None:
     if not web_search and NAVIGATION.search(question):
         return None
     inventory_question = question if INVENTORY.search(question) else ""
-    weight_only = WEIGHT.fullmatch(re.sub(r"^i\s+", "", question.rstrip(" .!?"), flags=re.I))
-    if not inventory_question and weight_only and INVENTORY.search(previous_question):
-        inventory_question = previous_question
+    if not inventory_question and _weight_only(question):
+        previous_question = next((text for text in previous_questions or () if not _weight_only(text)), "")
+        if INVENTORY.search(previous_question):
+            inventory_question = previous_question
     inventory = bool(inventory_question)
     settings = bool(SETTINGS.search(question))
     lookup = bool(LOOKUP.search(question))

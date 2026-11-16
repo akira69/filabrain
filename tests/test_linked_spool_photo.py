@@ -65,6 +65,7 @@ async def test_edit_uses_only_the_exact_linked_profile(
         "empty_weight_g": 170,
         "outer_diameter_mm": 200,
         "width_mm": 68,
+        "package_weights_g": [],
         **({"photo": "/api/v1/filamentdb/spool-profile-image?image_file=735.png"} if image_file == "735.png" else {}),
     }
     saved = await db_session.scalar(select(Filament).where(Filament.id == filament_id))
@@ -144,6 +145,53 @@ async def test_chat_uses_the_linked_profile_for_questions_about_the_selected_fil
         assert catalog_requests == []
     else:
         assert result["spool_profiles"]
+        assert len(catalog_requests) == 2
+
+
+@pytest.mark.parametrize(("follow_up", "current_filament", "linked"), [
+    ("How wide is it?", False, True),
+    ("How wide is it?", True, True),
+    ("What is the tare of the Paramount 3D PLA spool?", True, False),
+])
+async def test_selected_spool_replay_uses_its_lookup_filament(
+    installed, db_session, catalog_requests, linked_profile, filament, follow_up, current_filament, linked,
+):
+    other = Filament(
+        manufacturer=Manufacturer(name="Elegoo"), designation="PETG", material_type="PETG",
+        diameter_mm=1.75, raw_material_weight_g=1000,
+    )
+    db_session.add_all([filament, other])
+    await db_session.commit()
+    filament_id, other_id = filament.id, other.id
+    config = {"model_url": "http://model.test", "model_id": "example"}
+    assert (await installed.put(f"{BASE}/settings", json=config)).status_code == 200
+    question = {"role": "user", "content": "What does my spool look like?"}
+    first = await installed.post(f"{BASE}/chat", json={"filament_id": filament_id, "messages": [question]})
+    assert first.status_code == 200
+    card, = first.json()["spool_profiles"]
+    assert (card["id"], card["width_mm"]) == ("filamandb-735", 68)
+
+    linked_profile["width_mm"] = 70
+    db_session.expunge_all()
+    response = await installed.post(f"{BASE}/chat", json={
+        "filament_id": other_id if current_filament else None,
+        "spool_lookup_filament_id": filament_id,
+        "spool_lookup_message_index": 1,
+        "selected_spool_profile_id": card["id"],
+        "messages": [question, {"role": "assistant", "content": first.json()["reply"]},
+                     {"role": "user", "content": follow_up}],
+    })
+    assert response.status_code == 200, response.text
+    result = response.json()
+    if linked:
+        assert result.get("selected_spool_profile_id") == card["id"]
+        verified, = result["spool_profiles"]
+        assert verified["width_mm"] == 70
+        assert catalog_requests == []
+    else:
+        assert "selected_spool_profile_id" not in result
+        assert result["spool_profiles"]
+        assert all(profile["id"] != card["id"] for profile in result["spool_profiles"])
         assert len(catalog_requests) == 2
 
 
@@ -241,3 +289,66 @@ async def test_chat_accepts_style_after_weight_clarification(installed, catalog_
     assert third.status_code == 200, third.text
     assert [card["empty_weight_g"] for card in third.json().get("spool_profiles", [])] == [232]
     assert "232 g empty" in third.json()["reply"]
+
+
+async def test_edit_compares_distinct_filamandb_alternatives(
+    installed, db_session, filament, linked_profile, catalog_requests, monkeypatch,
+):
+    db_session.add(filament)
+    await db_session.commit()
+    profiles = [{**linked_profile, "spool_material": "Cardboard"}, {
+        "id": 999, "name": "Cardboard Spool", "spool_material": "Cardboard",
+        "image_file": "999.png", "empty_weight_g": 232,
+    }]
+
+    async def catalog(path, params=None):
+        if path == "/spool-profiles/735":
+            return profiles[0]
+        if path == "/manufacturers":
+            return {"items": [{"id": 618, "name": "Paramount 3D"}], "total": 1}
+        if path == "/filaments":
+            return {"items": [{
+                "manufacturer": {"name": "Paramount 3D"}, "designation": "PLA",
+                "material": {"name": "PLA"}, "nominal_weight_g": 1000,
+                "spool_profile_id": profile["id"], "spool_profile": profile,
+            } for profile in profiles], "total": 2}
+        return {"items": [], "total": 0}
+
+    monkeypatch.setattr(filamentdb_proxy, "_proxy_get", catalog)
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "edit", "filament_id": filament.id, "spool_lookup": True, "guidance": "It is cardboard.",
+    })
+    assert response.status_code == 200, response.text
+    assert [card["id"] for card in response.json()["spool_profiles"]] == ["filamandb-735", "filamandb-999"]
+
+
+@pytest.mark.parametrize("stored_weight", [1000, None])
+async def test_edit_excludes_known_incompatible_package(
+    installed, db_session, filament, linked_profile, monkeypatch, stored_weight,
+):
+    from filabrain import spool_profiles
+
+    filament.filamentdb_spool_profile_id = None
+    filament.designation = "Special PLA"
+    filament.raw_material_weight_g = stored_weight
+    db_session.add(filament)
+    await db_session.commit()
+
+    async def catalog(url):
+        if url != spool_profiles.CATALOGS[0]:
+            return []
+        common = {"source": "The Empty Spool", "url": "https://theemptyspool.cc/brand/paramount-3d"}
+        return [
+            ({**common, "id": "3-kg", "title": "Paramount 3D Special PLA",
+              "net_weight_g": 3000, "empty_weight_g": 322}, "", "plastic"),
+            ({**common, "id": "1-kg", "title": "Paramount 3D PLA",
+              "net_weight_g": 1000, "empty_weight_g": 150}, "", "plastic"),
+        ]
+
+    monkeypatch.setattr(spool_profiles, "_catalog", catalog)
+    response = await installed.post(f"{BASE}/proposals", json={
+        "mode": "edit", "filament_id": filament.id, "spool_lookup": True,
+        "spool_package_weight_g": 1000,
+    })
+    assert response.status_code == 200, response.text
+    assert [card["id"] for card in response.json()["spool_profiles"]] == ["1-kg"]
