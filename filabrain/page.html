@@ -1197,8 +1197,12 @@ main:has([data-tab="new"][aria-current]) .message-composer:has(textarea:disabled
     <details data-guide-settings open>
       <summary>Model providers</summary>
       <dl>
-        <dt><a href="https://docs.ollama.com/api/openai-compatibility" target="_blank" rel="noopener noreferrer">Ollama setup</a></dt>
-        <dd><code>http://&lt;ollama-host&gt;:11434/v1</code><br>Use an address the FilaMan server can reach and a model already installed on Ollama. Local Ollama typically uses no key.</dd>
+        <dt><a href="https://docs.ollama.com/quickstart" target="_blank" rel="noopener noreferrer">Ollama setup</a></dt>
+        <dd>
+          <p>Install and start Ollama on the computer running the model. Start with <code>ollama pull qwen3:4b-instruct</code>.</p>
+          <p>In FilaBrain, enter <code>http://&lt;ollama-host&gt;:11434/v1</code> using an address reachable from FilaMan, including from inside its container if applicable. Leave the API key blank for a standard local Ollama server. For a separate machine, use a private network and configure Ollama to listen on it. <a href="https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network" target="_blank" rel="noopener noreferrer">Ollama network setup</a></p>
+          <p>Load models, pick the model you downloaded, test the connection, and save. Try asking which filament suits an outdoor bracket. Use <strong>Sources and inventory</strong> to check exact weights, settings, and compatibility. The built-in references are available without SearXNG.</p>
+        </dd>
         <dt><a href="https://developers.openai.com/api/reference/overview" target="_blank" rel="noopener noreferrer">OpenAI API setup</a></dt>
         <dd><code>https://api.openai.com/v1</code><br>Use an OpenAI project API key and a text model that supports Chat Completions.</dd>
         <dt><a href="https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk" target="_blank" rel="noopener noreferrer">Claude compatibility setup</a></dt>

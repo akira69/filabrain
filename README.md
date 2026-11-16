@@ -45,6 +45,18 @@ A product page can supply color codes from its text or URL. A related listing ca
 
 Open **Model & MCP settings** and use **Add endpoint** for each model server. Give it a name, enter its URL and API key if required, then load models or enter a model ID manually. Use **Models shown in chat** to choose which models appear under that endpoint in the chat picker. Save your changes after testing the connection. **Make default** sets the endpoint and model that new conversations and background research batches use.
 
+### Run Ollama locally
+
+Install and start Ollama, then download the tested starting model on the Ollama machine.
+
+```sh
+ollama pull qwen3:4b-instruct
+```
+
+In FilaBrain's **Model & MCP settings**, add an endpoint with a URL such as `http://ollama:11434/v1` on a shared Docker network or `http://<ollama-host>:11434/v1` on a private LAN. Use the address reachable by the FilaMan server. Leave the API key blank for a standard local Ollama server. Select **Load models**, pick your model, then use **Test connection** and **Save**. [Ollama installation](https://docs.ollama.com/quickstart) · [Ollama network setup](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network)
+
+Try a materials question in Chat and inspect **Sources and inventory**. Small local models can use the bundled references for offline questions. Use the sourced cards for exact specifications and review research suggestions before saving them.
+
 ## Optional SearXNG search
 
 Attach the search container to the Docker network used by FilaMan and enter `http://searxng:8080` as the search URL in the plugin.
@@ -92,5 +104,7 @@ Run the 25-product benchmark against the stock host. The report records wrong va
 ```sh
 python scripts/research_benchmark.py /path/to/filaman-system
 ```
+
+[Small-model evaluation and team guidance](docs/local-model-evaluation.md)
 
 [MIT license](LICENSE.md)
