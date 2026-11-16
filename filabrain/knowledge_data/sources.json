@@ -1,0 +1,27 @@
+{
+  "ofd": {
+    "license": "MIT",
+    "repo": "https://github.com/OpenFilamentCollective/open-filament-database",
+    "revision": "60be55d3448c615c4938b949435b1b1c904668b4",
+    "revision_date": "2026-11-16",
+    "title": "Open Filament Database",
+    "url": "https://api.openfilamentdatabase.org/"
+  },
+  "polymaker": {
+    "license": "MIT",
+    "repo": "https://github.com/Polymaker3D/Polymaker-Preset",
+    "revision": "25d423c506ad3cfad5a27e12a7f36d9e992454da",
+    "revision_date": "2026-11-13",
+    "title": "Polymaker Presets",
+    "url": "https://github.com/Polymaker3D/Polymaker-Preset"
+  },
+  "spoolman": {
+    "license": "MIT",
+    "repo": "https://github.com/Donkie/SpoolmanDB",
+    "revision": "bbdc012ba9270d545f2be0f3e66603640d60d800",
+    "revision_date": "2026-11-15",
+    "sha256": "379bda12092d47b8edb869f0a1ac085a03c2624f5b5178e4efb1c45d1574d085",
+    "title": "SpoolmanDB",
+    "url": "https://donkie.github.io/SpoolmanDB/filaments.json"
+  }
+}

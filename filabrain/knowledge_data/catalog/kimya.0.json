@@ -1,0 +1,3 @@
+[
+{"bed_temperature_max_c":90,"bed_temperature_min_c":70,"color":"S White","color_hex":"#FFFFFF","density_g_cm3":1.27,"diameter_mm":1.75,"maker":"Kimya","material":"PETG","net_weight_g":1000,"nozzle_temperature_max_c":250,"nozzle_temperature_min_c":220,"product":"PETG","product_id":"3406d68f-6bc3-4215-8162-419e3a5382f0","source_id":"ofd:eeb8b2f5-c61f-40ad-b814-503f2eb818fc","source_path":"data/kimya/PETG/petg/s_white/sizes.json","variant":"S White","variant_id":"1c1ebdee-9ae6-4d45-996b-a8d947a17d36"}
+]

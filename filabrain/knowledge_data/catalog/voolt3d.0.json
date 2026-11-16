@@ -1,0 +1,7 @@
+[
+{"bed_temperature_c":70,"color_hex":"686868","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"Voolt3D","material":"PLA","net_weight_g":1000.0,"nozzle_temperature_c":215,"package_material":"plastic","product":"Alumínio Silk","source_id":"spoolman:voolt3d_pla_alumniosilk_1000_175_p","spool_weight_g":187},
+{"bed_temperature_c":70,"color_hex":"ca9400","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"Voolt3D","material":"PLA","net_weight_g":1000.0,"nozzle_temperature_c":215,"package_material":"plastic","product":"Dourado Silk","source_id":"spoolman:voolt3d_pla_douradosilk_1000_175_p","spool_weight_g":187},
+{"bed_temperature_c":70,"color_hex":"a45608","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"Voolt3D","material":"PLA","net_weight_g":1000.0,"nozzle_temperature_c":215,"package_material":"plastic","product":"Marrom Caramelo","source_id":"spoolman:voolt3d_pla_marromcaramelo_1000_175_p","spool_weight_g":187},
+{"bed_temperature_c":70,"color_hex":"FFFFFF","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"Voolt3D","material":"PLA","net_weight_g":1000.0,"nozzle_temperature_c":215,"package_material":"plastic","product":"Preto Velvet","source_id":"spoolman:voolt3d_pla_pretovelvet_1000_175_p","spool_weight_g":187},
+{"bed_temperature_c":70,"color_hex":"2b6935","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"Voolt3D","material":"PLA","net_weight_g":1000.0,"nozzle_temperature_c":215,"package_material":"plastic","product":"Verde Oliva Velvet","source_id":"spoolman:voolt3d_pla_verdeolivavelvet_1000_175_p","spool_weight_g":187}
+]

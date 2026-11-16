@@ -1,0 +1,3 @@
+[
+{"bed_temperature_max_c":65,"bed_temperature_min_c":50,"color":"White","color_hex":"#FFFFFF","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"Nexaforge","material":"PLA","net_weight_g":1000,"nozzle_temperature_max_c":220,"nozzle_temperature_min_c":190,"packaging":"spool","product":"PLA Basic","product_id":"41a3a1ff-19de-4f27-af7e-bb1a6c3cec4e","source_id":"ofd:d6faf21f-3c5c-4072-8f52-59a9e478d672","source_path":"data/nexaforge/PLA/pla_basic/white/sizes.json","variant":"White","variant_id":"0f5c2fa5-922a-468f-8ed4-0d786fe94331"}
+]

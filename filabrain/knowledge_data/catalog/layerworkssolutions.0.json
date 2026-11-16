@@ -1,0 +1,3 @@
+[
+{"bed_temperature_max_c":65,"bed_temperature_min_c":20,"color":"Black","color_hex":"#000000","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"LayerWorks Solutions","material":"PLA","net_weight_g":1000,"nozzle_temperature_max_c":220,"nozzle_temperature_min_c":200,"packaging":"spool","product":"LayerWorks WORKS series","product_id":"1475acc0-618e-46d3-8b67-3357cb9a14eb","source_id":"ofd:ad7e0678-773a-4a9e-a0dc-237ac097c9e1","source_path":"data/layerworks_solutions/PLA/layerworks_works_series/black/sizes.json","variant":"Black","variant_id":"2f041af0-18bf-428a-88da-57c328a8c4e1"}
+]

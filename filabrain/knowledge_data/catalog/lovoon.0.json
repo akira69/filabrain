@@ -1,0 +1,4 @@
+[
+{"color":"Red-Yellow-Blue","color_hex":["#FF0000","#FFF700","#2B00FF"],"density_g_cm3":1.24,"diameter_mm":1.75,"maker":"LOVOON","material":"PLA","net_weight_g":1000,"nozzle_temperature_max_c":220,"nozzle_temperature_min_c":190,"packaging":"spool","product":"Silk Magic Color","product_id":"d42a3628-1e26-4011-a051-892ad09b5796","source_id":"ofd:dbf51b15-28aa-4f67-8ca9-851011482fb9","source_path":"data/lovoon/PLA/silk_magic_color/red_yellow_blue/sizes.json","variant":"Red-Yellow-Blue","variant_id":"ba49d825-5c25-4f1b-8a06-f94e1191d929"},
+{"color_hex":"FF0000","density_g_cm3":1.24,"diameter_mm":1.75,"maker":"LOVOON","material":"PLA","net_weight_g":1000,"nozzle_temperature_max_c":220,"nozzle_temperature_min_c":190,"product":"Silk Magic Color Red-Yellow-Blue","source_id":"spoolman:lovoon_pla_silkmagiccolorred-yellow-blue_1000_175_n","spool_weight_g":200}
+]
