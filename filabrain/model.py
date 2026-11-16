@@ -210,7 +210,8 @@ async def request_extraction(
         "Use the user's guidance to prioritize fields and sources while keeping the exact identity and citation requirements. "
         'Return one JSON object with a "suggestions" array. Use exactly the keys '
         '"field", "value", "source", and "quote" in each entry. "source" is the integer evidence ID. '
-        '"quote" is a verbatim excerpt from that source containing the specification label and its value. '
+        '"quote" is the shortest verbatim excerpt containing the specification label and value. '
+        "Return only fields that have values in matching evidence. Omit missing fields. "
         "Extract the manufacturer page first. Extract each matching source independently, including when values agree. "
         f"Allowed fields: {', '.join(FIELDS)}. Numeric values use grams, °C, mm, hours and g/cm³. "
         "Ranges have {min,max}, with null for an unspecified endpoint. "
@@ -224,17 +225,19 @@ async def request_extraction(
             {"identity": identity, "guidance": guidance, "evidence": evidence},
             ensure_ascii=False,
         )},
-    ])
+    ], timeout=45, max_tokens=2400)
     if content.strip().startswith("```"):
         content = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", content, flags=re.IGNORECASE)
     result = json.loads(content)
+    if isinstance(result, list):
+        result = {"suggestions": result}
     if not isinstance(result, dict) or not isinstance(result.get("suggestions"), list):
         raise TypeError("Model did not return a suggestions array")
     return extract_proposal(result, sources)
 
 
 async def request_completion(
-    base_url: str, model: str, key: str, messages: list[dict[str, str]], *, timeout: float = 15,
+    base_url: str, model: str, key: str, messages: list[dict[str, str]], *, timeout: float = 15, max_tokens: int = 1500,
 ) -> str:
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     token_limit = "max_completion_tokens" if urlsplit(base_url).hostname == "api.openai.com" else "max_tokens"
@@ -247,7 +250,7 @@ async def request_completion(
             json={
                 "model": model,
                 "messages": messages,
-                token_limit: 1500,
+                token_limit: max_tokens,
             },
         ) as response,
     ):

@@ -681,6 +681,23 @@ async def search_web(origin: str, query: str) -> list[str]:
     return urls
 
 
+def search_connection_problem(error: Exception) -> str:
+    if isinstance(error, SearchEnginesUnavailable):
+        return "SearXNG's upstream search engines did not respond. Check the enabled engines."
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        if status == 403:
+            return "SearXNG rejected the JSON search request. Enable JSON output in the server settings."
+        if status == 429:
+            return "SearXNG hit a rate limit. Check its request limits and retry later."
+        return f"SearXNG returned HTTP {status}. Check the server URL and search endpoint."
+    if isinstance(error, (httpx.TimeoutException, TimeoutError)):
+        return "SearXNG took too long to respond. Check that its server and search engines are running."
+    if isinstance(error, httpx.RequestError):
+        return "Could not reach SearXNG. Check its URL and that the server is running."
+    return "SearXNG returned an invalid result. Check that the URL is correct and JSON output is enabled."
+
+
 async def ofd_candidates(manufacturer: str) -> tuple[list[dict], str]:
     if not manufacturer:
         return [], ""

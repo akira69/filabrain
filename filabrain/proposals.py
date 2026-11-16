@@ -21,13 +21,14 @@ from sqlalchemy import func, or_, select
 
 from .catalog import linked_spool_profile, lookup_filaments, manufacturer_website
 from .color_standards import RAL_NUMBER, normalize_reference, references_in_product_url
+from .knowledge import lookup_catalog, lookup_published_specs
 from .model import (
     LIMITS,
     SPEC_LABELS,
     extract_proposal,
     request_extraction,
 )
-from .settings import check_model_catalog, config_record, model_key, select_model
+from .settings import check_model_catalog, config_record, model_connection_problem, model_key, select_model
 from .sources import (
     SHARED_SPEC,
     SUPPLIER_TOO_LARGE,
@@ -38,6 +39,7 @@ from .sources import (
     ofd_candidates,
     paramount_product_urls,
     public_link,
+    search_connection_problem,
     search_web,
     supplier_page_url,
     supplier_sitemap_urls,
@@ -404,6 +406,59 @@ def _catalog_color_mode(item):
     )
 
 
+def bundled_catalog_candidates(identity: Identity, *, sku_hint="", package=None) -> dict[str, list[dict]]:
+    if not identity.manufacturer:
+        return {}
+    queries = dict.fromkeys(filter(None, (
+        identity.sku or sku_hint,
+        " ".join(filter(None, (identity.designation, identity.color))),
+        identity.designation,
+    )))
+    grouped: dict[str, list[dict]] = {}
+    seen = set()
+    for query in queries:
+        for row in lookup_catalog(identity.manufacturer, query, limit=200):
+            row_id = row["source_id"]
+            if row_id in seen or package and row.get("packaging") != package:
+                continue
+            seen.add(row_id)
+            colors = row.get("color_hexes") or []
+            swatch = row.get("color_hex") or (colors[0] if len(colors) == 1 else None)
+            title = row["product"]
+            if package and (suffix := re.search(
+                r"\s+(refill|spoolless|without (?:a )?spool|with (?:a )?spool|on spool|spooled)$", identity.designation, re.I,
+            )):
+                title += suffix[0]
+            verified_spool = row.get("package_verified") and row.get("packaging") == "spool"
+            grouped.setdefault(row["source"], []).append({
+                "id": row_id,
+                "name": title,
+                "manufacturer": {"name": row["maker"]},
+                "material": {"key": row["material"]},
+                "manufacturer_color_name": row.get("color") or row.get("variant"),
+                "color_hex": swatch,
+                "color_mode": "multi" if len(colors) > 1 else "single",
+                "diameter_mm": row.get("diameter_mm"),
+                "nominal_weight_g": row.get("net_weight_g"),
+                "empty_spool_weight_g": row.get("spool_weight_g") if verified_spool else None,
+                "spool_material": row.get("package_material") if verified_spool else None,
+                "density_g_cm3": row.get("density_g_cm3"),
+                "sku": row.get("manufacturer_sku"),
+                "shop_url": row.get("product_url"),
+                "datasheet_url": row.get("datasheet_url"),
+                "dry_temp": row.get("drying_temperature_c"),
+                "dry_time_hours": row.get("drying_hours"),
+                "temp_nozzle_min": row.get("nozzle_temperature_min_c"),
+                "temp_nozzle_max": row.get("nozzle_temperature_max_c"),
+                "temp_bed_min": row.get("bed_temperature_min_c"),
+                "temp_bed_max": row.get("bed_temperature_max_c"),
+                "catalog_source_url": row["url"],
+                "packaging": row.get("packaging"),
+                "catalog_barcode": row.get("barcode"),
+            })
+    return grouped
+
+
 def _catalog_variant(identity: Identity, item: dict) -> Identity:
     candidate = catalog_identity(item)
     name = _product_key(candidate.color)
@@ -527,7 +582,7 @@ _REEL_SIZE = re.compile(
     r"""\bspool\s+size\s*:\s*[\d.]+\s*(?:"|in)\s*ID\s*/\s*([\d.]+)\s*(?:"|in)\s*OD\s*/\s*([\d.]+)\s*(?:"|in)\s*(?:depth|width)\b""",
     re.IGNORECASE,
 )
-_LABELLED_SKU = re.compile(r"\b(?:sku|article number)\s*[:#]\s*([\w.+-]+)", re.IGNORECASE)
+_LABELLED_SKU = re.compile(r"\b(?:sku|article number)\s*[:#]\s*([\w.+-]+(?<!\.))", re.IGNORECASE)
 _COLOR_CODES = (
     ("RAL", re.compile(rf"RAL(?: Colou?r)?\s*:?\s*({RAL_NUMBER})(?:\s+(.{{1,90}}))?", re.IGNORECASE)),
     ("Pantone", re.compile(
@@ -853,12 +908,12 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
         universal = bool(SHARED_SPEC.search(text))
         if page.selected_variant_unresolved and not universal:
             continue
-        row_sku = _literal_in(identity.sku, text)
-        labelled_skus = _LABELLED_SKU.findall(text)
+        labelled_skus = {_norm(found) for found in _LABELLED_SKU.findall(text)}
+        row_sku = _norm(identity.sku) in labelled_skus or _literal_in(identity.sku, text)
         if universal and labelled_skus:
             continue
         if _norm(identity.sku) and (
-            any(_norm(found) != _norm(identity.sku) for found in labelled_skus)
+            labelled_skus - {_norm(identity.sku)}
             or not (row_sku or universal)
         ):
             continue
@@ -1300,8 +1355,45 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
     return extract_proposal({"suggestions": entries}, [page])
 
 
+PRINT_TEMPERATURE_RANGE = re.compile(
+    r"\b(?P<part>nozzle|bed|build plate) temperature\s*:?\s*(?P<low>\d{2,3})"
+    r"\s*(?:[-–—~]|to)\s*(?P<high>\d{2,3})\s*(?:[°˚]\s*C|℃)",
+    re.IGNORECASE,
+)
+
+
+def _print_temperature_entries(text, *, labeled_rows=False):
+    for match in PRINT_TEMPERATURE_RANGE.finditer(text):
+        if labeled_rows and not re.search(r"(?:^|[\n.;|])\s*$", text[:match.start()]):
+            continue
+        yield {
+            "field": "extruder_temp_range_c" if match["part"].casefold() == "nozzle" else "bed_temp_range_c",
+            "value": {"min": int(match["low"]), "max": int(match["high"])},
+            "source": 1, "quote": match[0],
+        }
+
+
+def _exact_product_page_specs(page: Evidence, titles: set[str]) -> list[dict]:
+    title = (page.product or {}).get("designation") or page.title.split("|", 1)[0]
+    if page.datasheet or not urlsplit(page.url).path.strip("/") or _sheet_title(title) not in set(map(_sheet_title, titles)):
+        return []
+    entries = []
+    if section := re.search(
+        r"\brecommended printing settings\b(.{1,1000}?)(?:\bphysical properties\b|\bmechanical properties\b|$)",
+        page.text, re.IGNORECASE,
+    ):
+        entries.extend(_print_temperature_entries(section[1]))
+    if properties := re.search(r"\bphysical properties\b", page.text, re.I):
+        if density := re.search(
+            r"\bdensity\s*:?\s*(?:(?:ISO\s*1183|ASTM\s*D\s*792)(?:\s*,\s*GB/T\s*1033)?\s*)?"
+            r"(\d+\.\d+)\s*g\s*/\s*cm[³3]\b", page.text[properties.end():properties.end() + 1000], re.I,
+        ):
+            entries.append({"field": "density_g_cm3", "value": float(density[1]), "source": 1, "quote": density[0]})
+    return extract_proposal({"suggestions": entries}, [page])[0]
+
+
 async def research_products(
-    db: DBSession, identity: Identity, *, product_url=None, sku_hint="", snapshot=None,
+    db: DBSession, identity: Identity, *, product_url=None, reference_url=None, sku_hint="", snapshot=None,
     guidance="", release_read=False, model_id: str | None = None, endpoint_id: str | None = None,
     deadline: float | None = None,
 ) -> dict:
@@ -1369,7 +1461,7 @@ async def research_products(
         elif existing["value"] == value or (
             isinstance(value, str) and _norm(value) == _norm(existing["value"])
         ):
-            existing["sources"].extend(citations)
+            existing["sources"].extend(cite for cite in citations if cite not in existing["sources"])
         elif field not in primary_fields or (primary and field not in sheet_fields) or datasheet:
             conflict.add(field)
 
@@ -1476,9 +1568,8 @@ async def research_products(
                 if not isinstance(error, SearchEnginesUnavailable):
                     search_available = False
                 if search_issue is None:
-                    search_issue = {"code": "unavailable_source", "source": "Web search"}
-                    if isinstance(error, ValueError):
-                        search_issue["reason"] = str(error)
+                    search_issue = {"code": "unavailable_source", "source": "Web search",
+                                    "reason": search_connection_problem(error)}
                     issues.append(search_issue)
         return []
 
@@ -1597,6 +1688,7 @@ async def research_products(
             product_url if not resolve_pasted_url else None,
             (snapshot or {}).get("shop_url"),
             (snapshot or {}).get("datasheet_url"),
+            reference_url,
         ) if (link := public_link(url))
     ]
     first_urls = [url for url in direct_urls if _on_manufacturer_site(url, manufacturer_domain)]
@@ -1671,20 +1763,34 @@ async def research_products(
 
     await check_datasheets(first_pages)
 
+    bundled_publisher_urls: set[str] = set()
+
     def primary_source(url):
-        return url in authoritative_docs or url in archived_official_urls or _on_manufacturer_site(url, manufacturer_domain)
+        return (url in authoritative_docs or url in archived_official_urls or url in bundled_publisher_urls
+                or _on_manufacturer_site(url, manufacturer_domain))
+
+    package = None
+    if re.search(r"\b(?:refill|spoolless|without (?:a )?spool)\b", identity.designation, re.I):
+        package = "refill"
+    elif re.search(r"\b(?:with (?:a )?spool|on spool|spooled)\b", identity.designation, re.I):
+        package = "spool"
+    bundled = bundled_catalog_candidates(identity, sku_hint=sku_hint, package=package)
 
     async def from_catalog(name):
-        try:
-            async with network_time():
-                if name == "FilaManDB":
-                    items, url, complete = await catalog_candidates(identity)
-                else:
-                    items, url = await ofd_candidates(identity.manufacturer)
-                    complete = True
-        except (httpx.HTTPError, HTTPException, TimeoutError, ValueError, AttributeError, TypeError):
-            issues.append({"code": "unavailable_source", "source": name})
-            return
+        items, url, complete = [], "", True
+        if name in {"FilaManDB", "Open Filament Database"} and not (package and name == "Open Filament Database"):
+            try:
+                async with network_time():
+                    if name == "FilaManDB":
+                        items, url, complete = await catalog_candidates(identity)
+                    else:
+                        items, url = await ofd_candidates(identity.manufacturer)
+            except (httpx.HTTPError, HTTPException, TimeoutError, ValueError, AttributeError, TypeError):
+                issues.append({"code": "unavailable_source", "source": name})
+        if not items and (cached := bundled.get(name)):
+            items = cached
+            url = items[0]["catalog_source_url"]
+            name += " (bundled)"
         possible_matches[name] = _possible_catalog_matches(identity, items, url, name)
         matches = []
         for item in items:
@@ -1692,10 +1798,28 @@ async def research_products(
                 continue
             try:
                 candidate = _catalog_variant(identity, item)
+                if not identity.sku and sku_hint and _norm(sku_hint) not in {
+                    _norm(candidate.sku), _norm(item.get("catalog_barcode")),
+                }:
+                    continue
                 if same_variant(identity, candidate, snapshot, item):
                     matches.append((item, candidate))
             except (ValueError, AttributeError, TypeError):
                 continue
+        if snapshot is None and len(matches) > 1 and identity.sku:
+            first_row, first_identity = matches[0]
+            if all(candidate == first_identity for _, candidate in matches[1:]):
+                # Several records share the same labeled filament. Only carry
+                # the values common to all packages and let the user choose tare.
+                common = {
+                    key: value for key, value in first_row.items()
+                    if all(row.get(key) == value for row, _ in matches[1:])
+                }
+                common["catalog_source_url"] = first_row.get("catalog_source_url")
+                for key in ("empty_spool_weight_g", "spool_width_mm", "spool_outer_diameter_mm",
+                            "spool_material", "spool_profile", "shop_url"):
+                    common.pop(key, None)
+                matches = [(common, first_identity)]
         if matches and complete and (snapshot is not None or len(matches) == 1):
             catalog_matches.append((matches, url, name))
         elif matches or (name == "FilaManDB" and items):
@@ -1723,7 +1847,8 @@ async def research_products(
             add(field, value, [{"url": url, "title": "Linked FilamentDB spool profile", "evidence": str(value)}], primary=True)
 
     await asyncio.gather(
-        from_catalog("FilaManDB"), from_catalog("Open Filament Database"), from_linked_spool()
+        from_catalog("FilaManDB"), from_catalog("Open Filament Database"),
+        from_catalog("SpoolmanDB"), from_linked_spool(),
     )
     all_matches = [row for matches, _, _ in catalog_matches for row in matches]
     candidates = [candidate for _, candidate in all_matches]
@@ -1793,13 +1918,21 @@ async def research_products(
     for matches, url, name in catalog_matches:
         item, candidate = matches[0]
 
-        def cite(value, citation_item=item, url=url, name=name):
+        def cite(value, citation_item=item, variant=candidate, url=url, name=name):
+            url = citation_item.get("catalog_source_url") or url
             record_id = citation_item.get("id")
             source_url = (
                 f"{settings.filamentdb_url.rstrip('/')}/api/v1/filaments/{record_id}"
                 if name == "FilaManDB" and type(record_id) is int and record_id > 0 else url
             )
-            return [{"url": source_url, "title": name, "evidence": str(value)}]
+            variant_details = (
+                variant.designation, variant.color,
+                f"{variant.diameter_mm:g} mm" if variant.diameter_mm is not None else "",
+                f"{variant.weight_g:g} g" if variant.weight_g is not None else "",
+                variant.sku,
+            )
+            title = " · ".join(dict.fromkeys(filter(None, (name, *variant_details))))
+            return [{"url": source_url, "title": title, "evidence": str(value)}]
 
         if snapshot is None and not await add_draft_identity(candidate, cite):
             return proposal
@@ -1831,9 +1964,9 @@ async def research_products(
             for row, variant in matches:
                 for field, value in row_values(row, variant).items():
                     if field in shared_fields:
-                        add(field, value, cite(value, row))
+                        add(field, value, cite(value, row, variant))
                     elif field in conflict:
-                        remember(field, value, cite(value, row))
+                        remember(field, value, cite(value, row, variant))
         else:
             for field, value in row_values(item, candidate).items():
                 add(field, value, cite(value))
@@ -2134,7 +2267,8 @@ async def research_products(
             if reason == SUPPLIER_TOO_LARGE:
                 continue
             source_name = "Manufacturer page" if url in linked_sheets or _on_manufacturer_site(url, manufacturer_domain) else "Supplier page"
-            issues.append({"code": "unavailable_source", "source": source_name,
+            issues.append({"code": "supplier_rate_limited" if (reason or "").startswith("HTTP 429") else "unavailable_source",
+                           "source": source_name,
                            "url": public_link(url), "reason": reason})
             continue
         if page.url in authoritative_docs:
@@ -2187,6 +2321,27 @@ async def research_products(
         for url in dict.fromkeys([*direct_urls, *pages])
         if fetch_errors.get(url) == SUPPLIER_TOO_LARGE and url not in recovered_urls
     )
+
+    for page, title, scopes in official_scopes:
+        if not scopes:
+            continue
+        stated_sku = (page.product or {}).get("sku")
+        if supplier_identity.sku and stated_sku and _norm(supplier_identity.sku) != _norm(stated_sku):
+            continue
+        for result in _exact_product_page_specs(replace(page, title=title), _product_titles(supplier_identity)):
+            add(result["field"], result["value"], result["sources"], primary=True)
+
+    grade = " ".join(_line(identity.designation, identity.color))
+    requested_finish = _finish(identity.designation, identity.finish_type, identity.material)
+    for row in lookup_published_specs(identity.manufacturer, grade, _material_family(identity.material)):
+        published_finish = _finish(row["product"], None, row["material"])
+        if requested_finish and requested_finish != published_finish:
+            continue
+        bundled_publisher_urls.add(row["url"])
+        for field, value in row["fields"].items():
+            evidence_text = " ".join(filter(None, (row.get("evidence"), f"Reference checked {row['reviewed']}.")))
+            add(field, value, [{"url": row["url"], "title": row["title"], "evidence": evidence_text}],
+                primary=field not in primary_fields)
 
     has_published_color = False
     url_color_references = {}
@@ -2283,6 +2438,15 @@ async def research_products(
         evidence = [source for source in evidence if source.shared]
     if ambiguous_identity:
         evidence = [source for source in evidence if source.manufacturer_page]
+    for source in evidence:
+        if source.shared:
+            continue
+        entries = list(_print_temperature_entries(source.text, labeled_rows=True))
+        results, disagreements = extract_proposal({"suggestions": entries}, [source])
+        for spec in results:
+            add(spec["field"], spec["value"], spec["sources"], primary=source.manufacturer_page)
+        for issue in disagreements:
+            remember_conflict(issue, primary=source.manufacturer_page)
     evidence.sort(key=lambda source: not source.manufacturer_page)
     first_by_site = {}
     for source in evidence:
@@ -2291,7 +2455,7 @@ async def research_products(
 
     if evidence and endpoint["model_url"] and model:
         try:
-            async with network_time(22):
+            async with network_time(50):
                 await check_model_catalog(endpoint, model)
                 extracted, model_issues = await request_extraction(
                     endpoint["model_url"],
@@ -2321,7 +2485,7 @@ async def research_products(
         except HTTPException as exc:
             if exc.status_code != 502:
                 raise
-            issues.append({"code": "unavailable_source", "source": "Configured model"})
+            issues.append({"code": "unavailable_source", "source": "Configured model", "reason": str(exc.detail)})
         except (
             httpx.HTTPError,
             TimeoutError,
@@ -2330,8 +2494,9 @@ async def research_products(
             IndexError,
             TypeError,
             RuntimeError,
-        ):
-            issues.append({"code": "unavailable_source", "source": "Configured model"})
+        ) as error:
+            issues.append({"code": "unavailable_source", "source": "Configured model",
+                           "reason": model_connection_problem(error)})
 
     if snapshot is None and suggestions:
         resolved = identity.model_copy(
@@ -2405,8 +2570,8 @@ async def research_products(
     if not proposal["suggestions"]:
         issues.append({"code": "no_verified_values" if all_matches or evidence or authoritative_docs else "no_match"})
     if not all_matches or unresolved_variants or ambiguous_identity:
-        for source in ("FilaManDB", "Open Filament Database"):
-            issues.extend(possible_matches.get(source, []))
+        for matches in possible_matches.values():
+            issues.extend(matches)
         titles = {url: page.title for url, page in pages.items() if page}
         for url in dict.fromkeys(web_urls):
             if link := public_link(url):
@@ -2418,7 +2583,7 @@ async def research_products(
 
 
 async def batch_proposal(
-    db: DBSession, snapshot: dict, mode: str, *, sku_hint="", product_url=None,
+    db: DBSession, snapshot: dict, mode: str, *, sku_hint="", product_url=None, reference_url=None,
     guidance="", release_read=True, skip_complete=False, model_id: str | None = None, endpoint_id: str | None = None,
     deadline: float | None = None,
 ) -> dict:
@@ -2433,7 +2598,7 @@ async def batch_proposal(
     if _norm(identity.sku) and _norm(sku_hint) and _norm(identity.sku) != _norm(sku_hint):
         return {**result, "issues": [{"code": "needs_match", "field": "manufacturer_sku"}]}
     raw = await research_products(
-        db, identity, product_url=product_url, sku_hint=sku_hint, snapshot=snapshot,
+        db, identity, product_url=product_url, reference_url=reference_url, sku_hint=sku_hint, snapshot=snapshot,
         guidance=guidance, release_read=release_read, model_id=model_id, endpoint_id=endpoint_id, deadline=deadline,
     )
     for suggestion in raw["suggestions"]:

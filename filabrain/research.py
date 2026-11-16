@@ -12,11 +12,12 @@ from app.core.event_bus import event_bus
 from app.models import Filament, FilamentColor, InstalledPlugin, Manufacturer
 from fastapi import APIRouter, HTTPException, Path, Query
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StrictBool, StringConstraints
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from .chat_context import collect_context, lookup_live
 from .db import FilamentResearchSave
 from .model import request_completion
 from .proposals import (
@@ -63,6 +64,7 @@ class ProposalRequest(BaseModel):
     identity: Identity | None = None
     record_token: RecordToken | None = None
     product_url: Annotated[str, Field(max_length=2048)] | None = None
+    reference_url: Annotated[str, Field(max_length=2048)] | None = None
     sku_hint: Text = ""
     guidance: Annotated[str, Field(max_length=400)] = ""
     action: Literal["fill", "standardize"] = "fill"
@@ -86,6 +88,10 @@ class ChatRequest(BaseModel):
     messages: Annotated[list[ChatMessage], Field(min_length=1, max_length=11)]
     model_id: ModelId | None = None
     endpoint_id: EndpointId | None = None
+    filament_id: Annotated[int, Field(gt=0, le=2_147_483_647)] | None = None
+    printer_id: Annotated[int, Field(gt=0, le=2_147_483_647)] | None = None
+    nozzle_mm: Annotated[float, Field(gt=0, le=2, allow_inf_nan=False)] | None = None
+    web_search: StrictBool = False
 
 
 async def is_enabled(db: DBSession) -> bool:
@@ -113,6 +119,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "manufacturers:update",
                 "spools:create",
                 "spools:read",
+                "printers:read",
                 "admin:plugins_manage",
             )
         except HTTPException as exc:
@@ -134,6 +141,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         "can_add_spool": enabled and principal.auth_type == "session"
         and {"filaments:read", "spools:create"} <= permissions,
         "can_read_spools": enabled and principal.auth_type == "session" and "spools:read" in permissions,
+        "can_read_printers": enabled and principal.auth_type == "session" and "printers:read" in permissions,
         "can_update": "filaments:update" in permissions,
         "can_update_manufacturer": enabled and principal.auth_type == "session"
         and {"filaments:update", "manufacturers:update"} <= permissions,
@@ -150,7 +158,9 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         raise HTTPException(404, "FilaBrain is disabled")
     if principal.auth_type != "session":
         raise HTTPException(403, "A browser session is required")
-    permissions = await ensure_any_permission(db, principal, *(permission for _, permission in CHAT_PAGES.values()))
+    permissions = await ensure_any_permission(
+        db, principal, "spools:read", "printers:read", *(permission for _, permission in CHAT_PAGES.values()),
+    )
     if "filaments:read" not in permissions:
         raise HTTPException(403, "Filament read access is required")
     allowed_pages = {name: url for name, (url, permission) in CHAT_PAGES.items() if permission in permissions}
@@ -163,11 +173,18 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     _, config = await config_record(db)
     if not data.endpoint_id and not (config["model_url"] and config["model_id"]):
         raise HTTPException(503, "Configure a model in FilaBrain settings")
+    context = await collect_context(
+        db, data.messages[-1].content, permissions, filament_id=data.filament_id,
+        printer_id=data.printer_id, nozzle_mm=data.nozzle_mm, web_search=data.web_search,
+        previous_question=data.messages[-3].content if len(data.messages) >= 3 else "",
+    )
     await db.rollback()
     endpoint, model = select_model(config, data.model_id, data.endpoint_id)
     await check_model_catalog(endpoint, model)
+    if context:
+        await lookup_live(context, config["search_url"], config["supplier_download_mib"])
     messages = [
-        {"role": "system", "content": (
+        {"role": "system", "content": context.prompt() if context else (
             "You are the FilaMan assistant. Help with general questions, especially 3D printing, "
             "filament and FilaMan workflows. You can only see this conversation. "
             "Do not claim to have searched the web, inspected inventory, opened a page, or changed records. "
@@ -188,7 +205,11 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         if not answer.strip():
             raise ValueError("Empty model response")
     except (httpx.HTTPError, TimeoutError, ValueError, KeyError, IndexError, TypeError, RuntimeError):
+        if context:
+            return context.response("")
         raise HTTPException(502, "The configured model could not answer. Try again.") from None
+    if context:
+        return context.response(answer)
     action = None
     if marker := PAGE_MARKER.search(answer):
         page, name = marker.groups()
@@ -268,7 +289,7 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
         return {
             "target": target,
             **await research_products(
-                db, identity, product_url=data.product_url, sku_hint=data.sku_hint,
+                db, identity, product_url=data.product_url, reference_url=data.reference_url, sku_hint=data.sku_hint,
                 guidance=data.guidance, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
                 release_read=deadline is not None,
             ),
@@ -276,7 +297,7 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
     snapshot = filament_snapshot(filament)
     result = await batch_proposal(
         db, snapshot, data.action,
-        sku_hint=data.sku_hint, product_url=data.product_url, guidance=data.guidance,
+        sku_hint=data.sku_hint, product_url=data.product_url, reference_url=data.reference_url, guidance=data.guidance,
         release_read=deadline is not None, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
     )
     if data.action == "standardize":

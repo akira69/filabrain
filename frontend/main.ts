@@ -15,6 +15,7 @@ export type Status = {
   can_create: boolean
   can_add_spool?: boolean
   can_read_spools?: boolean
+  can_read_printers?: boolean
   can_update: boolean
   can_update_manufacturer?: boolean
   can_configure: boolean

@@ -1,6 +1,6 @@
 import { element, errorText, hostRequest, type Status } from './main'
 import { api, fetchAllPages, getCsrfToken } from './shared/api'
-import { researchFieldLabel, researchOptionValue, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
+import { researchFieldLabel, researchOptionValue, researchRecommendation, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
 import type { Chat } from './chat'
 import type { ExpectedFilament } from './shared/filabrain-batches'
@@ -27,7 +27,7 @@ export type SelectionContext = { mode: 'selection'; filament_ids: number[]; expe
 const route = '/filabrain'
 const sourceNotes = new Set([
   'manufacturer_page', 'archived_page', 'unavailable_source', 'manual_datasheet',
-  'supplier_alternative_found', 'supplier_download_limit',
+  'supplier_alternative_found', 'supplier_download_limit', 'supplier_rate_limited',
 ])
 const checkedSources = new Set(['manufacturer_page', 'archived_page'])
 const nativeFields = new Set([
@@ -43,9 +43,14 @@ const draftFields = [
   'manufacturer_id', 'designation', 'material_type', 'diameter_mm',
   'manufacturer_color_name', 'color_id', 'manufacturer_sku',
 ]
+const productFields = [
+  'manufacturer_id', 'manufacturer_sku', 'designation', 'material_type', 'diameter_mm',
+  'manufacturer_color_name', 'raw_material_weight_g', 'finish_type', 'material_subgroup',
+]
 const numericDraft = new Set(['manufacturer_id', 'color_id', 'diameter_mm'])
 const blank = (value: Value | undefined) => value == null || value === ''
-const equal = (a: Value | undefined, b: Value | undefined) => blank(a) && blank(b) || a === b
+const equal = (a: Value | undefined, b: Value | undefined) => blank(a) && blank(b) ||
+  a === b || (a != null && b != null && typeof a === 'object' && typeof b === 'object' && JSON.stringify(a) === JSON.stringify(b))
 export const identity = (fields: Fields): ResearchIdentity => ({
   manufacturer: String(fields.manufacturer_name || ''),
   designation: String(fields.designation || ''),
@@ -60,6 +65,24 @@ export const identity = (fields: Fields): ResearchIdentity => ({
 })
 const valueText = (value: Value) => value == null || value === '' ? '—'
   : typeof value === 'boolean' ? String(value) : researchOptionValue(value)
+
+function sameResolvedProduct(previous: ResearchProposal, fresh: ResearchProposal) {
+  const values = (proposal: ResearchProposal) => new Map(proposal.suggestions.map(item => [item.field, item.value]))
+  const before = values(previous)
+  const after = values(fresh)
+  return productFields.every(field => equal(before.get(field), after.get(field)))
+}
+
+function mergeFollowUp(previous: ResearchProposal, fresh: ResearchProposal, field: string): ResearchProposal {
+  const affects = (unit: NonNullable<ResearchProposal['proposals']>[number]) => field in unit.fields
+  return {
+    ...fresh,
+    suggestions: [...previous.suggestions.filter(item => item.field !== field), ...fresh.suggestions.filter(item => item.field === field)],
+    proposals: [...(previous.proposals || []).filter(unit => !affects(unit)), ...(fresh.proposals || []).filter(affects)],
+    issues: [...previous.issues.filter(issue => issue.field && issue.field !== field),
+      ...fresh.issues.filter(issue => !issue.field || issue.field === field)],
+  }
+}
 
 function externalLink(url: string, title: string) {
   const a = document.createElement('a')
@@ -112,6 +135,15 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   const optionsSummary = searchOptions.querySelector('summary')!
   const conversation = element('research-conversation')
   const reply = element('research-reply')
+  const followUpControls = document.createElement('div')
+  const followUpLabel = document.createElement('label')
+  const followUpScope = document.createElement('select')
+  followUpControls.className = 'actions'
+  followUpControls.hidden = true
+  followUpScope.id = followUpLabel.htmlFor = 'research-follow-up-scope'
+  followUpLabel.textContent = t('filaBrain.followUpScope')
+  followUpControls.append(followUpLabel, followUpScope)
+  document.querySelector('[data-chat-form] textarea')!.before(followUpControls)
   const inputs = element('research-inputs')
   const chatInput = document.querySelector('[data-chat-research-input]')!
   const chatResults = document.querySelector('[data-chat-research-results]')!
@@ -129,6 +161,8 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   let saving = false
   let duplicate = false
   let lastAction = 'fill'
+  let lastProductUrl = ''
+  let lastSku = ''
   let formRevision = 0
 
   function showInChat(movePicker = true, reveal = true, newDraft = false) {
@@ -146,7 +180,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     element('draft-fields').hidden = true
     advanced.hidden = true
     element('research-identity').append(element('research-sku-hint'))
-    element('research-heading').textContent = editor.mode === 'edit' ? 'Research this filament' : 'Research the new filament draft'
+    element('research-heading').textContent = t(editor.mode === 'edit' ? 'filaBrain.editorResearchExisting' : 'filaBrain.editorResearchDraft')
     const target = element('research-target')
     target.hidden = !editor.fields.designation
     target.textContent = [editor.fields.designation, editor.fields.manufacturer_name].filter(Boolean).join(' · ')
@@ -218,6 +252,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     results.replaceChildren()
     bound = undefined
     boundProposal = undefined
+    followUpControls.hidden = true
     updateSave()
     reply.hidden = true
   }
@@ -239,9 +274,19 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     return units
   }
 
+  function restoreSelection(selection: Unit[]) {
+    for (const [control, unit] of choices) {
+      control.checked = selection.some(saved => Object.keys(unit).length === Object.keys(saved).length &&
+        Object.entries(unit).every(([field, change]) => field in saved &&
+          equal(change.old, saved[field].old) && equal(change.value, saved[field].value)))
+    }
+    updateSave()
+  }
+
   function updateSave() {
     const count = editor ? selected().reduce((total, unit) => total + Object.keys(unit).length, 0) : 0
     save.disabled = !bound || duplicate || busy || saving || (!!editor && count === 0)
+    followUpScope.disabled = busy || saving
     if (editor) {
       for (const control of results.querySelectorAll<HTMLInputElement>('input[type=checkbox], input[type=radio]')) {
         control.disabled = saving
@@ -292,7 +337,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     return row
   }
 
-  function render(proposal: ResearchProposal, context: EditorContext) {
+  function render(proposal: ResearchProposal, context: EditorContext, action = 'fill', field = '') {
     clearResults()
     bound = context
     boundProposal = proposal
@@ -366,9 +411,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         const label = t('filaBrain.useProductPage')
         choose.append(researchMark.cloneNode(true), label)
         choose.addEventListener('click', () => {
-          const input = form.elements.namedItem('product_url') as HTMLInputElement
-          input.value = productUrl
-          if (form.reportValidity()) void search('fill', '', label).catch(showResearchError)
+          if (form.reportValidity()) void search('fill', '', label, productUrl).catch(showResearchError)
         })
         actions.append(choose)
         p.append(actions)
@@ -402,9 +445,8 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
         group.append(none)
         const preferred = proposal.suggestions.find(suggestion => suggestion.field === field)
         for (const candidate of issue.options) {
-          const recommended = preferred && JSON.stringify(candidate.value) === JSON.stringify(preferred.value)
           group.append(option(unitFor(field, candidate.value), candidate.sources,
-            recommended ? t('filaBrain.recommendedValue') : undefined, noChoice.name))
+            researchRecommendation(issue, candidate.value, preferred?.value), noChoice.name))
         }
         results.append(group)
       }
@@ -425,19 +467,33 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       summary.textContent = t('filaBrain.sourcesChecked', { count: seenChecks.size })
       results.append(checks)
     }
+    const researchable = action === 'standardize'
+      ? [...new Set((proposal.proposals || []).flatMap(unit => Object.keys(unit.fields)))]
+      : [...nativeFields].filter(key => blank(fields[key]))
+    followUpScope.replaceChildren(new Option(t('filaBrain.followUpAllFields'), ''),
+      ...researchable.map(key => new Option(researchFieldLabel(key), key)).sort((a, b) => a.text.localeCompare(b.text)))
+    if (researchable.includes(field)) followUpScope.value = field
+    followUpControls.hidden = !researchable.length
     updateSave()
     reply.hidden = !!editor && !results.childElementCount
   }
 
-  async function search(action: string, prompt = '', label?: string) {
+  async function search(action: string, prompt = '', label?: string, correctedUrl?: string, referenceUrl?: string) {
     if (busy || saving) return
     const revision = formRevision
     const context = await target()
     if (revision !== formRevision || busy || saving) return
     const formData = new FormData(form)
-    const productUrl = String(formData.get('product_url') || '').trim()
+    const productInput = form.elements.namedItem('product_url') as HTMLInputElement
+    const productUrl = correctedUrl || String(formData.get('product_url') || '').trim()
     const sku = String(formData.get('sku_hint') || '').trim()
     const product = identity(context.fields)
+    const previous = boundProposal
+    const scope = prompt && !correctedUrl ? followUpScope.value : ''
+    const focusing = scope && previous && bound && action === lastAction && productUrl === lastProductUrl && sku === lastSku &&
+      context.mode === bound.mode && context.filament_id === bound.filament_id && context.record_token === bound.record_token &&
+      context.fields.manufacturer_id === bound.fields.manufacturer_id &&
+      JSON.stringify(product) === JSON.stringify(identity(bound.fields))
     const actionLabel = buttons[action === 'standardize' ? 1 : 0].textContent?.trim() || ''
     const proposalTitle = [product.manufacturer, product.designation].filter(Boolean).join(' ') || productUrl || sku
     if (!product.designation && !product.sku && !productUrl && !sku) {
@@ -463,21 +519,36 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     try {
       await chat.researchTurn(prompt || label || (proposalTitle && !editor ? `${actionLabel} · ${proposalTitle}` : actionLabel), async () => {
         try {
-          const proposal = await api.post<ResearchProposal>(route + '/proposals', {
+          let proposal = await api.post<ResearchProposal>(route + '/proposals', {
             ...mcpTarget(context),
             record_token: context.record_token,
             action,
             product_url: productUrl || undefined,
+            reference_url: referenceUrl,
             sku_hint: sku,
-            guidance: prompt,
+            guidance: referenceUrl ? prompt.replace(/https?:\/\/[^\s<>()]+/gi, '').trim() : prompt,
             ...(action === 'fill' ? chat.model : undefined),
           })
           if (revision !== formRevision) return { reply: t('filaBrain.identityChanged') }
-          render(proposal, context)
+          const unsafeToMerge = proposal.issues.some(issue => issue.code === 'duplicate' ||
+            ((issue.code === 'ambiguous_match' || issue.requires_product_choice) &&
+              !previous?.issues.some(prior => JSON.stringify(prior) === JSON.stringify(issue))))
+          const keep = focusing && !unsafeToMerge && sameResolvedProduct(previous, proposal)
+          const selection = keep ? selected().filter(unit => !(scope in unit)) : []
+          if (keep) proposal = mergeFollowUp(previous, proposal, scope)
+          if (correctedUrl) {
+            productInput.value = correctedUrl
+            formData.set('product_url', correctedUrl)
+          }
+          lastProductUrl = productUrl
+          lastSku = sku
+          render(proposal, context, action, keep ? scope : '')
+          restoreSelection(selection)
           lastAction = action
           return {
             reply: t(results.childElementCount ? 'filaBrain.researchReview' : 'filaBrain.noSuggestions'),
-            draft: { fields: Object.fromEntries([...formData].map(([key, value]) => [key, String(value)])), context, proposal, action },
+            draft: { fields: Object.fromEntries([...formData].map(([key, value]) => [key, String(value)])),
+              context, proposal, action, selection: selected() },
           }
         } catch (error) {
           return { reply: errorText(error) }
@@ -594,15 +665,24 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       }
       conversation.hidden = false
       lastAction = draft.action
+      lastProductUrl = (draft.fields.product_url || '').trim()
+      lastSku = (draft.fields.sku_hint || '').trim()
       optionsSummary.hidden = false
       searchOptions.open = false
-      render(draft.proposal, context)
-      const checked = new Set(draft.selection?.map(unit => JSON.stringify(unit)))
-      for (const [control, unit] of choices) control.checked = checked.has(JSON.stringify(unit))
-      updateSave()
+      render(draft.proposal, context, draft.action)
+      restoreSelection(draft.selection || [])
       return true
     },
-    followUp: prompt => search(lastAction, prompt),
+    followUp(prompt) {
+      const url = prompt.match(/https?:\/\/[^\s<>()]+/i)?.[0]
+      if (url && !/\.pdf(?:[?#]|$)/i.test(url)) {
+        const instruction = prompt.slice(0, prompt.indexOf(url)).trim()
+        const choosesProduct = /^(?:use|choose|select|switch to|change to|verwende|nutze|wähle|wechsle zu|utilise|choisis|sélectionne|passe à)(?:\s|$)/i.test(instruction) &&
+          /\b(?:product|variant|refill|spool|produkt|variante|nachfüllung|spule|produit|recharge|bobine)\b/i.test(instruction)
+        if (url === prompt || choosesProduct) return search('fill', '', prompt, url)
+      }
+      return search(url ? 'fill' : lastAction, prompt, undefined, undefined, url)
+    },
   })
 
   save.addEventListener('click', async () => {
@@ -638,9 +718,9 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
           }
         }
         chat.archiveResearch()
-        if (boundProposal) render(boundProposal, { ...context, fields })
-        notice.textContent = `${staged.length} field${staged.length === 1 ? '' : 's'} staged. Save in the FilaMan editor to keep the changes.`
-          + (skipped.length ? ` ${skipped.length} skipped because the form changed or the field is unavailable.` : '')
+        if (boundProposal) render(boundProposal, { ...context, fields }, lastAction)
+        notice.textContent = t(staged.length === 1 ? 'filaBrain.stagedOne' : 'filaBrain.stagedMany', { count: staged.length })
+          + (skipped.length ? ' ' + t('filaBrain.stagedSkipped', { count: skipped.length }) : '')
         return
       }
       const data: Fields = Object.fromEntries(draftFields.filter(field => !blank(context.fields[field]))
@@ -649,11 +729,11 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       if (!Number(data.manufacturer_id) || !data.designation || !data.material_type || !(Number(data.diameter_mm) > 0)) {
         optionsSummary.hidden = false
         searchOptions.open = advanced.open = true
-        throw new Error('Choose or enter a manufacturer, product name, material and diameter before saving.')
+        throw new Error(t('filaBrain.draftRequiredFields'))
       }
       if (!manufacturers.some(item => item.id === data.manufacturer_id) ||
           data.color_id && ![...palette.options].some(item => Number(item.value) === data.color_id)) {
-        throw new Error('Choose a manufacturer and palette color already available in FilaMan.')
+        throw new Error(t('filaBrain.draftInvalidReferences'))
       }
       draft = data
       const preview = element('create-preview')

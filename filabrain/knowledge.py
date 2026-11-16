@@ -242,7 +242,8 @@ def lookup_guidance(query: str, *, material: str = "", printer: str = "", feeder
         exact = row.get("exact", [])
         if exact and not any(_includes(prompt, _words(value)) for value in exact):
             continue
-        if any(not _includes(prompt, _words(required)) for required in row.get("requires", [])):
+        requires = row.get("requires", [])
+        if any(not _includes(prompt, _words(required)) for required in requires):
             continue
         exclude = row.get("exclude", [])
         if any(_includes(prompt, _words(value)) for value in exclude):
@@ -251,7 +252,7 @@ def lookup_guidance(query: str, *, material: str = "", printer: str = "", feeder
         secondary = sum(_includes(prompt, _words(value)) for value in row.get("topics", []))
         if exact or primary or secondary:
             ranked.append((
-                6 * bool(exact) + 3 * bool(primary) + bool(secondary),
+                6 * bool(exact) + 3 * bool(primary) + 2 * bool(requires) + bool(secondary),
                 {key: value for key, value in row.items() if key not in {
                     "exact", "keywords", "topics", "requires", "exclude",
                 }},

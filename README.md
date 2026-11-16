@@ -6,14 +6,14 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 ## Install
 
-**Development preview.** This package targets FilaMan 2.0.5+. Review researched values before applying them to your inventory.
+**Development preview.** Verified on stock FilaMan 2.2.2. Review researched values before applying them to your inventory.
 
-### What's new in 0.1.18
+### What's new in 0.1.19
 
-- Connect multiple named model endpoints and choose which models appear in chat and interactive research. Set the default used for new conversations and background runs.
-- Use the compact mobile navigation and review research runs with source links next to the proposed changes.
-- Compare RAL and Pantone previews with the filament's saved swatch. Keep the current swatch, reuse an existing one, or create one after reviewing the reference.
-- Find more manufacturer listings through product links, article numbers, and sitemaps, with variant checks before FilaBrain proposes a purchase link or color reference.
+- Start **Add spool** with a label, SKU, product URL, or supported reader. Reuse a filament or review a new one, then save the spool through FilaMan.
+- Check catalog entries, material guidance, and selected printer presets using the built-in knowledge bundle, even when web search is unavailable.
+- Ask chat what you can print with your inventory, choose a printer and filament for settings questions, or use **Search the web** for live sources.
+- Review conflicting values and their sources. Refine one field while keeping other selections, or choose a different product and review its proposals.
 
 To build the preview ZIP from source, run the packaging script with Python 3. Published preview ZIPs appear under GitHub Releases.
 
@@ -82,9 +82,15 @@ On a FilaMan build with plugin MCP tool support, enable the built-in MCP server 
 Run the smoke test with the Python environment from a stock FilaMan checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.18.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.19.zip
 ```
 
-The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database.
+The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database. Pass `--previous path/to/old.zip` to test upgrade and rollback. The smoke test covers offline catalog research through FilaMan's built-in MCP and printing chat with a local test model. Use `--live-model` with `FILABRAIN_MODEL_URL` and `FILABRAIN_MODEL_ID` to exercise a configured server.
+
+Run the 25-product benchmark against the stock host. The report records wrong values, missing coverage, and source links. Add `--offline` to test the bundled catalog and `--case CASE_ID` to rerun specific records.
+
+```sh
+python scripts/research_benchmark.py /path/to/filaman-system
+```
 
 [MIT license](LICENSE.md)

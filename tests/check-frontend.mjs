@@ -12,6 +12,8 @@ const filament = {
   material_type: 'PLA', diameter_mm: 1.75, color_mode: 'single',
 }
 const evidence = [{ title: 'Fixture catalog', url: 'https://manufacturer.test/pla', evidence: '1.24 g/cm³' }]
+const refillUrl = 'https://manufacturer.test/pla-refill'
+const rotatingVariantUrl = 'https://manufacturer.test/pla-select-package'
 const batchSource = { title: 'Fixture catalog | Fixture Brand', url: 'https://manufacturer.test/pla', quote: 'Fixture catalog' }
 const fixtureBatch = {
   id: 'fixture-batch', mode: 'fill', status: 'active', total: 1,
@@ -22,6 +24,10 @@ const fixtureBatch = {
       { code: 'manufacturer_page', name: batchSource.title, url: batchSource.url },
       { code: 'possible_match', name: 'Other PLA', url: 'https://manufacturer.test/other', source: 'Web search' },
       { code: 'possible_match', name: 'Other PLA', url: 'https://manufacturer.test/other', source: 'Web search' },
+      { code: 'source_disagreement', field: 'density_g_cm3', options: [
+        { value: 1.24, sources: [{ ...evidence[0], title: 'Fixture manufacturer', evidence: 'Density for Fixture PLA: 1.24 g/cm³' }] },
+        { value: 1.30, sources: [{ title: 'Reseller', url: 'https://reseller.test/pla', evidence: 'Reseller lists 1.30 g/cm³' }] },
+      ] },
     ],
     approved_ids: [], changed_fields: [], applied_at: null,
     proposals: [{ id: 'density', fields: { density_g_cm3: { old: null, value: 1.24 } },
@@ -111,7 +117,7 @@ try {
           if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
           const { type, request_id, units } = event.data;
           if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'${editorMode}',
-            filament_id:${editorMode === 'edit' ? 10 : 'null'}, record_token:${JSON.stringify(hostEditorToken)}, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75 }}, location.origin)
+            filament_id:${editorMode === 'edit' ? 10 : 'null'}, record_token:${JSON.stringify(hostEditorToken)}, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75, ...window.editorEdits }}, location.origin)
           if (type === 'filaman:filament-stage') {
             window.staged = units;
             const reply = () => event.source.postMessage({type, request_id, staged:units.flatMap(unit => Object.keys(unit)), skipped:[]}, location.origin)
@@ -223,6 +229,18 @@ try {
         assert.equal(target.model_id, 'fixture:alternate')
         assert.equal(target.endpoint_id, endpoints.find(endpoint => endpoint.name === 'Remote models')?.id || defaultEndpoint)
       }
+      if (target.product_url === refillUrl) return route.fulfill({ json: { target, issues: [], suggestions: [
+        { field: 'density_g_cm3', value: 1.22, sources: [{ title: 'Refill specifications', url: refillUrl, evidence: '1.22 g/cm³' }] },
+        { field: 'manufacturer_sku', value: 'FIX-REFILL', sources: [{ title: 'Refill specifications', url: refillUrl, evidence: 'FIX-REFILL' }] },
+      ] } })
+      if (target.product_url === rotatingVariantUrl) {
+        const refill = target.guidance === 'Check the density again'
+        return route.fulfill({ json: { target, issues: [], suggestions: [
+          { field: 'manufacturer_sku', value: refill ? 'NEW-PACKAGE' : 'OLD-PACKAGE', sources: evidence },
+          { field: 'raw_material_weight_g', value: refill ? 500 : 1000, sources: evidence },
+          { field: 'density_g_cm3', value: refill ? 1.22 : 1.24, sources: evidence },
+        ] } })
+      }
       if (target.product_url) assert.equal(target.product_url, evidence[0].url)
       if (target.guidance === 'Continue in stale tab') return route.fulfill({
         status: 502, json: { detail: 'Source unavailable' },
@@ -243,9 +261,17 @@ try {
           material_subgroup: { old: null, value: target.guidance ? 'Silk' : 'Matte' },
         }, sources: [], reason: 'Consistent designation and finish.', group_key: null }],
       } })
+      if (target.reference_url === 'https://manufacturer.test/specs.pdf') return route.fulfill({ json: { target,
+        suggestions: [
+          { field: 'density_g_cm3', value: 1.27, sources: [{ ...evidence[0], evidence: '1.27 g/cm³' }] },
+          { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
+          { field: 'bed_temp_range_c', value: { min: 42, max: 42 }, sources: evidence },
+        ], issues: [],
+      } })
       return route.fulfill({ json: { target, suggestions: [
         { field: 'density_g_cm3', value: 1.24, sources: evidence },
         { field: 'manufacturer_sku', value: 'FIX-123', sources: evidence },
+        ...(!chatModelId ? [{ field: 'drying_temp_c', value: 50, sources: evidence }] : []),
       ], issues: target.mode === 'edit' ? [
         { code: 'manufacturer_page', name: 'Fixture datasheet', url: evidence[0].url },
         { code: 'manufacturer_page', name: 'Fixture datasheet', url: evidence[0].url },
@@ -341,8 +367,9 @@ try {
     }
     if (path.endsWith('/apply')) {
       assert.equal(req.postDataJSON().items[0].decision_revision, 1)
-      Object.assign(fixtureBatch.items[0], { status: 'applied', applied_at: '2026-01-01T00:00:00Z' })
-      return route.fulfill({ json: { batch: fixtureBatch, results: [{ item_id: 12, status: 'applied', changed_fields: [] }] } })
+      const changed_fields = ['density_g_cm3']
+      Object.assign(fixtureBatch.items[0], { status: 'applied', applied_at: '2026-01-01T00:00:00Z', changed_fields })
+      return route.fulfill({ json: { batch: fixtureBatch, results: [{ item_id: 12, status: 'applied', changed_fields }] } })
     }
     if (path.endsWith('/batches')) return route.fulfill({ json: hasResearchRun ? [fixtureBatch] : [] })
     return route.fulfill({ status: 404, json: {} })
@@ -656,7 +683,9 @@ try {
   assert.equal(await batchReview.locator('.batch-review-fields').getByText('Density (g/cm³)', { exact: true }).count(), 1)
   await batchReview.getByText('Sources (1)', { exact: true }).click()
   assert.equal(await batchReview.getByRole('link', { name: batchSource.title }).count(), 1)
-  assert.equal(await batchReview.locator('blockquote').count(), 0)
+  assert.equal(await batchReview.locator('.batch-disclosure blockquote').count(), 0)
+  assert.equal(await batchReview.getByText('Reseller lists 1.30 g/cm³', { exact: true }).count(), 1)
+  assert.equal(await batchReview.getByText('Manufacturer value', { exact: true }).count(), 1)
   assert.equal(await batchReview.getByText(/Possible match.*Other PLA/).isVisible(), false)
   await batchReview.getByText('Search details (1)', { exact: true }).click()
   assert.equal(await batchReview.getByText(/Possible match.*Other PLA/).count(), 1)
@@ -666,6 +695,9 @@ try {
   await page.getByRole('button', { name: 'Apply approved changes' }).click()
   await page.getByRole('dialog').getByRole('button', { name: /Apply/ }).click()
   await page.getByRole('heading', { name: 'Apply report' }).waitFor()
+  const appliedDetails = page.locator('[data-batch-report] details[data-result="applied"]')
+  await appliedDetails.locator('summary').click()
+  assert.equal(await appliedDetails.getByText('Density (g/cm³)', { exact: true }).count(), 1)
   await page.getByRole('link', { name: 'All runs' }).click()
   const batchOverview = page.getByRole('region', { name: 'Research runs' })
   await batchOverview.getByRole('link', { name: 'Fill missing specs' }).waitFor()
@@ -1184,6 +1216,58 @@ try {
   const followUpPayload = modelFreeResult.request().postDataJSON()
   assert.equal(followUpPayload.model_id, undefined)
   assert.equal(followUpPayload.endpoint_id, undefined)
+
+  const activeResearch = frame.locator('#research-results')
+  const reviewedSku = activeResearch.getByRole('checkbox', { name: /FIX-123/ })
+  await reviewedSku.check()
+  const reviewedDrying = activeResearch.getByRole('checkbox', { name: /Drying temperature.*50/ })
+  await reviewedDrying.check()
+  await page.evaluate(() => { window.editorEdits = { drying_temp_c: 60 } })
+  const followUpField = frame.getByRole('combobox', { name: 'Follow-up field', exact: true })
+  assert.equal(await followUpField.count(), 1, 'research can follow up on one field')
+  await followUpField.selectOption('density_g_cm3')
+  const checkDensity = 'Check the published density https://manufacturer.test/specs.pdf'
+  const checkedReference = page.waitForRequest(request => request.method() === 'POST' &&
+    request.url().endsWith('/proposals') && request.postDataJSON().guidance.startsWith('Check the published density'))
+  await followUp.fill(checkDensity)
+  await followUp.press('Enter')
+  const referencePayload = (await checkedReference).postDataJSON()
+  assert.equal(referencePayload.reference_url, 'https://manufacturer.test/specs.pdf')
+  assert.equal(referencePayload.guidance, 'Check the published density')
+  await activeResearch.getByRole('checkbox', { name: /Density.*1\.27/ }).waitFor()
+  assert.equal(await reviewedSku.isChecked(), true, 'an unrelated reviewed value stays selected')
+  assert.equal(await activeResearch.getByRole('checkbox', { name: /Bed temperature.*42/ }).count(), 0)
+  assert.equal(await reviewedDrying.count(), 0, 'a value edited in the host form is no longer eligible')
+  assert.equal(await frame.getByRole('button', { name: 'Stage 1 field' }).isEnabled(), true)
+  const stagedBeforeCorrection = await page.evaluate(() => window.staged)
+  const correctedProduct = page.waitForRequest(request => request.method() === 'POST' &&
+    request.url().endsWith('/proposals'))
+  await followUp.fill(`Use the refill at ${refillUrl}`)
+  await followUp.press('Enter')
+  const correctedPayload = (await correctedProduct).postDataJSON()
+  assert.equal(correctedPayload.product_url, refillUrl)
+  assert.equal(correctedPayload.reference_url, undefined)
+  await activeResearch.getByRole('checkbox', { name: /Density.*1\.22/ }).waitFor()
+  assert.equal(await reviewedSku.count(), 0, 'the old variant is no longer proposed')
+  assert.equal(await activeResearch.getByRole('checkbox', { name: /FIX-REFILL/ }).isChecked(), false)
+  assert.deepEqual(await page.evaluate(() => window.staged), stagedBeforeCorrection, 'follow-ups never stage changes')
+
+  const urlDraft = await context.newPage()
+  urlDraft.setDefaultTimeout(5_000)
+  await urlDraft.goto(`${url}?tab=new`)
+  await urlDraft.getByRole('textbox', { name: 'Product URL (optional)' }).fill(rotatingVariantUrl)
+  await urlDraft.getByRole('button', { name: 'Find specifications' }).click()
+  const urlResults = urlDraft.locator('#research-results')
+  const oldPackage = urlResults.getByRole('checkbox', { name: /OLD-PACKAGE/ })
+  await oldPackage.check()
+  await urlDraft.getByRole('combobox', { name: 'Follow-up field' }).selectOption('density_g_cm3')
+  const urlFollowUp = urlDraft.getByRole('textbox', { name: 'Follow up on this search' })
+  await urlFollowUp.fill('Check the density again')
+  await urlFollowUp.press('Enter')
+  await urlResults.getByRole('checkbox', { name: /Density.*1\.22/ }).waitFor()
+  assert.equal(await oldPackage.count(), 0, 'a scoped follow-up cannot carry the old URL-only variant')
+  assert.equal(await urlResults.getByRole('checkbox', { name: /NEW-PACKAGE/ }).isChecked(), false)
+  await urlDraft.close()
 
   canUseFilaments = false
   await page.goto(url)
