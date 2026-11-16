@@ -8,12 +8,11 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 **Development preview.** Verified on stock FilaMan 2.2.2. Review researched values before applying them to your inventory.
 
-### What's new in 0.1.19
+### What's new in 0.1.20
 
-- Start **Add spool** with a label, SKU, product URL, or supported reader. Reuse a filament or review a new one, then save the spool through FilaMan.
-- Check catalog entries, material guidance, and selected printer presets using the built-in knowledge bundle, even when web search is unavailable.
-- Ask chat what you can print with your inventory, choose a printer and filament for settings questions, or use **Search the web** to check known manufacturer pages and datasheets. SearXNG can find additional sources.
-- Review conflicting values and their sources. Refine one field while keeping other selections, or choose a different product and review its proposals.
+- Start **Add spool** with a label, SKU, product URL, or supported scale or NFC reader. Reuse an existing filament or review a new one before saving.
+- Compare reel photos, empty weights, and dimensions where available. Research uses the SKU you accepted, and chat remembers which reel you selected when you return to the conversation.
+- Ask what you can print with your inventory or look up materials and printer settings with source links. FilaBrain includes offline references and can use optional web search for more evidence.
 
 To build the preview ZIP from source, run the packaging script with Python 3. Published preview ZIPs appear under GitHub Releases.
 
@@ -102,7 +101,7 @@ When a manufacturer's website is missing, FilaBrain checks FilaManDB first and c
 Run the smoke test with the Python environment from a stock FilaMan 2.2.2 or newer checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.19.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.20.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database. Pass `--previous path/to/old.zip` to test upgrade and rollback. The smoke test covers offline catalog research through FilaMan's built-in MCP and printing chat with a local test model. Use `--live-model` with `FILABRAIN_MODEL_URL` and `FILABRAIN_MODEL_ID` to exercise a configured server.
