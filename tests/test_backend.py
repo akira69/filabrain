@@ -1256,6 +1256,7 @@ async def test_searxng_connection_requires_plugin_admin(installed, normal_user, 
 @pytest.mark.parametrize(("base_url", "limit"), [
     ("https://api.openai.com/v1", "max_completion_tokens"),
     ("https://api.anthropic.com/v1", "max_tokens"),
+    ("https://openrouter.ai/api/v1", "max_tokens"),
     ("http://ollama:11434/v1", "max_tokens"),
 ])
 async def test_model_completion_provider_request(monkeypatch, base_url, limit):

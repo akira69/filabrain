@@ -21,7 +21,7 @@ To build the preview ZIP from source, run the packaging script with Python 3. Pu
 python3 scripts/package_plugin.py
 ```
 
-Upload the ZIP from `dist/` under **Admin → System → Plugins**. Enable **FilaBrain**, then open it from the FilaMan sidebar. Configure the model and optional search server in the plugin's settings. Open **Guide** from the FilaBrain page or chat for Ollama, OpenAI and Claude model setup, research workflows, and external MCP connections.
+Upload the ZIP from `dist/` under **Admin → System → Plugins**. Enable **FilaBrain**, then open it from the FilaMan sidebar. Configure the model and optional search server in the plugin's settings. Open **Guide** from the FilaBrain page or chat for OmniRoute, Ollama, and other model setups, research workflows, and external MCP connections.
 
 The package includes the FilaBrain sidebar icon and uses FilaMan’s filament editor and selected-filament integration hooks.
 
@@ -45,6 +45,16 @@ A product page can supply color codes from its text or URL. A related listing ca
 
 Open **Model & MCP settings** and use **Add endpoint** for each model server. Give it a name, enter its URL and API key if required, then load models or enter a model ID manually. Use **Models shown in chat** to choose which models appear under that endpoint in the chat picker. Save your changes after testing the connection. **Make default** sets the endpoint and model that new conversations and background research batches use.
 
+### Recommended hosted setup with OmniRoute
+
+Use **Qwen 3.8 27B through Groq** for chat and interactive research. In one matched FilaBrain test, it recovered the same nine specs and conflicting nozzle ranges as local Qwen 27B. Extraction took 1.7 seconds through OmniRoute and 33.9 seconds locally on an NVIDIA V100 with 32 GB of VRAM. [Model benchmark](docs/local-model-evaluation.md#omniroute-and-local-qwen)
+
+1. Install or open your OmniRoute server. In its dashboard, open **Providers → Groq** and connect your Groq API key. Groq offers Qwen 3.8 27B on its rate-limited free plan. [OmniRoute setup](https://github.com/cheaper-inference/OmniRoute) · [Create a Groq API key](https://console.groq.com/keys) · [Groq model](https://console.groq.com/docs/model/qwen/qwen3.8-27b) · [Groq rate limits](https://console.groq.com/docs/rate-limits)
+2. In FilaBrain’s **Model & MCP settings**, choose **Add endpoint** and enter `http://<omniroute-host>:20128/v1` or your configured HTTPS URL. Use an address reachable by the FilaMan server. Paste the **OmniRoute endpoint key** from its dashboard into FilaBrain.
+3. Choose **Load models**, select `groq/qwen/qwen3.8-27b`, then **Test connection** and **Save**. Use **Make default** to make it your starting model. The OmniRoute key must allow that exact model.
+
+With a hosted model, FilaBrain sends your question and relevant FilaMan context to the provider.
+
 ### Run Ollama locally
 
 Install and start Ollama, then download the tested starting model on the Ollama machine.
@@ -56,6 +66,10 @@ ollama pull qwen3:4b-instruct
 In FilaBrain's **Model & MCP settings**, add an endpoint with a URL such as `http://ollama:11434/v1` on a shared Docker network or `http://<ollama-host>:11434/v1` on a private LAN. Use the address reachable by the FilaMan server. Leave the API key blank for a standard local Ollama server. Select **Load models**, pick your model, then use **Test connection** and **Save**. [Ollama installation](https://docs.ollama.com/quickstart) · [Ollama network setup](https://docs.ollama.com/faq#how-can-i-expose-ollama-on-my-network)
 
 Try a materials question in Chat and inspect **Sources and inventory**. Small local models can use the bundled references for offline questions. Use the sourced cards for exact specifications and review research suggestions before saving them.
+
+### Other hosted providers
+
+To use OpenRouter directly, add `https://openrouter.ai/api/v1` with an OpenRouter API key. Choose an available model with the `:free` suffix to use the free tier, then test the connection. [OpenRouter free models and limits](https://openrouter.ai/collections/free-models)
 
 ## Optional SearXNG search
 
