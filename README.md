@@ -2,7 +2,7 @@
 
 ![FilaBrain AI connected to FilaMan over Ethernet](filabrain/guide-art.webp)
 
-FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the FilaMan library, checks manufacturer and catalog sources, and presents proposals for review. It supports multiple OpenAI-compatible model endpoints, including Ollama, and can expose its tools to a separate MCP client.
+FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the FilaMan library, checks manufacturer and catalog sources, and presents proposals for review. It supports multiple OpenAI-compatible model endpoints, including Ollama, and exposes research through FilaMan’s built-in MCP server.
 
 ## Install
 
@@ -43,7 +43,7 @@ A product page can supply color codes from its text or URL. A related listing ca
 
 ## Model endpoints
 
-Open **Model & MCP settings** and use **Add endpoint** for each model server. Give it a name, enter its URL and API key if required, then load models or enter a model ID manually. Use **Models shown in chat** to choose which models appear under that endpoint in the chat picker. Save your changes after testing the connection. **Make default** sets the endpoint and model that new conversations and background research batches use.
+Open **FilaBrain settings** and use **Add endpoint** for each model server. Give it a name, enter its URL and API key if required, then load models or enter a model ID manually. Use **Models shown in chat** to choose which models appear under that endpoint in the chat picker. Save your changes after testing the connection. **Make default** sets the endpoint and model that new conversations and background research batches use.
 
 ## Optional SearXNG search
 
@@ -65,21 +65,15 @@ When a manufacturer's website is missing, FilaBrain checks FilaManDB first and c
 
 ## External MCP connections
 
-On FilaMan 2.1.0 or later, use the built-in MCP for general inventory work. Go to **Admin → App Settings → AI Assistants (MCP)** for client setup. The built-in endpoint is `/mcp` and uses `Authorization: ApiKey <FilaMan API key>`.
+**Switch to FilaMan’s built-in MCP.** If your client used `/api/v1/filabrain/mcp`, change the URL to `/mcp` on the same server. Replace `Authorization: Bearer <key>` with `Authorization: ApiKey <FilaMan API key>`. For remote connections, use HTTPS.
 
-Use FilaBrain's MCP to research filament specifications or send proposals to an open filament editor for review. Turn on **Enable the FilaBrain MCP endpoint** in FilaBrain's settings and configure your client for Streamable HTTP at `/api/v1/filabrain/mcp` on the FilaMan origin. Use a FilaMan API key as the bearer token. The plugin checks the key's permissions for each tool.
-
-FilaMan's **Allow write access** setting applies only to the built-in endpoint. FilaBrain's separate **Enable the FilaBrain MCP endpoint** switch controls its endpoint, where permitted keys can still create filaments and spools while the built-in server is read-only.
-
-Remote connections require HTTPS. If an HTTPS reverse proxy terminates TLS for FilaMan, configure the proxy to preserve the public `Host` and overwrite `X-Forwarded-Proto` with the scheme it received. Set `FILABRAIN_MCP_TRUSTED_PROXY_IPS` in the FilaMan process or container environment to the exact source IP of that proxy as seen by FilaMan. Separate multiple proxy IPs with commas. Keep direct clients off the proxy addresses.
-
-### Research through FilaMan's built-in MCP
-
-On a FilaMan build with plugin MCP tool support, enable the built-in MCP server and add `filabrain-research_filament` to the host's `MCP_PLUGIN_READ_TOOLS` environment setting. Restart FilaMan. Connect to `/mcp` with `Authorization: ApiKey <FilaMan API key>` and give the key `filaments:read` access. Use HTTPS for remote clients. The tool returns suggestions and sources for review without saving them. It works with FilaBrain's separate endpoint switched off. Use the separate endpoint for pairing a client to an open editor.
+1. In FilaMan, enable **AI Assistants (MCP)** under **Admin → App Settings**. Use `list_filaments` to verify the connection. Inventory changes require **Allow write access** and the appropriate permissions.
+2. For filament research, use FilaMan **2.2.2 or newer**. Add `filabrain-research_filament` to the host’s comma-separated `MCP_PLUGIN_READ_TOOLS` setting and restart FilaMan. With Docker Compose, add the setting to `.env` and run `docker compose up -d`.
+3. Call `filabrain-research_filament` with a key that has `filaments:read` access. Suggestions and sources appear in your MCP client for review. To continue in FilaMan, open the filament and review any changes in its editor.
 
 ## Verify a package
 
-Run the smoke test with the Python environment from a stock FilaMan checkout.
+Run the smoke test with the Python environment from a stock FilaMan 2.2.2 or newer checkout.
 
 ```sh
 python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.18.zip

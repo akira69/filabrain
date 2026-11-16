@@ -7,13 +7,12 @@ import pytest_asyncio
 from app.api.v1 import filamentdb_proxy
 from app.api.v1.router import mount_plugin_router_on_app
 from app.main import app
-from app.models import Filament, InstalledPlugin, Manufacturer, Spool
+from app.models import Filament, InstalledPlugin, Manufacturer
 from app.services import plugin_service
 from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient, MockTransport, Response
-from sqlalchemy import event, inspect, select
+from sqlalchemy import event, inspect, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 pytest_plugins = ("tests.conftest",)
 pytestmark = pytest.mark.asyncio
@@ -60,7 +59,7 @@ async def installed(auth_client, db_session, monkeypatch):
 async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_session):
     response = await installed.get(f"{BASE}/settings")
     assert response.status_code == 200
-    assert response.json()["mcp_enabled"] is True
+    assert "mcp_enabled" not in response.json()
     async with db_session.bind.connect() as connection:
         tables = await connection.run_sync(lambda conn: inspect(conn).get_table_names())
         settings_columns = await connection.run_sync(
@@ -73,13 +72,21 @@ async def test_stock_host_mounts_plugin_with_its_own_tables(installed, db_sessio
 
     config = {"model_url": "http://model.test", "model_id": "example"}
     assert (await installed.put(f"{BASE}/settings", json=config)).status_code == 200
-    assert (
-        await installed.put(f"{BASE}/settings/mcp", json={"mcp_enabled": False})
-    ).status_code == 200
     saved = (await installed.get(f"{BASE}/settings")).json()
     assert saved["model_url"] == config["model_url"]
     assert saved["model_id"] == config["model_id"]
-    assert saved["mcp_enabled"] is False
+    assert "mcp_enabled" not in saved
+    assert "filabrain_pairings" not in tables
+
+    # FilaBrain 0.1.18 reads this column when opening settings after a rollback.
+    async with db_session.bind.begin() as connection:
+        assert await connection.scalar(text("SELECT mcp_enabled FROM filabrain_settings WHERE id = 1"))
+        await connection.execute(text("UPDATE filabrain_settings SET mcp_enabled = FALSE"))
+    assert (await installed.get(f"{BASE}/settings")).json()["model_id"] == "example"
+    assert (await installed.put(f"{BASE}/settings", json=config | {"model_id": "updated"})).status_code == 200
+    assert (await installed.get(f"{BASE}/settings")).json()["model_id"] == "updated"
+    async with db_session.bind.connect() as connection:
+        assert await connection.scalar(text("SELECT mcp_enabled FROM filabrain_settings WHERE id = 1")) == 0
 
 
 async def test_create_research_draft_is_atomic_and_retry_safe(tmp_path):
@@ -1267,90 +1274,7 @@ async def test_model_completion_provider_request(monkeypatch, base_url, limit):
     assert await model.request_completion(base_url, "fixture-model", "fixture-key", messages) == "Hello"
 
 
-async def test_stock_host_api_key_authenticates_standalone_mcp(installed, db_session):
-    maker = Manufacturer(name="Stock host maker")
-    db_session.add(maker)
-    await db_session.commit()
-    key = await installed.post("/api/v1/me/api-keys", json={"name": "MCP test"})
-    assert key.status_code == 201
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="https://filaman.test",
-        headers={"Authorization": f"Bearer {key.json()['token']}"},
-    ) as external:
-
-        async def call(tool, **arguments):
-            response = await external.post(
-                f"{BASE}/mcp",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {"name": tool, "arguments": arguments},
-                },
-            )
-            assert response.status_code == 200
-            return response.json()["result"]
-
-        result = await call(
-            "create_filament",
-            manufacturer_id=maker.id,
-            designation="Fixture PLA",
-            material_type="PLA",
-            diameter_mm=1.75,
-        )
-        filament = result["structuredContent"]["id"]
-        assert (await call("create_spool", filament_id=filament, rfid_uid="DEADBEEF"))[
-            "isError"
-        ]
-        spool = (await call("create_spool", filament_id=filament))["structuredContent"]
-        assert await db_session.scalar(select(Spool.id)) == spool["id"]
-        assert (
-            await installed.delete(f"/api/v1/me/api-keys/{key.json()['id']}")
-        ).status_code == 204
-        response = await external.post(
-            f"{BASE}/mcp",
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-        )
-        assert response.status_code == 401
-
-
-async def test_mcp_requires_a_configured_proxy_for_forwarded_https(
-    installed, monkeypatch
-):
-    key = await installed.post("/api/v1/me/api-keys", json={"name": "MCP proxy test"})
-    headers = {
-        "Authorization": f"Bearer {key.json()['token']}",
-        "X-Real-IP": "192.0.2.20",
-        "X-Forwarded-For": "192.0.2.10, 192.0.2.20",
-        "X-Forwarded-Proto": "https",
-    }
-    payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-    proxy = ProxyHeadersMiddleware(app, trusted_hosts="127.0.0.1")
-    async with AsyncClient(
-        transport=ASGITransport(app=proxy, client=("127.0.0.1", 10000)),
-        base_url="http://filaman.test",
-    ) as external:
-        monkeypatch.delenv("FILABRAIN_MCP_TRUSTED_PROXY_IPS", raising=False)
-        assert (
-            await external.post(f"{BASE}/mcp", headers=headers, json=payload)
-        ).status_code == 403
-
-        monkeypatch.setenv("FILABRAIN_MCP_TRUSTED_PROXY_IPS", "192.0.2.20")
-        assert (
-            await external.post(f"{BASE}/mcp", headers=headers, json=payload)
-        ).status_code == 200
-        wrong_peer = headers | {"X-Forwarded-For": "192.0.2.20, 192.0.2.10"}
-        assert (
-            await external.post(f"{BASE}/mcp", headers=wrong_peer, json=payload)
-        ).status_code == 403
-        plain = headers | {"X-Forwarded-Proto": "http"}
-        assert (
-            await external.post(f"{BASE}/mcp", headers=plain, json=payload)
-        ).status_code == 403
-
-
-async def test_stock_host_session_pairing_and_built_in_proposals(
+async def test_stock_host_built_in_proposals(
     installed, monkeypatch
 ):
     from filabrain import research
@@ -1360,24 +1284,11 @@ async def test_stock_host_session_pairing_and_built_in_proposals(
 
     monkeypatch.setattr(research, "research_products", proposal)
     target = {"mode": "create", "identity": {"designation": "Fixture PLA"}}
-    response = await installed.post(f"{BASE}/pairings", json=target)
-    assert response.status_code == 201, response.text
-    pairing = response.json()
-    assert pairing["url"] == f"https://filaman.test{BASE}/mcp"
-    async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="https://filaman.test",
-        headers={"Authorization": f"Bearer {pairing['token']}"},
-    ) as external:
-        payload = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-        assert (await external.post(f"{BASE}/mcp", json=payload)).status_code == 200
-        await installed.put(f"{BASE}/settings/mcp", json={"mcp_enabled": False})
-        assert (await external.post(f"{BASE}/mcp", json=payload)).status_code == 404
     assert (await installed.post(f"{BASE}/proposals", json=target)).status_code == 200
 
 
 @pytest.mark.parametrize("oversized", [False, True])
-async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_session, monkeypatch, oversized):
+async def test_host_mcp_serves_filabrain_research_without_standalone_routes(installed, db_session, monkeypatch, oversized):
     from app.core.config import settings
     from app.models import AppSettings
 
@@ -1409,9 +1320,8 @@ async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_sess
     row.mcp_enabled = True
     row.mcp_write_enabled = False
     await db_session.commit()
-    key = await installed.post("/api/v1/me/api-keys", json={"name": "Host MCP", "scopes": ["filaments:read"]})
+    key = await installed.post("/api/v1/me/api-keys", json={"name": "Host MCP"})
     assert key.status_code == 201
-    assert (await installed.put(f"{BASE}/settings/mcp", json={"mcp_enabled": False})).status_code == 200
     token = key.json()["token"]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://filaman.test") as client:
@@ -1438,6 +1348,8 @@ async def test_host_mcp_can_research_with_legacy_endpoint_off(installed, db_sess
         response = await client.post(f"{BASE}/mcp", json=listing, headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 404
 
+    assert (await installed.put(f"{BASE}/settings/mcp", json={"mcp_enabled": False})).status_code == 404
+    assert (await installed.post(f"{BASE}/pairings", json={})).status_code == 404
     assert not (await db_session.scalars(select(Filament))).all()
 
 

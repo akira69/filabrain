@@ -1,15 +1,18 @@
 """Install and exercise the ZIP against an unmodified FilaMan backend."""
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 
 async def smoke(host: Path, archive: Path, directory: Path) -> None:
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{directory / 'filaman.db'}"
     os.environ["PLUGINS_DIR"] = str(directory / "plugins")
+    os.environ["MCP_PLUGIN_READ_TOOLS"] = "filabrain-research_filament"
     sys.path.insert(0, str(host / "backend"))
 
     from app.api.v1.router import mount_plugin_router_on_app
@@ -17,7 +20,7 @@ async def smoke(host: Path, archive: Path, directory: Path) -> None:
     from app.core.security import generate_token_secret, hash_token
     from app.core.seeds import run_all_seeds
     from app.main import app
-    from app.models import Base, Manufacturer, User, UserSession
+    from app.models import AppSettings, Base, Manufacturer, User, UserSession
     from app.services.plugin_service import PluginInstallService
     from httpx import ASGITransport, AsyncClient
 
@@ -28,6 +31,12 @@ async def smoke(host: Path, archive: Path, directory: Path) -> None:
             await run_all_seeds(db)
             user = User(email="plugin-smoke@example.invalid", is_superadmin=True, is_active=True)
             maker = Manufacturer(name="Plugin Smoke Test")
+            flags = await db.get(AppSettings, 1)
+            if flags is None:
+                flags = AppSettings(id=1)
+                db.add(flags)
+            flags.mcp_enabled = True
+            flags.mcp_write_enabled = True
             db.add_all([user, maker])
             await db.flush()
             secret = generate_token_secret()
@@ -62,17 +71,17 @@ async def smoke(host: Path, archive: Path, directory: Path) -> None:
             assert key.status_code == 201
             async with AsyncClient(
                 transport=transport, base_url="https://test",
-                headers={"Authorization": f"Bearer {key.json()['token']}"},
+                headers={"Authorization": f"ApiKey {key.json()['token']}"},
             ) as external:
                 async def tool(name, arguments):
-                    response = await external.post(f"{root}/mcp", json={
+                    response = await external.post("/mcp", json={
                         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
                         "params": {"name": name, "arguments": arguments},
                     })
                     assert response.status_code == 200, response.text
                     result = response.json()["result"]
                     assert not result.get("isError"), result
-                    return result["structuredContent"]
+                    return json.loads(result["content"][0]["text"])
 
                 created = await tool("create_filament", {
                     "manufacturer_id": maker.id, "designation": "Smoke PETG",
@@ -81,13 +90,22 @@ async def smoke(host: Path, archive: Path, directory: Path) -> None:
                 spool = await tool("create_spool", {"filament_id": created["id"]})
                 assert (await browser.get(f"/api/v1/spools/{spool['id']}")).json()["filament_id"] == created["id"]
 
-                off = await browser.put(f"{root}/settings/mcp", headers=headers, json={"mcp_enabled": False})
-                assert off.json() == {"mcp_enabled": False}
-                disabled = await external.post(f"{root}/mcp", json={
+                from filabrain import research
+
+                async def fixture_research(_db, _identity, **_hints):
+                    return {
+                        "suggestions": [{"field": "density_g_cm3", "value": 1.27}],
+                        "issues": [],
+                    }
+
+                with patch.object(research, "research_products", fixture_research):
+                    result = await tool("filabrain-research_filament", {"identity": {"designation": "Smoke PETG"}})
+                assert result["proposal"]["suggestions"] == [{"field": "density_g_cm3", "value": 1.27}]
+
+                response = await external.post(f"{root}/mcp", json={
                     "jsonrpc": "2.0", "id": 1, "method": "tools/list",
                 })
-                assert disabled.status_code == 404
-                assert (await browser.get(f"{root}/status")).json()["enabled"] is True
+                assert response.status_code == 404
     finally:
         await engine.dispose()
 
@@ -99,4 +117,4 @@ if __name__ == "__main__":
     with TemporaryDirectory(prefix="filabrain-install-") as scratch:
         os.chdir(scratch)
         asyncio.run(smoke(checkout, package, Path(scratch)))
-    print("Installed plugin and verified sidebar, standalone MCP creation, and the off switch.")
+    print("Installed the plugin and verified its sidebar, research and inventory creation through FilaMan MCP.")
