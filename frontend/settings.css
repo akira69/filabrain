@@ -1,14 +1,15 @@
 .research-clear-key { display: flex; align-items: center; gap: .4rem; }
-#research-endpoint-fields { min-width: 0; border: 0; padding: 0; margin: 0; }
+#research-endpoint-fields { min-width: 0; border: 1px solid var(--border); border-radius: .5rem; padding: .65rem; margin: 0; }
 #research-model-visibility > summary { cursor: pointer; }
 #research-visible-models { max-height: 15rem; overflow: auto; margin-block: .4rem; }
 #research-visible-models label { display: flex; align-items: center; gap: .55rem; min-height: 2.25rem; overflow-wrap: anywhere; }
 #research-visible-models input { flex: none; }
-#research-add-endpoint { min-height: 44px; }
+#research-add-endpoint { min-height: 36px; }
 #research-add-endpoint[aria-disabled="true"] { opacity: .55; cursor: default; }
   .research-model-picker { display: grid; gap: .4rem; }
   .research-model-picker > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8.5rem, max-content); gap: .5rem; }
-  .research-model-picker .fm-btn { min-height: 2.5rem; }
+  .research-model-picker > div:has(> select:only-child) { grid-template-columns: minmax(0, 1fr); }
+  .research-model-picker .fm-btn { min-height: 36px; }
   .research-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
   .fm-toggle input:focus-visible + .fm-toggle-slider { outline: 2px solid var(--accent); outline-offset: 3px; }
 .research-built-in { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .2rem .85rem; margin: .4rem 0 0; padding: 0; list-style: none; color: var(--text-muted); font-size: .875rem; }
@@ -26,7 +27,28 @@
 .research-supplier-row button, .research-supplier-add button, .research-supplier-add input { min-height: 2.75rem; }
 .research-manual-model > summary { color: var(--text-muted); cursor: pointer; }
 .research-manual-model > label { margin-block-start: .5rem; }
-@media (max-width: 480px) {
+.research-settings { max-width: 52rem; font-size: .875rem; }
+.research-settings .fm-section-header { padding: .4rem .75rem; }
+.research-settings .fm-section-body { padding: .65rem .75rem; gap: .5rem; }
+.research-settings .fm-compact-form { gap: .5rem; }
+.research-settings .fm-field-hint { margin: 0; font-size: .8125rem; }
+.research-settings :is(input:not([type=checkbox]), select, button) { min-height: 36px; font-size: .875rem; }
+.endpoint-identity { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: .5rem .75rem; }
+.endpoint-key { display: grid; align-content: start; gap: .25rem; min-width: 0; }
+.research-settings-actions { grid-column: 1 / -1; }
+@media (min-width: 700px) {
+  #filabrain-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  #filabrain-settings > section:first-of-type { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .endpoint-identity { grid-template-columns: minmax(0, 1fr); }
+}
+@media (pointer: coarse) {
+  #research-add-endpoint { min-height: 44px; }
+  .research-settings :is(input:not([type=checkbox]), select) { min-height: 44px; font-size: 1rem; }
+  .research-settings :is(button, .research-model-picker .fm-btn) { min-height: 44px; }
+}
+@media (max-width: 360px) {
   .research-model-picker > div { grid-template-columns: minmax(0, 1fr); }
   .research-model-picker .fm-btn { justify-self: start; }
 }

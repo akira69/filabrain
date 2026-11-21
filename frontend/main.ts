@@ -167,6 +167,9 @@ function mountLibrary(context?: SelectionContext) {
       if (picker.contentDocument?.querySelector('[data-filament-picker="1"]')) {
         message.textContent = ''
         const doc = picker.contentDocument
+        const surface = doc.createElement('style')
+        surface.textContent = 'html, body, #fm-page { background: var(--bg-elevated); }'
+        doc.head.append(surface)
         const count = doc.getElementById('picker-selection-count')
         if (count) count.hidden = true
         picker.hidden = false

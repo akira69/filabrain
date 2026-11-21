@@ -37,6 +37,11 @@
   --accent: #73d1ff;
 }
 * { box-sizing: border-box; }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text-muted) 45%, transparent) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-muted) 45%, transparent); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+@media (forced-colors: active) { * { scrollbar-color: auto; } }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 1rem/1.5 var(--font-sans); }
 main { max-width: 76rem; margin: auto; padding: clamp(.65rem, 2vw, 1.25rem); }

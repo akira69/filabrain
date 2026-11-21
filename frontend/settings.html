@@ -5,23 +5,34 @@
   <div class="research-settings">
     <form id="filabrain-settings" class="fm-compact-form">
     <section class="fm-card fm-section" aria-labelledby="model-settings-title">
-      <header class="fm-section-header"><h2 id="model-settings-title" data-i18n="filaBrain.settings">Model settings</h2></header>
+      <header class="fm-section-header"><h2 id="model-settings-title" data-i18n="filaBrain.settings">Model settings</h2>
+        <button type="button" id="research-add-endpoint" class="fm-btn" aria-disabled="true">
+              <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span data-i18n="filaBrain.addEndpoint">Add endpoint</span>
+            </button>
+      </header>
       <div class="fm-section-body">
         <div class="research-model-picker">
           <label for="research-model-endpoint" data-i18n="filaBrain.endpoint">Model endpoint</label>
           <div>
             <select id="research-model-endpoint" class="fm-input" disabled></select>
-            <button type="button" id="research-add-endpoint" class="fm-btn" aria-disabled="true">
-              <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-              <span data-i18n="filaBrain.addEndpoint">Add endpoint</span>
-            </button>
           </div>
         </div>
         <fieldset id="research-endpoint-fields" class="fm-compact-form" disabled>
-          <label>
-            <span data-i18n="filaBrain.endpointName">Endpoint name</span>
-            <input name="endpoint_name" class="fm-input" maxlength="100" />
-          </label>
+          <div class="endpoint-identity">
+            <label>
+              <span data-i18n="filaBrain.endpointName">Endpoint name</span>
+              <input name="endpoint_name" class="fm-input" maxlength="100" />
+            </label>
+            <div class="endpoint-key">
+              <label>
+                <span data-i18n="filaBrain.apiKey">API key (optional)</span>
+                <input name="api_key" type="password" class="fm-input" maxlength="1000" autocomplete="new-password" />
+              </label>
+              <p id="research-key-state" class="fm-field-hint"></p>
+              <label class="research-clear-key"><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
+            </div>
+          </div>
           <div class="research-model-picker">
             <label for="research-model-url" data-i18n="filaBrain.modelUrl">Model server URL</label>
             <div>
@@ -49,12 +60,6 @@
               <input name="model_id" class="fm-input" maxlength="150" />
             </label>
           </details>
-          <label>
-            <span data-i18n="filaBrain.apiKey">API key (optional)</span>
-            <input name="api_key" type="password" class="fm-input" maxlength="1000" autocomplete="new-password" />
-          </label>
-          <p id="research-key-state" class="fm-field-hint"></p>
-          <label class="research-clear-key"><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
           <details id="research-model-visibility" hidden>
             <summary data-i18n="filaBrain.modelVisibility">Models shown in chat</summary>
             <div id="research-visible-models"></div>

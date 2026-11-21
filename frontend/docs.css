@@ -9,6 +9,8 @@
   overscroll-behavior: contain;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  min-width: 0;
+  container-type: inline-size;
 }
 .docs-header {
   position: sticky;
@@ -16,7 +18,7 @@
   z-index: 1;
   background: radial-gradient(ellipse at top left, #9c6cf62e, transparent 70%), var(--bg-elevated);
 }
-.docs-content { padding: 1rem; font-size: .875rem; overflow-wrap: anywhere; }
+.docs-content { padding: .75rem 1rem; font-size: .875rem; overflow-wrap: anywhere; }
 .docs-content h3 { margin: 0; font-size: .9375rem; }
 .docs-content p { margin: .5rem 0 .85rem; }
 .docs-content details { border-top: 1px solid var(--border); padding: .7rem 0; }
@@ -25,8 +27,10 @@
 .docs-content dl { display: block; }
 .docs-content dt { font-weight: 650; }
 .docs-content dd { margin: .15rem 0 .65rem; }
+@container (min-width: 34rem) {
+  .docs-content dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem 1.25rem; }
+}
 @media (min-width: 801px) {
-  main > [data-view] { display: flow-root; }
   main:has(> .docs-panel[open]:not(:modal)) {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(19rem, 30%);
@@ -39,7 +43,7 @@
   }
   main:has(> .docs-panel[open]:not(:modal)) > #plugin-header { grid-area: 1 / 1 / 2 / -1; }
   main:has(> .docs-panel[open]:not(:modal)) > #plugin-status { grid-area: 2 / 1 / 3 / -1; }
-  main:has(> .docs-panel[open]:not(:modal)) > [data-view] { grid-area: 3 / 1; overflow: auto; }
+  main:has(> .docs-panel[open]:not(:modal)) > [data-view] { grid-area: 3 / 1; overflow: auto; min-height: 0; min-width: 0; }
   main:has(> .docs-panel[open]:not(:modal)) .research-chat { height: 100%; }
   .docs-panel:not(:modal) {
     grid-area: 3 / 2;
@@ -48,7 +52,21 @@
     height: 100%;
     max-height: none;
   }
-  .docs-panel:modal { width: min(32rem, calc(100% - 2rem)); max-height: calc(100dvh - 2rem); }
+  .docs-panel:modal {
+    position: fixed; inset: 0 0 0 auto; margin: 0;
+    width: min(30rem, 100%); max-width: none;
+    height: 100dvh; max-height: none;
+    border-radius: .65rem 0 0 .65rem;
+  }
+}
+@media (min-width: 96rem) {
+  main:has(> .docs-panel[open]:not(:modal)) {
+    max-width: 116rem;
+    grid-template-columns: minmax(0, 73.5rem) minmax(16rem, 1fr);
+  }
+  main:has(> .docs-panel[open]:not(:modal)[data-guide-topic="settings"]) {
+    grid-template-columns: 52rem minmax(16rem, 1fr);
+  }
 }
 @media (max-width: 800px) {
   .docs-panel {
