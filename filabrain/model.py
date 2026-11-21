@@ -273,10 +273,17 @@ async def request_completion(
         if "prompt_tokens" in usage and result.get("system_fingerprint") == "fp_ollama":
             # The running window can be smaller than the model's advertised maximum.
             try:
-                async with httpx.AsyncClient(timeout=2, trust_env=False) as client:
-                    response = await client.get(f"{base_url.rstrip('/').removesuffix('/v1')}/api/ps", headers=headers)
+                async with (
+                    httpx.AsyncClient(timeout=2, trust_env=False) as client,
+                    client.stream("GET", f"{base_url.rstrip('/').removesuffix('/v1')}/api/ps", headers=headers) as response,
+                ):
                     response.raise_for_status()
-                    metadata = response.json() if len(response.content) <= 64 * 1024 else {}
+                    raw = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        raw.extend(chunk)
+                        if len(raw) > 64 * 1024:
+                            raise ValueError("Model metadata too large")
+                    metadata = json.loads(raw)
                 running = metadata.get("models") if isinstance(metadata, dict) else None
                 for item in running if isinstance(running, list) else []:
                     if isinstance(item, dict) and (item.get("model") or item.get("name")) == result.get("model", model):

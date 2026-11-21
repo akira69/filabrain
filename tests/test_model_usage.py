@@ -47,3 +47,27 @@ async def test_unavailable_ollama_metadata_keeps_token_counts(monkeypatch, metad
     usage = {}
     assert await model.request_completion('http://model/v1', 'test', '', [], usage=usage) == 'Answer'
     assert usage == {'prompt_tokens': 100}
+
+
+@pytest.mark.asyncio
+async def test_oversized_ollama_metadata_stops_streaming(monkeypatch):
+    import httpx
+    chunks = []
+
+    class Metadata(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for index in range(6):
+                chunks.append(index)
+                yield b" " * 32768
+
+    def upstream(request):
+        if request.url.path == "/api/ps":
+            return Response(200, stream=Metadata())
+        return Response(200, json={"system_fingerprint": "fp_ollama", "model": "test",
+            "choices": [{"message": {"content": "Answer"}}], "usage": {"prompt_tokens": 100}})
+
+    monkeypatch.setattr(model.httpx, "AsyncClient", lambda **kwargs: AsyncClient(transport=MockTransport(upstream), **kwargs))
+    usage = {}
+    assert await model.request_completion("http://model/v1", "test", "", [], usage=usage) == "Answer"
+    assert usage == {"prompt_tokens": 100}
+    assert len(chunks) == 3
