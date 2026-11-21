@@ -1,7 +1,7 @@
 .docs-trigger { gap: .45rem; }
 .docs-trigger svg { color: var(--accent); flex: none; }
 .docs-trigger[aria-expanded="true"] { border-color: var(--accent); }
-.docs-close { width: 44px; height: 44px; padding: 0; }
+.docs-close { width: 36px; height: 36px; padding: 0; }
 .docs-panel {
   padding: 0;
   width: 100%;
@@ -16,7 +16,12 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  background: radial-gradient(ellipse at top left, #9c6cf62e, transparent 70%), var(--bg-elevated);
+  padding: .35rem .75rem;
+  background: var(--bg-soft);
+}
+.docs-header .filabrain-mark { width: 1.5rem; height: 1.5rem; }
+@media (pointer: coarse) {
+  .docs-close { width: 44px; height: 44px; }
 }
 .docs-content { padding: .75rem 1rem; font-size: .875rem; overflow-wrap: anywhere; }
 .docs-content h3 { margin: 0; font-size: .9375rem; }
@@ -27,9 +32,6 @@
 .docs-content dl { display: block; }
 .docs-content dt { font-weight: 650; }
 .docs-content dd { margin: .15rem 0 .65rem; }
-@container (min-width: 34rem) {
-  .docs-content dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem 1.25rem; }
-}
 @media (min-width: 801px) {
   main:has(> .docs-panel[open]:not(:modal)) {
     display: grid;

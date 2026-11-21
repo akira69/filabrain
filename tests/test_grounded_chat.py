@@ -472,3 +472,15 @@ async def test_ams_comparison_retrieves_both_rules_and_allows_the_cited_device_n
     assert "missing_evidence" in invalid["notices"]
     unknown = await ask(chat_db, monkeypatch, question, answer.replace("AMS 2 Pro", "AMS 3 Pro"))
     assert "missing_evidence" in unknown["notices"]
+
+
+async def test_chat_returns_measured_usage(chat_db, monkeypatch):
+    db, _, research = chat_db
+    async def complete(_url, _model, _key, _messages, *, usage, **_kwargs):
+        usage.update(prompt_tokens=120, completion_tokens=40, context_window=4096)
+        return 'Hello.'
+    monkeypatch.setattr(research, 'request_completion', complete)
+    principal = Principal(auth_type='session', user_id=1, is_superadmin=True)
+    result = await research.research_chat(research.ChatRequest(messages=[{'role': 'user', 'content': 'Hello'}]), db, principal)
+    assert result['reply'] == 'Hello.'
+    assert result['usage'] == {'prompt_tokens': 120, 'completion_tokens': 40, 'context_window': 4096}

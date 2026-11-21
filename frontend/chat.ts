@@ -4,6 +4,7 @@ import { researchFieldLabel } from './shared/filabrain'
 import { spoolProfileCards, type SpoolProfile } from './shared/spool-profiles'
 import { mountModelPicker, type ModelSelection } from './shared/model-picker'
 import { identity, type ResearchDraft } from './research'
+import { mountDictation } from './dictation'
 
 const pageLabels = {
   new_filament: 'filaments.newFilament',
@@ -26,6 +27,8 @@ type Message = {
   role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal']; savedDraftId?: string
   grounding?: Grounding; spoolProfiles?: SpoolProfile[]; selectedSpoolProfile?: string; confirmedSpoolProfile?: string
   activeSpoolChoice?: true; spoolLookupFilamentId?: number | null; spoolLookupId?: string
+  usage?: { prompt_tokens: number; completion_tokens?: number; context_window?: number }
+  usageModel?: ModelSelection
 }
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
@@ -122,6 +125,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   let model = statusModel.chat_model
   const form = document.querySelector<HTMLFormElement>('[data-chat-form]')!
   const input = form.querySelector('textarea')!
+  const dictation = mountDictation(form, input)
+  const usageLabel = form.querySelector<HTMLElement>('[data-chat-usage]')!
   const submit = form.querySelector<HTMLButtonElement>('.chat-send')!
   const webSearch = form.querySelector<HTMLButtonElement>('[data-chat-web-search]')!
   const contextPanel = form.querySelector<HTMLDetailsElement>('[data-chat-context]')!
@@ -184,6 +189,19 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     submit.title = label
     submit.toggleAttribute('data-busy', !!request)
     input.readOnly = !!request || busyResearch || staging
+    dictation.setBusy(input.readOnly)
+    const usage = current.messages.at(-1)?.usage
+    const usedModel = current.messages.at(-1)?.usageModel
+    usageLabel.hidden = !usage || researching || usedModel?.model_id !== modelPicker.selected?.model_id
+      || usedModel?.endpoint_id !== modelPicker.selected?.endpoint_id
+    if (usage) {
+      const count = usage.prompt_tokens + (usage.completion_tokens ?? 0)
+      const limit = usage.context_window
+      usageLabel.textContent = t(limit ? 'filaBrain.contextPercent' : 'filaBrain.contextTokens', {
+        count: count.toLocaleString(), limit: limit?.toLocaleString() ?? '', percent: limit ? Math.round(count / limit * 100) : '',
+      })
+      usageLabel.title = t(limit ? 'filaBrain.contextUsageHint' : 'filaBrain.contextUsageUnknown')
+    }
     modelPicker.setBusy(!!request || busyResearch || staging)
     status.toggleAttribute('data-chat-running', !!request)
     newChat.disabled = busyResearch || staging || !researching && !request && !current.messages.length && !input.value
@@ -564,6 +582,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     updateControls()
   }
 
+  form.addEventListener('click', event => {
+    if (event.target instanceof Element && event.target.closest('[role=menuitemradio]')) updateControls()
+  })
+
   input.addEventListener('input', updateControls)
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !request && !busyResearch) {
@@ -624,8 +646,9 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       const filamentId = filament.value ? Number(filament.value) : null
       const history = chatHistoryWindow(current.messages, 10, lookup)
       const lookupMessageIndex = lookup ? history.indexOf(lookup) : -1
-      const { reply, action, spool_profiles, selected_spool_profile_id, ...grounding } = await api.post<{
+      const { reply, action, spool_profiles, selected_spool_profile_id, usage, ...grounding } = await api.post<{
         reply: string; action: Action | null; spool_profiles?: SpoolProfile[]; selected_spool_profile_id?: string
+        usage?: Message['usage']
       } & Partial<Grounding>>('/filabrain/chat', {
         messages: [...history, question].map(({ role, content, confirmedSpoolProfile }) => ({
           role, content, ...(confirmedSpoolProfile ? { confirmed_spool_profile_id: confirmedSpoolProfile } : {}),
@@ -648,6 +671,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       if (selected_spool_profile_id && lookup && !lookup.spoolLookupId) lookup.spoolLookupId = newId()
       const answer: Message = {
         role: 'assistant', content: reply, action: action ?? undefined,
+        usage,
+        usageModel: modelPicker.selected,
         grounding: Array.isArray(grounding.evidence) ? grounding as Grounding : undefined,
         spoolProfiles,
         spoolLookupFilamentId: spoolProfiles?.length

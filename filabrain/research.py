@@ -280,10 +280,11 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         )},
         *({"role": message.role, "content": message.content} for message in data.messages),
     ]
+    usage: dict[str, int] = {}
     try:
         async with asyncio.timeout(50):
             answer = await request_completion(
-                endpoint["model_url"], model, model_key(endpoint), messages, timeout=45,
+                endpoint["model_url"], model, model_key(endpoint), messages, timeout=45, usage=usage,
             )
         if not answer.strip():
             raise ValueError("Empty model response")
@@ -292,7 +293,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
             return context.response("")
         raise HTTPException(502, "The configured model could not answer. Try again.") from None
     if context:
-        return context.response(answer)
+        return {**context.response(answer), **({"usage": usage} if usage else {})}
     action = None
     if marker := PAGE_MARKER.search(answer):
         page, name = marker.groups()
@@ -303,7 +304,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         answer = PAGE_MARKER.sub("", answer).strip()
     if not answer.strip():
         answer = "Select the page to continue." if action else "That page is unavailable."
-    return {"reply": answer.strip()[:8000], "action": action}
+    return {"reply": answer.strip()[:8000], "action": action, **({"usage": usage} if usage else {})}
 
 
 def linked_spool_question(question: str, filament: Filament) -> bool:

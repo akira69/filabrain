@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node frontend/build.mjs",
-    "test": "node tests/check-frontend.mjs && node tests/check-layout.mjs"
+    "test": "node tests/check-frontend.mjs && node tests/check-layout.mjs && node tests/check-dictation.mjs"
   },
   "devDependencies": {
     "esbuild": "0.27.3",

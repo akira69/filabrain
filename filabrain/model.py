@@ -238,6 +238,7 @@ async def request_extraction(
 
 async def request_completion(
     base_url: str, model: str, key: str, messages: list[dict[str, str]], *, timeout: float = 15, max_tokens: int = 1500,
+    usage: dict[str, int] | None = None,
 ) -> str:
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     token_limit = "max_completion_tokens" if urlsplit(base_url).hostname == "api.openai.com" else "max_tokens"
@@ -260,7 +261,29 @@ async def request_completion(
             raw.extend(chunk)
             if len(raw) > 512 * 1024:
                 raise ValueError("Model response too large")
-    content = json.loads(raw)["choices"][0]["message"]["content"]
+    result = json.loads(raw)
+    content = result["choices"][0]["message"]["content"]
     if not isinstance(content, str):
         raise TypeError("Model did not return text")
+    if usage is not None:
+        reported = result.get("usage")
+        if isinstance(reported, dict) and type(reported.get("prompt_tokens")) is int and reported["prompt_tokens"] >= 0:
+            usage.update({name: reported[name] for name in ("prompt_tokens", "completion_tokens")
+                          if type(reported.get(name)) is int and 0 <= reported[name] <= 2**53 - 1})
+        if "prompt_tokens" in usage and result.get("system_fingerprint") == "fp_ollama":
+            # The running window can be smaller than the model's advertised maximum.
+            try:
+                async with httpx.AsyncClient(timeout=2, trust_env=False) as client:
+                    response = await client.get(f"{base_url.rstrip('/').removesuffix('/v1')}/api/ps", headers=headers)
+                    response.raise_for_status()
+                    metadata = response.json() if len(response.content) <= 64 * 1024 else {}
+                running = metadata.get("models") if isinstance(metadata, dict) else None
+                for item in running if isinstance(running, list) else []:
+                    if isinstance(item, dict) and (item.get("model") or item.get("name")) == result.get("model", model):
+                        limit = item.get("context_length")
+                        if type(limit) is int and 0 < limit <= 2**53 - 1:
+                            usage["context_window"] = limit
+                        break
+            except (httpx.HTTPError, ValueError):
+                pass
     return content

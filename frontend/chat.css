@@ -99,6 +99,12 @@
   }
   .message-composer textarea:focus { outline: none; box-shadow: none; }
   .chat-context { padding-inline: .45rem; color: var(--text-muted); font-size: .85rem; }
+  .chat-context-hint { margin: .4rem 0; font-size: .8125rem; }
+  .chat-mic { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; }
+  .chat-mic[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .chat-mic[aria-disabled="true"] { color: var(--text-muted); }
+  .chat-usage, .chat-dictation-status { color: var(--text-muted); font-size: .75rem; padding-inline: .45rem; }
+  .chat-usage { text-align: end; }
   .chat-context-fields {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
     align-items: start; gap: .45rem; margin-block-start: .4rem;
@@ -106,8 +112,9 @@
   .chat-context-fields > * { display: grid; gap: .2rem; min-width: 0; }
   .chat-context-fields .fm-input { width: 100%; min-width: 0; }
   .chat-search { margin-inline-start: auto; font-size: .85rem; min-height: 44px; }
-  .chat-toolbar { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: 0 .2rem; }
+  .chat-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .5rem; padding: 0 .2rem; }
   .chat-model-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 0 .5rem; min-width: 0; }
+  @media (max-width: 600px) { .chat-model-picker { flex-basis: 100%; } }
   .chat-model-trigger {
     display: inline-flex;
     align-items: center;

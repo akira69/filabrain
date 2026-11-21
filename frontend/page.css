@@ -24,9 +24,9 @@
   --accent: #14694b;
   --accent-text: #fff;
 }
-:root[data-theme="light"] .filabrain-mark [stroke="#4ee3a2"] { stroke: #168355; }
-:root[data-theme="light"] .filabrain-mark [stroke="#c7adff"] { stroke: #6941a5; }
-:root[data-theme="light"] .filabrain-mark [fill="#c7adff"] { fill: #6941a5; }
+:root[data-theme="light"] .filabrain-mark [stroke="#45D7BC"] { stroke: #087F74; }
+:root[data-theme="light"] .filabrain-mark [stroke="#F449A4"] { stroke: #BF2679; }
+:root[data-theme="light"] .filabrain-mark [fill="#F449A4"] { fill: #BF2679; }
 :root[data-theme="dark"] {
   --bg: #191e28;
   --bg-elevated: #212734;
