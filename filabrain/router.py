@@ -10,7 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import batch_api, research, settings
+from . import audio, batch_api, research, settings
 from .batch_worker import start_worker
 from .db import ensure_schema
 
@@ -31,7 +31,7 @@ router = APIRouter(
     dependencies=[Depends(ensure_schema)],
     lifespan=lifespan,
 )
-for routes in (research.router, settings.router, batch_api.router):
+for routes in (research.router, settings.router, batch_api.router, audio.router):
     router.include_router(routes)
 
 

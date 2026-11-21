@@ -1,4 +1,6 @@
 .research-clear-key { display: flex; align-items: center; gap: .4rem; }
+.endpoint-capabilities { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }
+.endpoint-capabilities label { display: flex; align-items: center; gap: .4rem; min-height: 36px; }
 .research-auto-live:has(input:disabled) { color: var(--text-muted); opacity: .6; }
 .research-settings .research-guide-link { min-height: auto; padding: 0; border: 0; background: transparent; color: var(--accent); text-decoration: underline; font: inherit; }
 #research-endpoint-fields { min-width: 0; border: 1px solid var(--border); border-radius: .5rem; padding: .65rem; margin: 0; }
@@ -10,7 +12,7 @@
 #research-add-endpoint[aria-disabled="true"] { opacity: .55; cursor: default; }
   .research-model-picker { display: grid; gap: .4rem; }
   .research-model-picker > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8.5rem, max-content); gap: .5rem; }
-  .research-model-picker > div:has(> select:only-child) { grid-template-columns: minmax(0, 1fr); }
+  .research-model-picker > div:has(> select:only-child), .research-model-picker > div:has(> button[hidden]) { grid-template-columns: minmax(0, 1fr); }
   .research-model-picker .fm-btn { min-height: 36px; }
   .research-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
   .fm-toggle input:focus-visible + .fm-toggle-slider { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -46,6 +48,7 @@
   .endpoint-identity { grid-template-columns: minmax(0, 1fr); }
 }
 @media (pointer: coarse) {
+  .endpoint-capabilities label { min-height: 44px; }
   #research-add-endpoint { min-height: 44px; }
   .research-settings :is(input:not([type=checkbox]), select) { min-height: 44px; font-size: 1rem; }
   .research-settings :is(button, .research-model-picker .fm-btn) { min-height: 44px; }

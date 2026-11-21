@@ -12,6 +12,9 @@ export type Status = {
   enabled: boolean
   can_chat: boolean
   microphone_enabled?: boolean
+  microphone_endpoint_id?: string | null
+  microphone_endpoint_name?: string | null
+  microphone_revision?: string
   chat_model?: string | null
   chat_endpoint_id?: string | null
   can_create: boolean
@@ -313,6 +316,7 @@ async function main() {
           setGuide('editor')
         }
         function openEditorSettings() {
+          chat.saveDraft()
           chatView.hidden = true
           settingsView.hidden = false
           setGuide('settings')
@@ -344,6 +348,9 @@ async function main() {
     document.addEventListener('filaman:model-change', event => {
       const detail = (event as CustomEvent<Status>).detail
       if (typeof detail.microphone_enabled === 'boolean') status.microphone_enabled = detail.microphone_enabled
+      if (detail.microphone_endpoint_id !== undefined) status.microphone_endpoint_id = detail.microphone_endpoint_id
+      if (detail.microphone_endpoint_name !== undefined) status.microphone_endpoint_name = detail.microphone_endpoint_name
+      if (detail.microphone_revision !== undefined) status.microphone_revision = detail.microphone_revision
     })
     const header = element('plugin-header')
     const nav = header.querySelector('nav')!

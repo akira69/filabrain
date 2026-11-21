@@ -605,7 +605,7 @@ try {
     await order[0].focus()
     for (const button of order.slice(1)) {
       await page.keyboard.press('Tab')
-      assert.ok(await button.evaluate(el => el === document.activeElement), 'utility controls precede the active tab')
+      assert.ok(await button.evaluate(el => el === document.activeElement), 'utility controls precede the active tab: ' + JSON.stringify({width,expected:await button.getAttribute('aria-label'),active:await page.evaluate(()=>document.activeElement?.outerHTML)}))
     }
   }
   await headerSettings.focus()
@@ -969,6 +969,13 @@ try {
   assert.deepEqual(supplierSites, [])
   assert.equal(await enableSearch.isVisible(), false)
   holdStage = true
+  await context.addInitScript(() => {
+    window.SpeechRecognition = class {
+      constructor() { window.editorRecognition=this }
+      start() {}
+      abort() { this.aborted=true; this.onend?.() }
+    }
+  })
   await page.goto('https://fila.test/editor-fixture')
   const frame = page.frameLocator('iframe')
   const followUp = frame.getByRole('textbox', { name: 'Follow up on this search' })
@@ -1053,6 +1060,11 @@ try {
   await researchPage.waitFor()
   await frame.getByRole('button', { name: 'Send follow-up' }).waitFor()
   await frame.locator('[data-chat-form]:visible [name="message"]:not([readonly])').waitFor()
+  await frame.getByRole('button', { name: 'Dictate a message', exact: true }).click()
+  await frame.getByRole('button', { name: 'Stop dictation', exact: true }).waitFor()
+  await frame.getByRole('button', { name: 'FilaBrain settings', exact: true }).click()
+  assert.equal(await frame.locator('body').evaluate(() => window.editorRecognition.aborted), true, 'embedded settings stops capture before hiding the chat')
+  await frame.getByRole('button', { name: 'Back to chat', exact: true }).click()
   assert.equal(await researchPage.locator('svg[aria-hidden=true]').count(), 1)
   recordUnavailable = true
   const requestsBeforeFailedClick = proposalRequests

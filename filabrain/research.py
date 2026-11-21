@@ -43,6 +43,7 @@ from .settings import (
     lock_research_plugin,
     model_group,
     model_key,
+    microphone_revision as effective_microphone_revision,
     select_model,
 )
 from .spool_profiles import (
@@ -145,6 +146,9 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 raise
     can_chat = enabled and principal.auth_type == "session" and "filaments:read" in permissions
     microphone_enabled = False
+    microphone_endpoint_id = None
+    microphone_endpoint_name = None
+    microphone_revision = None
     chat_model = None
     endpoint_id = None
     if enabled and principal.auth_type == "session" and (
@@ -152,6 +156,10 @@ async def research_status(db: DBSession, principal: PrincipalDep):
     ):
         _, config = await config_record(db)
         microphone_enabled = config.get("microphone_enabled", True)
+        microphone_endpoint_id = config.get("microphone_endpoint_id")
+        microphone_endpoint_name = next((item["name"] for item in endpoints(config)
+                                         if item["id"] == microphone_endpoint_id), None)
+        microphone_revision = effective_microphone_revision(config)
         chat_model = (config["model_id"] or None) if config["model_url"] else None
         endpoint_id = default_endpoint_id(config)
     return {
@@ -169,6 +177,9 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         "can_chat": can_chat,
         "chat_model": chat_model,
         "microphone_enabled": microphone_enabled,
+        "microphone_endpoint_id": microphone_endpoint_id,
+        "microphone_endpoint_name": microphone_endpoint_name,
+        "microphone_revision": microphone_revision,
         "chat_endpoint_id": endpoint_id,
     }
 
@@ -356,7 +367,7 @@ async def research_models(db: DBSession, principal: PrincipalDep):
     await ensure_any_permission(db, principal, "filaments:read", "filaments:create", "filaments:update")
     _, config = await config_record(db)
     await db.rollback()
-    saved = endpoints(config)
+    saved = [item for item in endpoints(config) if item["chat_enabled"]]
     # Saved catalogs are local data. Legacy and manual-only endpoints may need discovery.
     groups = await asyncio.gather(*(model_group(endpoint) for endpoint in saved))
     default_id = config.get("default_endpoint_id", saved[0]["id"] if saved else None)

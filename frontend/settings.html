@@ -33,15 +33,19 @@
               <label class="research-clear-key"><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
             </div>
           </div>
+          <div class="endpoint-capabilities">
+            <label><input name="chat_enabled" type="checkbox" checked /> <span data-i18n="filaBrain.endpointChat">Chat</span></label>
+            <label><input name="audio_enabled" type="checkbox" /> <span data-i18n="filaBrain.endpointAudio">Audio transcription</span></label>
+          </div>
           <div class="research-model-picker">
             <label for="research-model-url" data-i18n="filaBrain.modelUrl">Model server URL</label>
             <div>
               <input id="research-model-url" name="model_url" type="url" class="fm-input" maxlength="500" placeholder="http://ollama:11434" aria-describedby="research-model-url-hint" />
-              <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-i18n="filaBrain.testConnection" disabled>Test connection</button>
+              <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-chat-only data-i18n="filaBrain.testConnection" disabled>Test connection</button>
             </div>
             <small id="research-model-url-hint" class="fm-field-hint" data-i18n="filaBrain.modelUrlHint">Use an Ollama server or an OpenAI-compatible base URL.</small>
           </div>
-          <div class="research-model-picker">
+          <div class="research-model-picker" data-chat-only>
             <label for="research-available-model" data-i18n="filaBrain.availableModels">Available models</label>
             <div>
               <select id="research-available-model" name="available_model" class="fm-input" disabled>
@@ -53,19 +57,23 @@
               </button>
             </div>
           </div>
-          <details class="research-manual-model">
+          <details class="research-manual-model" data-chat-only>
             <summary data-i18n="filaBrain.modelManual">Enter a model ID manually</summary>
             <label>
               <span data-i18n="filaBrain.modelId">Model ID</span>
               <input name="model_id" class="fm-input" maxlength="150" />
             </label>
           </details>
+          <label id="research-audio-model" hidden>
+            <span data-i18n="filaBrain.audioModelId">Transcription model ID</span>
+            <input name="audio_model_id" class="fm-input" maxlength="150" />
+          </label>
           <details id="research-model-visibility" hidden>
             <summary data-i18n="filaBrain.modelVisibility">Models shown in chat</summary>
             <div id="research-visible-models"></div>
           </details>
           <div class="actions">
-            <button type="button" id="research-default-endpoint" class="fm-btn" data-i18n="filaBrain.makeDefault">Make default</button>
+            <button type="button" id="research-default-endpoint" class="fm-btn" data-chat-only data-i18n="filaBrain.makeDefault">Make default</button>
             <button type="button" id="research-remove-endpoint" class="fm-btn" data-i18n="filaBrain.removeEndpoint">Remove endpoint</button>
           </div>
           <p id="research-model-message" class="fm-field-hint" role="status"></p>
@@ -76,7 +84,9 @@
       <header class="fm-section-header"><h2 id="microphone-settings-title" data-i18n="filaBrain.microphoneSettings">Microphone</h2></header>
       <div class="fm-section-body">
         <label class="research-clear-key"><input name="microphone_enabled" type="checkbox" checked disabled /> <span data-i18n="filaBrain.microphoneEnabled">Enable microphone dictation</span></label>
-        <p class="fm-field-hint" data-i18n="filaBrain.microphoneHelp">Uses your browser’s speech-recognition service to put editable text in the chat. The browser may send audio to its online transcription service. Only text is sent to your chosen model, after you press Send. Requires HTTPS and a supported browser.</p>
+        <label for="research-microphone-source" data-i18n="filaBrain.microphoneSource">Dictation source</label>
+        <select id="research-microphone-source" name="microphone_endpoint_id" class="fm-input" aria-describedby="research-microphone-help" disabled></select>
+        <p id="research-microphone-help" class="fm-field-hint"></p>
         <p class="fm-field-hint" data-i18n="filaBrain.microphoneOsHelp">You can use your device’s keyboard dictation independently, even when this microphone is disabled. FilaBrain cannot start OS keyboard dictation for you.</p>
       </div>
     </section>
