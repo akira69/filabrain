@@ -6,6 +6,7 @@ import { mountResearch, type EditorContext, type SelectionContext } from './rese
 import { ApiError, api } from './shared/api'
 import { batchHref, createResearchBatch, listResearchRuns, mountResearchBatches, type BatchMode, type ExpectedFilament } from './shared/filabrain-batches'
 import { initI18n, t } from './shared/i18n'
+import { mountTheme } from './theme'
 
 export type Status = {
   enabled: boolean
@@ -257,10 +258,8 @@ function mountLibrary(context?: SelectionContext) {
 }
 
 async function main() {
+  mountTheme()
   await initI18n()
-  const theme = () => { document.documentElement.dataset.theme = localStorage.getItem('theme') || 'brand' }
-  theme()
-  window.addEventListener('storage', event => { if (event.key === 'theme') theme() })
   const params = new URLSearchParams(location.search)
   const id = params.get('id')
   const hostMode = window.parent === window ? null : params.get('filament_host')

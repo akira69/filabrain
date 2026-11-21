@@ -1,14 +1,19 @@
+/* Standalone defaults match FilaMan. Embedded pages receive the host's active tokens. */
 :root {
   color-scheme: dark;
-  --bg: #15231d;
-  --bg-elevated: #1b2c24;
-  --bg-soft: #24382f;
+  --bg: #0c1612;
+  --bg-elevated: #13261d;
+  --bg-soft: #183225;
   --input-bg: var(--bg-soft);
   --text: #e9f3ec;
   --text-muted: #b5c7bd;
-  --border: #30463b;
+  --border: rgba(255, 255, 255, .08);
   --accent: #4ee3a2;
-  --accent-text: #0b120e;
+  --accent-2: #6cc6ff;
+  --accent-3: #f7c86a;
+  --btn-primary-text: #0b120e;
+  --accent-text: var(--btn-primary-text);
+  --warning-text: var(--accent-3);
   --radius-sm: .75rem;
   --font-sans: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
   --font-serif: "Fraunces", Georgia, serif;
@@ -20,22 +25,26 @@
   --bg-soft: #f1ece3;
   --text: #1a231e;
   --text-muted: #53645a;
-  --border: #cbd3cd;
-  --accent: #14694b;
-  --accent-text: #fff;
+  --border: rgba(26, 35, 30, .12);
+  --accent: #1c9b6b;
+  --accent-2: #2b7bc7;
+  --accent-3: #d38e2c;
+  --btn-primary-text: #fff;
+  --warning-text: #8b5a12;
 }
-:root[data-theme="light"] .filabrain-mark [stroke="#4ee3a2"] { stroke: #168355; }
-:root[data-theme="light"] .filabrain-mark [stroke="#c7adff"] { stroke: #6941a5; }
-:root[data-theme="light"] .filabrain-mark [fill="#c7adff"] { fill: #6941a5; }
 :root[data-theme="dark"] {
-  --bg: #191e28;
-  --bg-elevated: #212734;
-  --bg-soft: #2a3343;
+  --bg: #0b0d12;
+  --bg-elevated: #141825;
+  --bg-soft: #1a2032;
   --text: #eef1f7;
   --text-muted: #9aa4b7;
-  --border: #374052;
   --accent: #73d1ff;
+  --accent-2: #8cf3b2;
+  --accent-3: #f3a05f;
 }
+.filabrain-mark [stroke="#4ee3a2"] { stroke: var(--accent); }
+.filabrain-mark [stroke="#c7adff"] { stroke: var(--accent-2); }
+.filabrain-mark [fill="#c7adff"] { fill: var(--accent-2); }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 1rem/1.5 var(--font-sans); }

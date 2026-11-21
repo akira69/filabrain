@@ -504,7 +504,7 @@ try {
   const warningBounds = await warning.boundingBox()
   const pickerBounds = await pickerButton.boundingBox()
   assert.ok(warningBounds.x >= pickerBounds.x + pickerBounds.width)
-  assert.equal(await warning.evaluate(el => getComputedStyle(el).color), 'rgb(255, 211, 107)')
+  assert.equal(await warning.evaluate(el => getComputedStyle(el).color), 'rgb(247, 200, 106)')
   assert.equal(await warning.getAttribute('href'), '?tab=settings')
   await warning.press('Enter')
   await page.waitForFunction(() => document.activeElement === document.querySelector('[name="model_url"]'))
