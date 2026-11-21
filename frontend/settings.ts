@@ -16,6 +16,8 @@ export async function mountSettings() {
   const enableSearch = document.getElementById('research-enable-search')!
   const searchSetup = document.getElementById('research-search-setup')!
   const sourceControls = form.querySelector<HTMLFieldSetElement>('#research-source-controls')!
+  const microphoneSource = form.querySelector<HTMLSelectElement>('#research-microphone-source')!
+  const microphoneHelp = document.getElementById('research-microphone-help')!
   const supplierSites = document.getElementById('research-supplier-sites')!
   const domainInput = form.querySelector<HTMLInputElement>('#research-supplier-domain')!
   const addSupplier = form.querySelector<HTMLButtonElement>('#research-add-supplier')!
@@ -28,8 +30,13 @@ export async function mountSettings() {
   let saving = false
   let testingSearch = false
   let sites: SupplierSite[] = []
+  let microphoneEndpointId: string | null = null
+  let microphoneEndpointName: string | null = null
   const models = mountModelSettings(form, refresh)
   const sourceValues = () => ({
+    microphone_enabled: field('microphone_enabled').checked,
+    microphone_endpoint_id: microphoneEndpointId,
+    chat_live_sources: field('chat_live_sources').checked,
     search_url: field('search_url').value.trim(),
     supplier_sites: sites,
     supplier_download_mib: field('supplier_download_mib').valueAsNumber,
@@ -38,6 +45,22 @@ export async function mountSettings() {
   function refresh() {
     const ready = savedSources !== undefined
     const sources = sourceValues()
+    field('microphone_enabled').disabled = saving || !ready
+    const audioEndpoints = models.endpoints.filter(endpoint => endpoint.audio_enabled && endpoint.name)
+    const selected = audioEndpoints.find(endpoint => endpoint.id === microphoneEndpointId)
+    if (selected) microphoneEndpointName = selected.name
+    const invalidSource = !!microphoneEndpointId && !selected
+    microphoneSource.replaceChildren(new Option(t('filaBrain.microphoneBrowser'), ''),
+      ...audioEndpoints.map(endpoint => new Option(endpoint.name, endpoint.id)),
+      ...(invalidSource ? [new Option(t('filaBrain.microphoneSourceUnavailable', { name: microphoneEndpointName ?? microphoneEndpointId! }), microphoneEndpointId!)] : []))
+    microphoneSource.value = microphoneEndpointId ?? ''
+    microphoneSource.disabled = saving || !ready
+    microphoneSource.setCustomValidity(invalidSource ? t('filaBrain.microphoneSourceRequired') : '')
+    microphoneHelp.textContent = invalidSource ? t('filaBrain.microphoneSourceRequired') : microphoneEndpointId
+      ? t('filaBrain.microphoneEndpointHelp', { name: selected!.name }) : t('filaBrain.microphoneHelp')
+    const searchReady = !!sources.search_url && field('search_url').validity.valid
+    field('chat_live_sources').disabled = saving || !ready || !searchReady
+    document.getElementById('research-auto-search-setup')!.hidden = searchReady
     const dirtyModels = ready && JSON.stringify(models.values()) !== savedModels
     const dirty = dirtyModels || (ready && JSON.stringify(sources) !== savedSources)
     save.disabled = saving || !dirty || models.pending
@@ -123,8 +146,13 @@ export async function mountSettings() {
     model_endpoints: ModelEndpoint[]; default_endpoint_id: string | null
     model_revision?: string
     supplier_sites?: SupplierSite[]; supplier_download_mib: number
+    chat_live_sources?: boolean; microphone_enabled?: boolean; microphone_endpoint_id?: string | null; microphone_endpoint_name?: string | null
   }) {
     field('search_url').value = config.search_url
+    field('microphone_enabled').checked = config.microphone_enabled ?? true
+    microphoneEndpointId = config.microphone_endpoint_id ?? null
+    microphoneEndpointName = config.microphone_endpoint_name ?? config.model_endpoints.find(endpoint => endpoint.id === microphoneEndpointId)?.name ?? null
+    field('chat_live_sources').checked = config.chat_live_sources ?? true
     field('supplier_download_mib').valueAsNumber = config.supplier_download_mib
     enableSearch.hidden = !!config.search_url
     searchSetup.hidden = !config.search_url
@@ -144,7 +172,15 @@ export async function mountSettings() {
     const modelSettings = models.values()
     const dirtyModels = JSON.stringify(modelSettings) !== savedModels
     if (isSave ? (dirtyModels && !models.validate()) || !form.reportValidity() : !field('search_url').reportValidity()) return
-    const changes = dirtyModels ? { ...sources, ...modelSettings, model_revision: modelRevision } : sources
+    const saved = JSON.parse(savedSources!) as ReturnType<typeof sourceValues>
+    const { microphone_enabled, microphone_endpoint_id, ...otherSources } = sources
+    const dirtyMicrophone = microphone_enabled !== saved.microphone_enabled || microphone_endpoint_id !== saved.microphone_endpoint_id
+    const changes = { ...otherSources,
+      ...(microphone_enabled !== saved.microphone_enabled ? { microphone_enabled } : {}),
+      ...(microphone_endpoint_id !== saved.microphone_endpoint_id ? { microphone_endpoint_id } : {}),
+      ...(dirtyModels ? modelSettings : {}),
+      ...(dirtyModels || dirtyMicrophone ? { model_revision: modelRevision } : {}),
+    }
     const stillCurrent = () => isSave || sources.search_url === sourceValues().search_url
     const inputs = isSave ? Array.from(form.querySelectorAll<HTMLInputElement>('input:not(:disabled)'))
       .filter(input => !sourceControls.contains(input) && !input.closest('#research-endpoint-fields')) : []
@@ -165,7 +201,9 @@ export async function mountSettings() {
       if (isSave) {
         fill(data)
         document.dispatchEvent(new CustomEvent('filaman:model-change', {
-          detail: { chat_model: data.model_id, chat_endpoint_id: data.default_endpoint_id },
+          detail: { chat_model: data.model_id, chat_endpoint_id: data.default_endpoint_id,
+            microphone_enabled: data.microphone_enabled ?? true, microphone_endpoint_id: microphoneEndpointId,
+            microphone_endpoint_name: microphoneEndpointName, microphone_revision: data.microphone_revision ?? data.model_revision ?? 'initial' },
         }))
       }
       feedback.textContent = t(isSave ? 'filaBrain.settingsSaved' : 'filaBrain.searchTestPassed')
@@ -189,9 +227,14 @@ export async function mountSettings() {
     refresh()
     form.addEventListener('submit', event => { event.preventDefault(); void send('save') })
     testSearch.addEventListener('click', () => void send('test-search'))
+    microphoneSource.addEventListener('change', () => {
+      microphoneEndpointId = microphoneSource.value || null
+      microphoneEndpointName = models.endpoints.find(endpoint => endpoint.id === microphoneEndpointId)?.name ?? null
+      refresh()
+    })
     form.addEventListener('input', event => {
       if (event.target === field('search_url')) searchMessage.textContent = ''
-      if (event.target === field('search_url') || event.target === field('supplier_download_mib')) refresh()
+      if (event.target === field('search_url') || event.target === field('supplier_download_mib') || event.target === field('chat_live_sources') || event.target === field('microphone_enabled')) refresh()
     })
   } catch {
     message.textContent = t('filaBrain.failed')

@@ -5,32 +5,47 @@
   <div class="research-settings">
     <form id="filabrain-settings" class="fm-compact-form">
     <section class="fm-card fm-section" aria-labelledby="model-settings-title">
-      <header class="fm-section-header"><h2 id="model-settings-title" data-i18n="filaBrain.settings">Model settings</h2></header>
+      <header class="fm-section-header"><h2 id="model-settings-title" data-i18n="filaBrain.settings">Model settings</h2>
+        <button type="button" id="research-add-endpoint" class="fm-btn" aria-disabled="true">
+              <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <span data-i18n="filaBrain.addEndpoint">Add endpoint</span>
+            </button>
+      </header>
       <div class="fm-section-body">
         <div class="research-model-picker">
           <label for="research-model-endpoint" data-i18n="filaBrain.endpoint">Model endpoint</label>
           <div>
             <select id="research-model-endpoint" class="fm-input" disabled></select>
-            <button type="button" id="research-add-endpoint" class="fm-btn" aria-disabled="true">
-              <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-              <span data-i18n="filaBrain.addEndpoint">Add endpoint</span>
-            </button>
           </div>
         </div>
         <fieldset id="research-endpoint-fields" class="fm-compact-form" disabled>
-          <label>
-            <span data-i18n="filaBrain.endpointName">Endpoint name</span>
-            <input name="endpoint_name" class="fm-input" maxlength="100" />
-          </label>
+          <div class="endpoint-identity">
+            <label>
+              <span data-i18n="filaBrain.endpointName">Endpoint name</span>
+              <input name="endpoint_name" class="fm-input" maxlength="100" />
+            </label>
+            <div class="endpoint-key">
+              <label>
+                <span data-i18n="filaBrain.apiKey">API key (optional)</span>
+                <input name="api_key" type="password" class="fm-input" maxlength="1000" autocomplete="new-password" />
+              </label>
+              <p id="research-key-state" class="fm-field-hint"></p>
+              <label class="research-clear-key"><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
+            </div>
+          </div>
+          <div class="endpoint-capabilities">
+            <label><input name="chat_enabled" type="checkbox" checked /> <span data-i18n="filaBrain.endpointChat">Chat</span></label>
+            <label><input name="audio_enabled" type="checkbox" /> <span data-i18n="filaBrain.endpointAudio">Audio transcription</span></label>
+          </div>
           <div class="research-model-picker">
             <label for="research-model-url" data-i18n="filaBrain.modelUrl">Model server URL</label>
             <div>
               <input id="research-model-url" name="model_url" type="url" class="fm-input" maxlength="500" placeholder="http://ollama:11434" aria-describedby="research-model-url-hint" />
-              <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-i18n="filaBrain.testConnection" disabled>Test connection</button>
+              <button type="button" id="research-test-model" class="fm-btn fm-btn-outline" data-chat-only data-i18n="filaBrain.testConnection" disabled>Test connection</button>
             </div>
             <small id="research-model-url-hint" class="fm-field-hint" data-i18n="filaBrain.modelUrlHint">Use an Ollama server or an OpenAI-compatible base URL.</small>
           </div>
-          <div class="research-model-picker">
+          <div class="research-model-picker" data-chat-only>
             <label for="research-available-model" data-i18n="filaBrain.availableModels">Available models</label>
             <div>
               <select id="research-available-model" name="available_model" class="fm-input" disabled>
@@ -42,34 +57,45 @@
               </button>
             </div>
           </div>
-          <details class="research-manual-model">
+          <details class="research-manual-model" data-chat-only>
             <summary data-i18n="filaBrain.modelManual">Enter a model ID manually</summary>
             <label>
               <span data-i18n="filaBrain.modelId">Model ID</span>
               <input name="model_id" class="fm-input" maxlength="150" />
             </label>
           </details>
-          <label>
-            <span data-i18n="filaBrain.apiKey">API key (optional)</span>
-            <input name="api_key" type="password" class="fm-input" maxlength="1000" autocomplete="new-password" />
+          <label id="research-audio-model" hidden>
+            <span data-i18n="filaBrain.audioModelId">Transcription model ID</span>
+            <input name="audio_model_id" class="fm-input" maxlength="150" />
           </label>
-          <p id="research-key-state" class="fm-field-hint"></p>
-          <label class="research-clear-key"><input name="clear_key" type="checkbox" /> <span data-i18n="filaBrain.clearKey">Remove stored key</span></label>
           <details id="research-model-visibility" hidden>
             <summary data-i18n="filaBrain.modelVisibility">Models shown in chat</summary>
             <div id="research-visible-models"></div>
           </details>
           <div class="actions">
-            <button type="button" id="research-default-endpoint" class="fm-btn" data-i18n="filaBrain.makeDefault">Make default</button>
+            <button type="button" id="research-default-endpoint" class="fm-btn" data-chat-only data-i18n="filaBrain.makeDefault">Make default</button>
             <button type="button" id="research-remove-endpoint" class="fm-btn" data-i18n="filaBrain.removeEndpoint">Remove endpoint</button>
           </div>
           <p id="research-model-message" class="fm-field-hint" role="status"></p>
         </fieldset>
       </div>
     </section>
+    <section class="fm-card fm-section" aria-labelledby="microphone-settings-title">
+      <header class="fm-section-header"><h2 id="microphone-settings-title" data-i18n="filaBrain.microphoneSettings">Microphone</h2></header>
+      <div class="fm-section-body">
+        <label class="research-clear-key"><input name="microphone_enabled" type="checkbox" checked disabled /> <span data-i18n="filaBrain.microphoneEnabled">Enable microphone dictation</span></label>
+        <label for="research-microphone-source" data-i18n="filaBrain.microphoneSource">Dictation source</label>
+        <select id="research-microphone-source" name="microphone_endpoint_id" class="fm-input" aria-describedby="research-microphone-help" disabled></select>
+        <p id="research-microphone-help" class="fm-field-hint"></p>
+        <p class="fm-field-hint" data-i18n="filaBrain.microphoneOsHelp">You can use your device’s keyboard dictation independently, even when this microphone is disabled. FilaBrain cannot start OS keyboard dictation for you.</p>
+      </div>
+    </section>
     <section class="fm-card fm-section" aria-labelledby="research-sources-title">
       <header class="fm-section-header"><h2 id="research-sources-title" data-i18n="filaBrain.researchSources">Research sources</h2></header>
       <div class="fm-section-body">
+          <label class="research-clear-key research-auto-live"><input name="chat_live_sources" type="checkbox" checked /> <span data-i18n="filaBrain.autoLiveSources">Check live sources automatically</span></label>
+          <p id="research-auto-search-setup" class="fm-field-hint"><span data-i18n="filaBrain.autoLiveSourcesSetup">Set up SearXNG to enable automatic checks.</span> <button type="button" class="research-guide-link" data-search-guide aria-controls="filabrain-docs" data-i18n="filaBrain.searchSetupGuide">Setup guide</button></p>
+          <p class="fm-field-hint" data-i18n="filaBrain.autoLiveSourcesHint">Checks known manufacturer pages for product and printer questions. SearXNG can discover additional sources.</p>
           <ul class="research-built-in" role="list">
             <li>FilaManDB</li>
             <li>Open Filament Database</li>

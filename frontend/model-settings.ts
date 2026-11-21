@@ -6,11 +6,14 @@ export type ModelEndpoint = {
   name: string
   model_url: string
   model_id: string
+  chat_enabled?: boolean
+  audio_enabled?: boolean
+  audio_model_id?: string
   has_key: boolean
   models: string[] | null
   hidden_models: string[]
 }
-type Draft = ModelEndpoint & { api_key: string; clear_key: boolean }
+type Draft = ModelEndpoint & { chat_enabled: boolean; audio_enabled: boolean; audio_model_id: string; api_key: string; clear_key: boolean }
 
 export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
   const field = (name: string) => form.elements.namedItem(name) as HTMLInputElement
@@ -31,7 +34,7 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
   let defaultId: string | null = null
   let ready = false
   let saving = false
-  const incompleteAtLoad = new WeakMap<Draft, [string, string]>()
+  const incompleteAtLoad = new WeakMap<Draft, string>()
   const testing = new Set<Draft>()
   const feedback = new WeakMap<Draft, string>()
 
@@ -39,7 +42,17 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
     return {
       id: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''),
       name: t('filaBrain.defaultEndpoint'), model_url: '', model_id: '', has_key: false,
+      chat_enabled: true, audio_enabled: false, audio_model_id: '',
       models: [], hidden_models: [], api_key: '', clear_key: false,
+    }
+  }
+
+  const configuration = (entry: Draft) => JSON.stringify([entry.model_url, entry.model_id, entry.chat_enabled, entry.audio_enabled, entry.audio_model_id])
+  function chooseDefault() {
+    if (!entries.some(entry => entry.id === defaultId && entry.chat_enabled)) {
+      const entry = entries.find(entry => entry.chat_enabled)
+      defaultId = entry?.id ?? null
+      if (entry) entry.hidden_models = entry.hidden_models.filter(id => id !== entry.model_id)
     }
   }
 
@@ -61,7 +74,7 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
     modelList.replaceChildren(new Option(t('filaBrain.chooseModel'), ''),
       ...models.map(model => new Option(model, model)))
     modelList.value = entry.model_id
-    visibility.hidden = !models.length
+    visibility.hidden = !entry.chat_enabled || !models.length
     visibleModels.replaceChildren(...models.map(model => {
       const label = document.createElement('label')
       const checkbox = document.createElement('input')
@@ -87,9 +100,9 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
     fields.disabled = select.disabled = blocked
     add.setAttribute('aria-disabled', String(blocked))
     const pending = !!active && testing.has(active)
-    load.disabled = blocked || pending || !active?.model_url
+    load.disabled = blocked || pending || !active?.model_url || !active?.chat_enabled
     test.disabled = load.disabled || !active?.model_id
-    makeDefault.disabled = blocked || !active?.model_id || active.id === defaultId
+    makeDefault.disabled = blocked || !active?.chat_enabled || !active.model_id || active.id === defaultId
     makeDefault.textContent = t(active?.id === defaultId ? 'filaBrain.defaultEndpoint' : 'filaBrain.makeDefault')
     remove.disabled = blocked || !active
     modelList.disabled = blocked || pending
@@ -97,7 +110,11 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
 
   function show(entry: Draft, resetDetails = false) {
     active = entry
-    for (const key of ['model_url', 'model_id', 'api_key'] as const) field(key).value = entry[key]
+    for (const key of ['model_url', 'model_id', 'audio_model_id', 'api_key'] as const) field(key).value = entry[key]
+    field('chat_enabled').checked = entry.chat_enabled
+    field('audio_enabled').checked = entry.audio_enabled
+    form.querySelectorAll<HTMLElement>('[data-chat-only]').forEach(element => { element.hidden = !entry.chat_enabled })
+    form.querySelector<HTMLElement>('#research-audio-model')!.hidden = !entry.audio_enabled
     field('endpoint_name').value = entry.name
     field('clear_key').checked = entry.clear_key
     field('clear_key').closest('label')!.hidden = !entry.has_key
@@ -172,6 +189,12 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
       }
     } else if (element.name === 'api_key') active.api_key = element.value
     else if (element.name === 'clear_key') active.clear_key = element.checked
+    else if (element.name === 'audio_model_id') active.audio_model_id = element.value.trim()
+    else if (element.name === 'chat_enabled' || element.name === 'audio_enabled') {
+      active[element.name] = element.checked
+      chooseDefault()
+      show(active)
+    }
     else return
     if (element.name === 'api_key' || element.name === 'clear_key') {
       active.models = []
@@ -192,7 +215,7 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
   select.addEventListener('change', () => show(entries.find(entry => entry.id === select.value)!, true))
   add.addEventListener('click', () => {
     if (!ready || saving) return
-    if (entries.length === 1 && !entries[0].model_url && !entries[0].model_id && !entries[0].api_key) {
+    if (entries.length === 1 && !entries[0].model_url && !entries[0].model_id && !entries[0].audio_enabled && !entries[0].audio_model_id && !entries[0].api_key) {
       entries = []
       defaultId = null
     }
@@ -205,7 +228,7 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
     changed()
   })
   makeDefault.addEventListener('click', () => {
-    if (!active) return
+    if (!active?.chat_enabled) return
     defaultId = active.id
     active.hidden_models = active.hidden_models.filter(id => id !== active!.model_id)
     showModels()
@@ -214,10 +237,7 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
   remove.addEventListener('click', () => {
     entries = entries.filter(entry => entry !== active)
     if (!entries.length) entries.push(newDraft())
-    if (!entries.some(entry => entry.id === defaultId)) {
-      defaultId = entries[0].id
-      entries[0].hidden_models = entries[0].hidden_models.filter(id => id !== entries[0].model_id)
-    }
+    chooseDefault()
     show(entries[0], true)
     select.focus()
     changed()
@@ -228,35 +248,42 @@ export function mountModelSettings(form: HTMLFormElement, changed: () => void) {
   return {
     refresh,
     get pending() { return entries.some(entry => testing.has(entry)) },
+    get endpoints() { return entries },
     fill(endpoints: ModelEndpoint[], defaultEndpoint: string | null) {
       const activeId = active?.id
-      entries = endpoints.map(entry => ({ ...entry, api_key: '', clear_key: false }))
+      entries = endpoints.map(entry => ({ ...entry, chat_enabled: entry.chat_enabled ?? true,
+        audio_enabled: entry.audio_enabled ?? false, audio_model_id: entry.audio_model_id ?? '', api_key: '', clear_key: false }))
       for (const entry of entries) {
-        if (!entry.model_url || !entry.model_id) incompleteAtLoad.set(entry, [entry.model_url, entry.model_id])
+        if (!entry.model_url || (entry.chat_enabled && !entry.model_id)) incompleteAtLoad.set(entry, configuration(entry))
       }
       if (!entries.length) entries.push(newDraft())
-      defaultId = defaultEndpoint ?? entries[0].id
+      defaultId = defaultEndpoint
+      chooseDefault()
       ready = true
       show(entries.find(entry => entry.id === activeId) ?? entries.find(entry => entry.id === defaultId) ?? entries[0])
     },
     validate() {
       const incomplete = entries.find(entry => {
         const initial = incompleteAtLoad.get(entry)
-        if (initial && initial[0] === entry.model_url && initial[1] === entry.model_id && !entry.api_key && !entry.clear_key) return false
-        return (entry.model_url || entry.model_id || entry.api_key || entries.length > 1)
-          && (!entry.name || !entry.model_id || /\s/.test(entry.model_id) || !/^https?:\/\/[^\s]+$/i.test(entry.model_url))
+        if (initial === configuration(entry) && !entry.api_key && !entry.clear_key) return false
+        return (entry.model_url || entry.model_id || entry.audio_enabled || entry.audio_model_id || entry.api_key || entries.length > 1)
+          && (!entry.name || (!entry.chat_enabled && !entry.audio_enabled)
+            || (entry.chat_enabled && (!entry.model_id || /\s/.test(entry.model_id)))
+            || (entry.audio_enabled && (!entry.audio_model_id || /\s/.test(entry.audio_model_id)))
+            || !/^https?:\/\/[^\s]+$/i.test(entry.model_url))
       })
       if (!incomplete) return true
       show(incomplete)
-      report(incomplete, t('filaBrain.endpointIncomplete'))
+      report(incomplete, t(!incomplete.chat_enabled && !incomplete.audio_enabled ? 'filaBrain.endpointCapabilitiesRequired' : 'filaBrain.endpointIncomplete'))
       message.tabIndex = -1
       message.focus()
       return false
     },
     values() {
-      const configured = entries.filter(entry => entry.model_url || entry.model_id || entry.api_key || incompleteAtLoad.has(entry))
+      const configured = entries.filter(entry => entry.model_url || entry.model_id || entry.audio_enabled || entry.audio_model_id || entry.api_key || incompleteAtLoad.has(entry))
+      const chat = configured.filter(entry => entry.chat_enabled)
       return {
-        default_endpoint_id: configured.length ? defaultId : null,
+        default_endpoint_id: chat.find(entry => entry.id === defaultId)?.id ?? chat[0]?.id ?? null,
         model_endpoints: configured.map(({ has_key, ...entry }) => ({ ...entry, api_key: entry.api_key || null })),
       }
     },

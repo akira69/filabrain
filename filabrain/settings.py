@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import re
 from os import getenv
@@ -111,9 +112,23 @@ class ModelEndpointInput(ModelConnection):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
     models: list[ModelId] | None = None
     hidden_models: list[ModelId] = Field(default_factory=list)
+    chat_enabled: StrictBool = True
+    audio_enabled: StrictBool = False
+    audio_model_id: str = Field("", max_length=150)
+
+    @field_validator("audio_model_id")
+    @classmethod
+    def validate_audio_model(cls, value: str) -> str:
+        value = value.strip()
+        if any(ch.isspace() for ch in value):
+            raise ValueError("Enter a model ID without spaces")
+        return value
 
 
 class SettingsInput(ModelConnection):
+    microphone_enabled: StrictBool = True
+    microphone_endpoint_id: EndpointId | None = None
+    chat_live_sources: StrictBool = True
     search_url: str = Field("", max_length=500)
     supplier_download_mib: int = Field(DEFAULT_SUPPLIER_DOWNLOAD_MIB, ge=1, le=32, strict=True)
     supplier_sites: list[SupplierSite] = Field(default_factory=list, max_length=4)
@@ -154,6 +169,9 @@ async def config_record(db: DBSession) -> tuple[FilamentResearchSettings | None,
         "search_url": _deployment_search_url(),
         "supplier_sites": [],
         "supplier_download_mib": DEFAULT_SUPPLIER_DOWNLOAD_MIB,
+        "chat_live_sources": True,
+        "microphone_enabled": True,
+        "microphone_endpoint_id": None,
     }
     stored = row.config or {} if row else {}
     config = fallback | stored
@@ -166,7 +184,9 @@ async def config_record(db: DBSession) -> tuple[FilamentResearchSettings | None,
                     "models": item["models"] if item["model_url"] == fallback["model_url"] else None}
             if item.get("deployment_endpoint") else item for item in config["model_endpoints"]
         ]
-        default = next((item for item in config["model_endpoints"] if item["id"] == config["default_endpoint_id"]), None)
+        config["model_endpoints"] = endpoints(config)
+        default = next((item for item in config["model_endpoints"]
+                        if item["id"] == config.get("default_endpoint_id") and item["chat_enabled"]), None)
         if default:
             default["hidden_models"] = [model for model in default["hidden_models"] if model != default["model_id"]]
         config.update({key: (default or {}).get(key, "") for key in ("model_url", "model_id", "encrypted_key")})
@@ -176,7 +196,8 @@ async def config_record(db: DBSession) -> tuple[FilamentResearchSettings | None,
 
 def endpoints(config: dict) -> list[dict]:
     if "model_endpoints" in config:
-        return config["model_endpoints"]
+        return [{"chat_enabled": True, "audio_enabled": False, "audio_model_id": ""} | item
+                for item in config["model_endpoints"]]
     if not config["model_url"]:
         return []
     return [{
@@ -184,6 +205,7 @@ def endpoints(config: dict) -> list[dict]:
         "model_id": config["model_id"], "models": None, "hidden_models": [],
         "encrypted_key": config.get("encrypted_key"),
         "deployment_endpoint": config.get("deployment_endpoint", False),
+        "chat_enabled": True, "audio_enabled": False, "audio_model_id": "",
     }]
 
 
@@ -200,6 +222,14 @@ def model_key(config: dict) -> str:
     return deployment_key(config)
 
 
+def microphone_revision(config: dict) -> str:
+    source = config.get("microphone_endpoint_id")
+    endpoint = next((item for item in endpoints(config) if item["id"] == source), {})
+    state = [config.get("model_revision", "initial"), config.get("microphone_enabled", True), source,
+             endpoint.get("model_url"), endpoint.get("audio_enabled"), endpoint.get("audio_model_id")]
+    return hashlib.sha256(json.dumps(state, separators=(",", ":")).encode()).hexdigest()
+
+
 def public_config(config: dict) -> dict:
     model_endpoints = endpoints(config)
     return {
@@ -208,11 +238,16 @@ def public_config(config: dict) -> dict:
         "search_url": config["search_url"],
         "supplier_sites": config["supplier_sites"],
         "supplier_download_mib": config["supplier_download_mib"],
+        "chat_live_sources": config.get("chat_live_sources", True),
+        "microphone_enabled": config.get("microphone_enabled", True),
+        "microphone_endpoint_id": config.get("microphone_endpoint_id"),
+        "microphone_revision": microphone_revision(config),
         "has_key": bool(config.get("encrypted_key") or deployment_key(config)),
         "default_endpoint_id": config.get("default_endpoint_id", model_endpoints[0]["id"] if model_endpoints else None),
         "model_revision": config.get("model_revision", "initial"),
         "model_endpoints": [
-            {key: item[key] for key in ("id", "name", "model_url", "model_id", "models", "hidden_models")}
+            {key: item[key] for key in ("id", "name", "model_url", "model_id", "models", "hidden_models",
+                                        "chat_enabled", "audio_enabled", "audio_model_id")}
             | {"has_key": bool(item.get("encrypted_key") or deployment_key(item))}
             for item in model_endpoints
         ],
@@ -230,7 +265,7 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
     await lock_research_plugin(db)
     row, old = await config_record(db)
     config = dict(row.config or {}) if row else {}
-    for key in ("search_url", "supplier_sites", "supplier_download_mib"):
+    for key in ("search_url", "supplier_sites", "supplier_download_mib", "chat_live_sources", "microphone_enabled", "microphone_endpoint_id"):
         if key in data.model_fields_set:
             config[key] = data.model_dump(include={key})[key]
     if data.model_endpoints is not None:
@@ -243,8 +278,11 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
             key = saved_key(item, prior)
             deploy = bool(prior.get("deployment_endpoint") and not key and not item.clear_key
                           and (item.model_url, item.model_id) == (prior["model_url"], prior["model_id"]))
-            if item.id in entries or (not deploy and (not item.model_url or not item.model_id or any(ch.isspace() for ch in item.model_id))):
-                raise HTTPException(422, "Each endpoint needs a unique ID, model server URL and model ID")
+            if (item.id in entries or not (item.chat_enabled or item.audio_enabled)
+                or (not deploy and (not item.model_url or (item.chat_enabled and not item.model_id)))
+                or (item.chat_enabled and any(ch.isspace() for ch in item.model_id))
+                or (item.audio_enabled and not item.audio_model_id)):
+                raise HTTPException(422, "Each endpoint needs a unique ID, server URL and a model ID for each enabled capability")
             entries[item.id] = item.model_dump(exclude={"api_key", "clear_key", "endpoint_id"}) | {
                 "models": None if item.id == LEGACY_ENDPOINT_ID and item.models is None else sorted(set(item.models or [])),
                 "hidden_models": sorted(set(item.hidden_models)),
@@ -252,8 +290,9 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
                 "deployment_endpoint": deploy,
             }
         default = entries.get(data.default_endpoint_id)
-        if (entries and not default) or (not entries and data.default_endpoint_id):
-            raise HTTPException(422, "Choose a default endpoint")
+        if (any(item["chat_enabled"] for item in entries.values()) and not default
+            or data.default_endpoint_id is not None and (not default or not default["chat_enabled"])):
+            raise HTTPException(422, "Choose a chat-enabled default endpoint")
         if default and default["model_id"] in default["hidden_models"]:
             raise HTTPException(422, "The default model must be visible")
         config["model_endpoints"] = list(entries.values())
@@ -268,6 +307,15 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
         if bool(data.model_id) != bool(data.model_url):
             raise HTTPException(422, "Enter both a model URL and a model ID")
         config.update(model_url=data.model_url, model_id=data.model_id, encrypted_key=saved_key(data, old))
+        config["model_revision"] = uuid4().hex
+    source = config.get("microphone_endpoint_id", old.get("microphone_endpoint_id"))
+    if source is not None and not any(item["id"] == source and item["audio_enabled"]
+                                      for item in endpoints(config if "model_endpoints" in config else old)):
+        raise HTTPException(422, "Choose an audio-enabled microphone endpoint or Browser dictation")
+    if any(key in data.model_fields_set and config.get(key) != old.get(key)
+           for key in ("microphone_enabled", "microphone_endpoint_id")):
+        if data.model_revision != old.get("model_revision", "initial"):
+            raise HTTPException(409, "Another session changed microphone settings. Reload settings before editing them again.")
         config["model_revision"] = uuid4().hex
     if row is None:
         row = FilamentResearchSettings(id=1)
@@ -366,7 +414,7 @@ async def model_group(endpoint: dict) -> dict:
 def select_model(config: dict, requested: str | None, endpoint_id: str | None = None) -> tuple[dict, str]:
     if endpoint_id is None and requested in (None, config["model_id"]):
         return config, config["model_id"]
-    candidates = endpoints(config)
+    candidates = [item for item in endpoints(config) if item["chat_enabled"]]
     selected = endpoint_id or config.get("default_endpoint_id", LEGACY_ENDPOINT_ID)
     endpoint = next((item for item in candidates if item["id"] == selected), None)
     if not endpoint or not endpoint["model_url"] or not requested or requested in endpoint["hidden_models"]:
@@ -377,6 +425,8 @@ def select_model(config: dict, requested: str | None, endpoint_id: str | None = 
 
 
 async def check_model_catalog(endpoint: dict, model: str) -> None:
+    if not endpoint.get("chat_enabled", True):
+        raise HTTPException(422, "Select a chat-enabled endpoint")
     if model != endpoint["model_id"] and endpoint["models"] is None and model not in await visible_models(endpoint):
         raise HTTPException(422, "Select a model available on the configured endpoint")
 

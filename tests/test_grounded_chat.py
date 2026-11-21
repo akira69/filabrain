@@ -21,7 +21,7 @@ async def chat_db(db_session, monkeypatch):
         plugin_type="integration", is_active=True,
     ))
     await db_session.commit()
-    config = SettingsInput(model_url="http://model.test", model_id="test-model").model_dump()
+    config = SettingsInput(model_url="http://model.test", model_id="test-model", chat_live_sources=False).model_dump()
 
     async def config_record(_db):
         return None, config
@@ -159,13 +159,14 @@ async def test_inventory_follow_up_resolves_localized_weight(
     "Use 999 °C [saved-profile-2].",
     "Use the matching profile [source-made-up].",
 ])
-async def test_settings_use_only_the_selected_nozzle_profile_and_strip_unverified_numbers(chat_db, monkeypatch, reply):
+@pytest.mark.parametrize("active", [True, False])
+async def test_settings_use_only_the_selected_nozzle_profile_and_strip_unverified_numbers(chat_db, monkeypatch, reply, active):
     db, _, _ = chat_db
     filament = Filament(
         manufacturer=Manufacturer(name="Other Brand"), designation="Fixture PLA",
         material_type="PLA", diameter_mm=1.75,
     )
-    printer = Printer(name="My Bambu A1", driver_key="manual", driver_config={"token": "private-token"})
+    printer = Printer(name="My Bambu A1", driver_key="manual", is_active=active, driver_config={"token": "private-token"})
     db.add_all([
         FilamentPrinterProfile(
             filament=filament, printer=printer, profile_name="Smaller nozzle",
@@ -472,3 +473,32 @@ async def test_ams_comparison_retrieves_both_rules_and_allows_the_cited_device_n
     assert "missing_evidence" in invalid["notices"]
     unknown = await ask(chat_db, monkeypatch, question, answer.replace("AMS 2 Pro", "AMS 3 Pro"))
     assert "missing_evidence" in unknown["notices"]
+
+
+async def test_chat_returns_measured_usage(chat_db, monkeypatch):
+    db, _, research = chat_db
+    async def complete(_url, _model, _key, _messages, *, usage, **_kwargs):
+        usage.update(prompt_tokens=120, completion_tokens=40, context_window=4096)
+        return 'Hello.'
+    monkeypatch.setattr(research, 'request_completion', complete)
+    principal = Principal(auth_type='session', user_id=1, is_superadmin=True)
+    result = await research.research_chat(research.ChatRequest(messages=[{'role': 'user', 'content': 'Hello'}]), db, principal)
+    assert result['reply'] == 'Hello.'
+    assert result['usage'] == {'prompt_tokens': 120, 'completion_tokens': 40, 'context_window': 4096}
+
+
+@pytest.mark.parametrize('enabled,search_url,expected', [(True, 'https://search.test', True), (False, 'https://search.test', False), (True, '', False)])
+async def test_automatic_live_sources_require_enabled_search(chat_db, monkeypatch, enabled, search_url, expected):
+    db, config, research = chat_db
+    config.update(chat_live_sources=enabled, search_url=search_url)
+    filament = Filament(manufacturer=Manufacturer(name='Fixture', url='https://maker.example'),
+        designation='Fixture PLA', material_type='PLA', diameter_mm=1.75, datasheet_url='https://maker.example/spec.pdf')
+    db.add(filament)
+    await db.commit()
+    requested=[]
+    async def lookup(context, *_args):
+        requested.append(context.search_requested)
+        if context.search_requested: assert context.search_target['urls'] == ['https://maker.example/spec.pdf']
+    monkeypatch.setattr(research, 'lookup_live', lookup)
+    await ask(chat_db, monkeypatch, 'How does this filament perform?', filament_id=filament.id)
+    assert requested == [expected]

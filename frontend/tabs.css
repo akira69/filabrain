@@ -1,0 +1,44 @@
+:root[data-workspace-tabs] #plugin-header {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "logo utilities" "tabs tabs";
+  gap: .75rem 1rem; margin-bottom: -1px; position: relative; z-index: 2;
+}
+:root[data-workspace-tabs] #plugin-header .header-utilities { margin: 0; }
+.workspace-tabs { grid-area: tabs; display: flex; align-items: end; min-width: 0; gap: .75rem; }
+:root[data-workspace-tabs] #plugin-header nav { display: block; flex: 1; min-width: 0; width: 100%; }
+.workspace-tablist { display: flex; align-items: end; gap: .25rem; overflow-x: auto; padding: 3px 1px 2px; scrollbar-width: none; }
+.workspace-tablist::-webkit-scrollbar { display: none; }
+:root[data-workspace-tabs] #plugin-header nav button {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  min-width: 5rem; min-height: 44px; height: 44px; padding: 0 .85rem;
+  border: 1px solid var(--border); border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-muted); background: var(--bg); position: relative; top: 3px;
+}
+:root[data-workspace-tabs] #plugin-header nav button[aria-selected=true] {
+  height: 48px; top: 0; z-index: 1; color: var(--text); background: var(--bg-elevated);
+  border-color: var(--border); box-shadow: inset 0 2px 0 var(--accent);
+}
+.workspace-tablist button[aria-selected=true]::after { content: ""; position: absolute; inset: auto 0 -3px; height: 4px; background: var(--bg-elevated); }
+.workspace-tabs .chat-header { min-width: 0; flex: none; padding: 0 0 3px; border: 0; background: transparent; gap: .45rem; }
+.workspace-tabs .chat-new { width: 44px; height: 44px; }
+.workspace-tabs .chat-history { max-width: min(18rem, 24vw); }
+.workspace-tabs .chat-history summary { min-height: 44px; }
+:root[data-workspace-tabs] [data-view]:not([hidden]) > .fm-card { border-top-left-radius: 0; }
+:root[data-workspace-tabs] .research-chat { grid-template-rows: minmax(0, 1fr) auto; }
+.workspace-title-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
+:root[data-workspace-tabs] [data-view=new] #research-inputs { border: 0; background: transparent; }
+.research-scroll:empty { display: none; }
+@media (max-width: 800px) {
+  .workspace-tabs { flex-wrap: wrap; gap: 0; }
+  :root[data-workspace-tabs] #plugin-header nav { flex-basis: 100%; }
+  :root[data-workspace-tabs] #plugin-header nav button { min-width: 4.3rem; padding: 0 .55rem; font-size: .8125rem; }
+  :root[data-workspace-tabs] #plugin-header nav .action-icon { width: 14px; height: 14px; margin-inline-end: .3rem; }
+  .workspace-tabs .chat-header {
+    flex-basis: 100%; width: 100%; justify-content: end; padding: .25rem .5rem;
+    background: var(--bg-elevated); border: 1px solid var(--border); border-bottom: 0;
+  }
+  .workspace-tabs .chat-history { max-width: min(22rem, calc(100% - 3.5rem)); }
+  :root[data-workspace-tabs] [data-view=chat] .research-chat,
+  :root[data-workspace-tabs] [data-view=new] .research-chat { border-top: 0; border-radius: 0 0 .65rem .65rem; }
+}

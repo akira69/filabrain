@@ -43,6 +43,7 @@ from .settings import (
     lock_research_plugin,
     model_group,
     model_key,
+    microphone_revision as effective_microphone_revision,
     select_model,
 )
 from .spool_profiles import (
@@ -137,18 +138,28 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "spools:create",
                 "spools:read",
                 "printers:read",
+                "display:read",
                 "admin:plugins_manage",
             )
         except HTTPException as exc:
             if exc.status_code != 403:
                 raise
     can_chat = enabled and principal.auth_type == "session" and "filaments:read" in permissions
+    microphone_enabled = False
+    microphone_endpoint_id = None
+    microphone_endpoint_name = None
+    microphone_revision = None
     chat_model = None
     endpoint_id = None
     if enabled and principal.auth_type == "session" and (
         can_chat or permissions.intersection({"filaments:create", "filaments:update"})
     ):
         _, config = await config_record(db)
+        microphone_enabled = config.get("microphone_enabled", True)
+        microphone_endpoint_id = config.get("microphone_endpoint_id")
+        microphone_endpoint_name = next((item["name"] for item in endpoints(config)
+                                         if item["id"] == microphone_endpoint_id), None)
+        microphone_revision = effective_microphone_revision(config)
         chat_model = (config["model_id"] or None) if config["model_url"] else None
         endpoint_id = default_endpoint_id(config)
     return {
@@ -158,12 +169,17 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         and {"filaments:read", "spools:create"} <= permissions,
         "can_read_spools": enabled and principal.auth_type == "session" and "spools:read" in permissions,
         "can_read_printers": enabled and principal.auth_type == "session" and "printers:read" in permissions,
+        "can_read_display": enabled and principal.auth_type == "session" and "display:read" in permissions,
         "can_update": "filaments:update" in permissions,
         "can_update_manufacturer": enabled and principal.auth_type == "session"
         and {"filaments:update", "manufacturers:update"} <= permissions,
         "can_configure": enabled and "admin:plugins_manage" in permissions,
         "can_chat": can_chat,
         "chat_model": chat_model,
+        "microphone_enabled": microphone_enabled,
+        "microphone_endpoint_id": microphone_endpoint_id,
+        "microphone_endpoint_name": microphone_endpoint_name,
+        "microphone_revision": microphone_revision,
         "chat_endpoint_id": endpoint_id,
     }
 
@@ -257,6 +273,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     context = await collect_context(
         db, data.messages[-1].content, permissions, filament_id=data.filament_id,
         printer_id=data.printer_id, nozzle_mm=data.nozzle_mm, web_search=data.web_search,
+        auto_web_search=config.get("chat_live_sources", True) and bool(config["search_url"]),
         previous_questions=[message.content for message in reversed(data.messages[:-1:2])],
     )
     await db.rollback()
@@ -280,10 +297,11 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         )},
         *({"role": message.role, "content": message.content} for message in data.messages),
     ]
+    usage: dict[str, int] = {}
     try:
         async with asyncio.timeout(50):
             answer = await request_completion(
-                endpoint["model_url"], model, model_key(endpoint), messages, timeout=45,
+                endpoint["model_url"], model, model_key(endpoint), messages, timeout=45, usage=usage,
             )
         if not answer.strip():
             raise ValueError("Empty model response")
@@ -292,7 +310,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
             return context.response("")
         raise HTTPException(502, "The configured model could not answer. Try again.") from None
     if context:
-        return context.response(answer)
+        return {**context.response(answer), **({"usage": usage} if usage else {})}
     action = None
     if marker := PAGE_MARKER.search(answer):
         page, name = marker.groups()
@@ -303,7 +321,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
         answer = PAGE_MARKER.sub("", answer).strip()
     if not answer.strip():
         answer = "Select the page to continue." if action else "That page is unavailable."
-    return {"reply": answer.strip()[:8000], "action": action}
+    return {"reply": answer.strip()[:8000], "action": action, **({"usage": usage} if usage else {})}
 
 
 def linked_spool_question(question: str, filament: Filament) -> bool:
@@ -349,7 +367,7 @@ async def research_models(db: DBSession, principal: PrincipalDep):
     await ensure_any_permission(db, principal, "filaments:read", "filaments:create", "filaments:update")
     _, config = await config_record(db)
     await db.rollback()
-    saved = endpoints(config)
+    saved = [item for item in endpoints(config) if item["chat_enabled"]]
     # Saved catalogs are local data. Legacy and manual-only endpoints may need discovery.
     groups = await asyncio.gather(*(model_group(endpoint) for endpoint in saved))
     default_id = config.get("default_endpoint_id", saved[0]["id"] if saved else None)
