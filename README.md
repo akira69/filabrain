@@ -8,11 +8,12 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 **Development preview.** Verified on stock FilaMan 2.2.2. Review researched values before applying them to your inventory.
 
-### What's new in 0.1.20
+### What's new in 0.1.21
 
-- Start **Add spool** with a label, SKU, product URL, or supported scale or NFC reader. Reuse an existing filament or review a new one before saving.
-- Compare reel photos, empty weights, and dimensions where available. Research uses the SKU you accepted, and chat remembers which reel you selected when you return to the conversation.
-- Ask what you can print with your inventory or look up materials and printer settings with source links. FilaBrain includes offline references and can use optional web search for more evidence.
+- Connected tabs keep Chat and New filament drafts separate, preserve replies during navigation, and offer a named conversation selector.
+- Full-height chat, compact settings, and a single-column Guide use space better on phones and desktops.
+- Printer and filament choices preload from FilaMan. A context ring shows reported token usage and the active limit when known.
+- Optional dictation produces editable text through the browser or an audio-enabled endpoint. Endpoints can support Chat, Audio transcription, or both; defaults remain **Chat on, Audio off**.
 
 To build the preview ZIP from source, run the packaging script with Python 3. Published preview ZIPs appear under GitHub Releases.
 
@@ -43,6 +44,14 @@ A product page can supply color codes from its text or URL. A related listing ca
 ## Model endpoints
 
 Open **FilaBrain settings** and use **Add endpoint** for each model server. Give it a name, enter its URL and API key if required, then load models or enter a model ID manually. Use **Models shown in chat** to choose which models appear under that endpoint in the chat picker. Save your changes after testing the connection. **Make default** sets the endpoint and model that new conversations and background research batches use.
+
+### Microphone dictation
+
+Enable or disable the microphone under **Settings → Microphone**. Choose **Browser dictation**, which may use the browser’s online speech service, or select a configured transcription endpoint. OS keyboard dictation remains independent.
+
+For endpoint transcription, enable **Audio transcription** on a model connection and enter its transcription model ID. Leave **Chat** enabled too if the connection serves both. The server must support the standard `/audio/transcriptions` API; a chat model alone does not establish audio support. No speech service or model is installed automatically.
+
+Recordings are limited to 60 seconds. Endpoint mode sends audio through FilaMan to the selected service when recording stops; FilaBrain does not save the audio. Review the editable transcript and press **Send** to submit text to chat. Capture requires HTTPS and a supported browser. Manufacturer names can be misrecognized, including in the live Ollama test, so check the transcript.
 
 ### Recommended hosted setup with OmniRoute
 
@@ -101,7 +110,7 @@ When a manufacturer's website is missing, FilaBrain checks FilaManDB first and c
 Run the smoke test with the Python environment from a stock FilaMan 2.2.2 or newer checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.20.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.21.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database. Pass `--previous path/to/old.zip` to test upgrade and rollback. The smoke test covers offline catalog research through FilaMan's built-in MCP and printing chat with a local test model. Use `--live-model` with `FILABRAIN_MODEL_URL` and `FILABRAIN_MODEL_ID` to exercise a configured server.

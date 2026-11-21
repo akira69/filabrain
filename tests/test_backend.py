@@ -2574,3 +2574,24 @@ async def test_archived_supplier_keeps_original_variant_for_matching(monkeypatch
     assert evidence.product == {"designation": "Ocean Blue 285", "sku": "OCEAN-285"}
     assert evidence.url == f"{snapshot}#size-285"
     assert evidence.archived_at == "2026-09-12"
+
+
+async def test_automatic_live_source_preference_persists(installed):
+    route = f'{BASE}/settings'
+    assert (await installed.get(route)).json()['chat_live_sources'] is True
+    assert (await installed.put(route, json={'chat_live_sources': 'false'})).status_code == 422
+    assert (await installed.put(route, json={'chat_live_sources': False})).json()['chat_live_sources'] is False
+    assert (await installed.put(route, json={})).json()['chat_live_sources'] is False
+
+
+async def test_microphone_preference_persists_and_reaches_chat(installed):
+    route = f"{BASE}/settings"
+    original = (await installed.get(route)).json()
+    assert original["microphone_enabled"] is True
+    assert (await installed.put(route, json={"microphone_enabled": "false"})).status_code == 422
+    saved = (await installed.put(route, json={"microphone_enabled": False, "model_revision": original["model_revision"]})).json()
+    assert saved["microphone_enabled"] is False
+    assert (await installed.get(f"{BASE}/status")).json()["microphone_enabled"] is False
+    assert (await installed.put(route, json={})).json()["microphone_enabled"] is False
+    assert (await installed.put(route, json={"microphone_enabled": True, "model_revision": saved["model_revision"]})).json()["microphone_enabled"] is True
+    assert (await installed.get(f"{BASE}/status")).json()["microphone_enabled"] is True

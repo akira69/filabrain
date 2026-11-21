@@ -96,7 +96,7 @@ try {
   await page.locator('[data-chat-filament]').selectOption('37')
   await page.locator('[data-chat-nozzle]').selectOption('0.4')
   await page.getByRole('textbox', { name: 'Your question' }).fill('What do I have for an outdoor bracket?')
-  await page.getByRole('button', { name: 'Search the web' }).click()
+  await page.getByRole('button', { name: 'Send message', exact: true }).click()
 
   const facts = page.locator('[data-chat-evidence]')
   await facts.getByText('145 g', { exact: false }).waitFor()
@@ -114,7 +114,7 @@ try {
   assert.deepEqual(
     { web_search: requests[0].web_search, printer_id: requests[0].printer_id,
       filament_id: requests[0].filament_id, nozzle_mm: requests[0].nozzle_mm },
-    { web_search: true, printer_id: 21, filament_id: 37, nozzle_mm: 0.4 },
+    { web_search: undefined, printer_id: 21, filament_id: 37, nozzle_mm: 0.4 },
   )
 
   await page.getByRole('textbox', { name: 'Your question' }).fill('What does my Elegoo spool weigh empty?')
@@ -136,7 +136,7 @@ try {
   await page.setViewportSize({ width: 320, height: 780 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320)
   await page.reload()
-  await page.locator('[data-chat-history] summary').click()
+  await page.locator('[data-chat-history]:visible summary').click()
   await page.getByRole('button', { name: 'What do I have for an outdoor bracket?' }).click()
   assert.equal(await basic.locator('button').getAttribute('aria-pressed'), 'true')
   await basic.getByRole('button', { name: 'Selected: Elegoo PLA Basic 1 kg' }).click()
@@ -164,7 +164,7 @@ try {
   await page.getByRole('button', { name: 'Selected: Elegoo PLA Basic 1 kg' }).nth(5).click()
   await page.getByRole('button', { name: 'This matches: Elegoo PLA Basic 1 kg' }).click()
   await page.reload()
-  await page.locator('[data-chat-history] summary').click()
+  await page.locator('[data-chat-history]:visible summary').click()
   await page.getByRole('button', { name: 'What do I have for an outdoor bracket?' }).click()
   await page.getByRole('textbox', { name: 'Your question' }).fill('How wide is it?')
   await page.getByRole('button', { name: 'Send' }).click()

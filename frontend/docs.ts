@@ -1,7 +1,7 @@
 export function mountDocs(editor: boolean) {
   const panel = document.querySelector<HTMLDialogElement>('#filabrain-docs')!
   const buttons = document.querySelectorAll<HTMLButtonElement>('[data-open-docs]')
-  const compact = matchMedia('(max-width: 800px)')
+  const compactWorkspace = matchMedia('(width < 96rem)')
   // Keep room for the settings form (52rem), guide (19rem), and page gutters (3.5rem).
   const compactSettings = matchMedia('(width < 74.5rem)')
   const topics = panel.querySelectorAll<HTMLElement>('[data-guide-topic]')
@@ -9,7 +9,7 @@ export function mountDocs(editor: boolean) {
   let opener: HTMLButtonElement | undefined
 
   function needsModal() {
-    return compact.matches || (panel.dataset.guideTopic === 'settings' && compactSettings.matches)
+    return panel.dataset.guideTopic === 'settings' ? compactSettings.matches : compactWorkspace.matches
   }
 
   function show() {
@@ -29,6 +29,14 @@ export function mountDocs(editor: boolean) {
       show()
     })
   }
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-search-guide]')) {
+    button.addEventListener('click', () => {
+      opener = button
+      if (!panel.open) show()
+      panel.querySelector<HTMLDetailsElement>('[data-guide-settings]')!.open = true
+      panel.querySelector('#guide-search-setup')!.scrollIntoView({ block: 'start' })
+    })
+  }
 
   panel.addEventListener('close', () => {
     if (panel.open) return
@@ -44,7 +52,7 @@ export function mountDocs(editor: boolean) {
     panel.close()
     show()
   }
-  compact.addEventListener('change', updateLayout)
+  compactWorkspace.addEventListener('change', updateLayout)
   compactSettings.addEventListener('change', updateLayout)
 
   return (topic: string) => {
