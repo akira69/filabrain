@@ -2574,3 +2574,11 @@ async def test_archived_supplier_keeps_original_variant_for_matching(monkeypatch
     assert evidence.product == {"designation": "Ocean Blue 285", "sku": "OCEAN-285"}
     assert evidence.url == f"{snapshot}#size-285"
     assert evidence.archived_at == "2026-09-12"
+
+
+async def test_automatic_live_source_preference_persists(installed):
+    route = f'{BASE}/settings'
+    assert (await installed.get(route)).json()['chat_live_sources'] is True
+    assert (await installed.put(route, json={'chat_live_sources': 'false'})).status_code == 422
+    assert (await installed.put(route, json={'chat_live_sources': False})).json()['chat_live_sources'] is False
+    assert (await installed.put(route, json={})).json()['chat_live_sources'] is False

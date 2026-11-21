@@ -21,7 +21,7 @@ async def chat_db(db_session, monkeypatch):
         plugin_type="integration", is_active=True,
     ))
     await db_session.commit()
-    config = SettingsInput(model_url="http://model.test", model_id="test-model").model_dump()
+    config = SettingsInput(model_url="http://model.test", model_id="test-model", chat_live_sources=False).model_dump()
 
     async def config_record(_db):
         return None, config
@@ -484,3 +484,20 @@ async def test_chat_returns_measured_usage(chat_db, monkeypatch):
     result = await research.research_chat(research.ChatRequest(messages=[{'role': 'user', 'content': 'Hello'}]), db, principal)
     assert result['reply'] == 'Hello.'
     assert result['usage'] == {'prompt_tokens': 120, 'completion_tokens': 40, 'context_window': 4096}
+
+
+@pytest.mark.parametrize('enabled,search_url,expected', [(True, 'https://search.test', True), (False, 'https://search.test', False), (True, '', False)])
+async def test_automatic_live_sources_require_enabled_search(chat_db, monkeypatch, enabled, search_url, expected):
+    db, config, research = chat_db
+    config.update(chat_live_sources=enabled, search_url=search_url)
+    filament = Filament(manufacturer=Manufacturer(name='Fixture', url='https://maker.example'),
+        designation='Fixture PLA', material_type='PLA', diameter_mm=1.75, datasheet_url='https://maker.example/spec.pdf')
+    db.add(filament)
+    await db.commit()
+    requested=[]
+    async def lookup(context, *_args):
+        requested.append(context.search_requested)
+        if context.search_requested: assert context.search_target['urls'] == ['https://maker.example/spec.pdf']
+    monkeypatch.setattr(research, 'lookup_live', lookup)
+    await ask(chat_db, monkeypatch, 'How does this filament perform?', filament_id=filament.id)
+    assert requested == [expected]

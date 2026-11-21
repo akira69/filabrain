@@ -257,6 +257,7 @@ async def research_chat(data: ChatRequest, db: DBSession, principal: PrincipalDe
     context = await collect_context(
         db, data.messages[-1].content, permissions, filament_id=data.filament_id,
         printer_id=data.printer_id, nozzle_mm=data.nozzle_mm, web_search=data.web_search,
+        auto_web_search=config.get("chat_live_sources", True) and bool(config["search_url"]),
         previous_questions=[message.content for message in reversed(data.messages[:-1:2])],
     )
     await db.rollback()

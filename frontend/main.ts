@@ -261,6 +261,21 @@ function mountLibrary(context?: SelectionContext) {
 
 async function main() {
   await initI18n()
+  for (const [headingId, selector] of [
+    ['research-chat-title', '[data-tab="chat"] svg'], ['research-heading', '[data-tab="new"] svg'],
+    ['spool-intake-heading', '[data-tab="spool"] svg'], ['library-heading', '[data-tab="library"] svg'],
+    ['batch-title', '[data-tab="batches"] svg'], ['model-settings-title', '[data-tab="settings"] svg'],
+    ['docs-title', '[data-open-docs] svg'],
+  ]) {
+    const heading = document.getElementById(headingId)
+    const icon = document.querySelector(selector)
+    if (heading && icon) {
+      const svg = icon.cloneNode(true) as SVGElement
+      svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+      heading.classList.add('page-heading')
+      heading.style.setProperty('--heading-icon', `url("data:image/svg+xml,${encodeURIComponent(svg.outerHTML)}")`)
+    }
+  }
   const theme = () => { document.documentElement.dataset.theme = localStorage.getItem('theme') || 'brand' }
   theme()
   window.addEventListener('storage', event => { if (event.key === 'theme') theme() })

@@ -111,10 +111,9 @@
   }
   .chat-context-fields > * { display: grid; gap: .2rem; min-width: 0; }
   .chat-context-fields .fm-input { width: 100%; min-width: 0; }
-  .chat-search { margin-inline-start: auto; font-size: .85rem; min-height: 44px; }
+  .chat-mic { margin-inline-start: auto; }
   .chat-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .5rem; padding: 0 .2rem; }
-  .chat-model-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 0 .5rem; min-width: 0; }
-  @media (max-width: 600px) { .chat-model-picker { flex-basis: 100%; } }
+  .chat-model-picker { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 0 .5rem; min-width: 0; }
   .chat-model-trigger {
     display: inline-flex;
     align-items: center;

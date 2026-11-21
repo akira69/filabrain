@@ -128,7 +128,6 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   const dictation = mountDictation(form, input)
   const usageLabel = form.querySelector<HTMLElement>('[data-chat-usage]')!
   const submit = form.querySelector<HTMLButtonElement>('.chat-send')!
-  const webSearch = form.querySelector<HTMLButtonElement>('[data-chat-web-search]')!
   const contextPanel = form.querySelector<HTMLDetailsElement>('[data-chat-context]')!
   const printer = contextPanel.querySelector<HTMLSelectElement>('[data-chat-printer]')!
   const filament = contextPanel.querySelector<HTMLSelectElement>('[data-chat-filament]')!
@@ -170,10 +169,6 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
 
   function scrollToEnd() { transcript.scrollTop = transcript.scrollHeight }
 
-  function lastQuestion() {
-    return current.messages.at(-2)?.content ?? ''
-  }
-
   function updateControls() {
     form.hidden = (!researching && !modelPicker.hasOptions) || (editorScope !== undefined && !form.contains(picker))
     input.disabled = researching && !current.messages.length && !busyResearch
@@ -181,8 +176,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     input.placeholder = t(researching ? 'filaBrain.followUpHint' : 'filaBrain.chatPlaceholder')
     input.setAttribute('aria-label', t(researching ? 'filaBrain.followUp' : 'filaBrain.chatQuestion'))
     submit.disabled = busyResearch || staging || !request && (input.disabled || !input.value.trim())
-    webSearch.hidden = contextPanel.hidden = researchOnly || researching
-    webSearch.disabled = !!request || busyResearch || staging || !modelPicker.selected || (!input.value.trim() && !lastQuestion())
+    contextPanel.hidden = researchOnly || researching
     for (const field of [printer, filament, filamentSearch, nozzle]) field.disabled = !!request
     const label = t(request ? 'filaBrain.chatStop' : researching ? 'filaBrain.sendFollowUp' : 'filaBrain.chatSend')
     submit.setAttribute('aria-label', label)
@@ -618,8 +612,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       request.abort()
       return
     }
-    const searchWeb = event.submitter === webSearch && !researching
-    const content = input.value.trim() || (searchWeb ? lastQuestion() : '')
+    const content = input.value.trim()
     if (!content || busyResearch || staging) return
     if (researching) {
       try { await research?.followUp(content) }
@@ -657,7 +650,6 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         ...(typeof selectedProfileId === 'string' ? { selected_spool_profile_id: selectedProfileId } : {}),
         ...(lookupMessageIndex >= 0 ? { spool_lookup_message_index: lookupMessageIndex } : {}),
         ...(lookupFilamentId !== undefined ? { spool_lookup_filament_id: lookupFilamentId } : {}),
-        ...(searchWeb ? { web_search: true } : {}),
         ...(printer.value ? { printer_id: Number(printer.value) } : {}),
         ...(filamentId !== null ? { filament_id: filamentId } : {}),
         ...(nozzle.value ? { nozzle_mm: Number(nozzle.value) } : {}),

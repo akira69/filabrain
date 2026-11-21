@@ -19,7 +19,7 @@
   padding: .35rem .75rem;
   background: var(--bg-soft);
 }
-.docs-header .filabrain-mark { width: 1.5rem; height: 1.5rem; }
+#guide-search-setup { scroll-margin-block-start: 4rem; }
 @media (pointer: coarse) {
   .docs-close { width: 44px; height: 44px; }
 }

@@ -42,6 +42,7 @@ try {
   const writes = []
   const savePaths = []
   let searchUrl = ''
+  let chatLiveSources = true
   let supplierDownloadMiB = 8
   let supplierSites = []
   let savedManufacturerWebsite
@@ -346,6 +347,7 @@ try {
       const settings = req.method() === 'PUT' ? req.postDataJSON() : null
       if (settings) {
         searchUrl = settings.search_url
+        chatLiveSources = settings.chat_live_sources ?? chatLiveSources
         supplierDownloadMiB = settings.supplier_download_mib
         supplierSites = settings.supplier_sites ?? supplierSites
         if (settings.model_endpoints) {
@@ -357,7 +359,7 @@ try {
       return route.fulfill({ json: {
         model_url: endpoints.find(endpoint => endpoint.id === defaultEndpoint)?.model_url || '', model_id: chatModelId,
         model_endpoints: endpoints, default_endpoint_id: defaultEndpoint,
-        search_url: searchUrl, has_key: false,
+        search_url: searchUrl, chat_live_sources: chatLiveSources, has_key: false,
         supplier_sites: supplierSites, supplier_download_mib: supplierDownloadMiB,
       } })
     }
@@ -827,6 +829,12 @@ try {
   const enableSearch = page.getByRole('button', { name: 'Set up search' })
   const searchField = page.getByRole('textbox', { name: 'SearXNG URL (optional)' })
   const sources = page.getByRole('region', { name: 'Research sources' })
+  const autoSources = sources.getByRole('checkbox', { name: 'Check live sources automatically' })
+  assert.equal(await autoSources.isDisabled(), true)
+  await sources.getByRole('button', { name: 'Setup guide' }).click()
+  await guide.locator('#guide-search-setup').waitFor()
+  await guide.getByRole('link', { name: 'SearXNG with Docker' }).waitFor()
+  await guide.getByRole('button', { name: 'Close' }).click()
   const builtIn = sources.getByRole('list')
   await builtIn.getByText('FilaManDB', { exact: true }).waitFor()
   await builtIn.getByText('Open Filament Database', { exact: true }).waitFor()

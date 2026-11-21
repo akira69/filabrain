@@ -1,6 +1,6 @@
 <dialog id="filabrain-docs" class="fm-card docs-panel" aria-labelledby="docs-title">
   <header class="fm-section-header docs-header">
-    <div class="filabrain-heading"><!-- mark --><h2 id="docs-title" data-i18n="filaBrain.docs">Guide</h2></div>
+    <h2 id="docs-title" data-i18n="filaBrain.docs">Guide</h2>
     <form method="dialog">
       <button type="submit" class="fm-btn docs-close" aria-label="Close" data-i18n-aria-label="common.close" autofocus>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
@@ -46,7 +46,7 @@
       <p>In <strong>FilaBrain settings</strong>, select <strong>Add endpoint</strong> to connect another model server. Enter a name, server URL and API key if required. Select <strong>Load models</strong> or open <strong>Enter a model ID manually</strong>. Use <strong>Test connection</strong> before saving.</p>
       <p>Use <strong>Models shown in chat</strong> to choose which models appear under each endpoint. Chat and interactive research share the model picker. <strong>Make default</strong> sets the endpoint and model for new conversations and background batches.</p>
       <p>For server-managed credentials, configure <code>FILABRAIN_MODEL_URL</code> and <code>FILABRAIN_API_KEY</code>. FilaMan uses <code>OIDC_ENC_KEY</code> to encrypt keys saved in the UI.</p>
-      <p>In <strong>Internet search</strong>, select <strong>Test SearXNG</strong> to check the URL before saving it.</p>
+      <p id="guide-search-setup">Install <a href="https://docs.searxng.org/admin/installation-docker" target="_blank" rel="noopener noreferrer">SearXNG with Docker</a>, enable JSON results, and enter its URL under <strong>Internet search</strong> in settings. Select <strong>Test SearXNG</strong> before saving. This enables the automatic live-source option under <strong>Research sources</strong>. Explicit requests to check a known manufacturer page can also work without SearXNG.</p>
     </details>
     <section data-guide-topic="chat">
       <h3 data-i18n="filaBrain.chat">Chat</h3>
@@ -54,7 +54,7 @@
       <p>The microphone dictates an editable draft; press Send when you are ready. It needs HTTPS and a supported browser. Your browser’s speech service may process audio online. Keyboard dictation is another option.</p>
       <p>The context indicator shows tokens reported for the last model request, including instructions, sources, and the reply. A percentage appears only when the active context limit is known. Ollama can report its running model’s window; other endpoints may report token counts without a limit.</p>
       <p>Ask for a spool’s empty weight or dimensions to compare catalog matches and photos. Select the reel that matches yours to keep the choice in this conversation.</p>
-      <p>Printing references and catalogs work with a local model when the Internet is unavailable. Choose <strong>Search the web</strong> to check known manufacturer pages and datasheets. SearXNG can find additional sources. Open <strong>History</strong> to continue a conversation saved in this browser.</p>
+      <p>Printing references and catalogs work with a local model when the Internet is unavailable. With SearXNG configured, known manufacturer pages and datasheets are checked automatically for product and printer questions. You can turn automatic checks off under <strong>Research sources</strong> in settings. SearXNG can find additional sources. Open <strong>History</strong> to continue a conversation saved in this browser.</p>
     </section>
     <section data-guide-topic="new" hidden>
       <h3>Research new filament</h3>

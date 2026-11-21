@@ -29,6 +29,14 @@ export function mountDocs(editor: boolean) {
       show()
     })
   }
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-search-guide]')) {
+    button.addEventListener('click', () => {
+      opener = button
+      if (!panel.open) show()
+      panel.querySelector<HTMLDetailsElement>('[data-guide-settings]')!.open = true
+      panel.querySelector('#guide-search-setup')!.scrollIntoView({ block: 'start' })
+    })
+  }
 
   panel.addEventListener('close', () => {
     if (panel.open) return

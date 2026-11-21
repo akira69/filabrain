@@ -1,4 +1,6 @@
 .research-clear-key { display: flex; align-items: center; gap: .4rem; }
+.research-auto-live:has(input:disabled) { color: var(--text-muted); opacity: .6; }
+.research-settings .research-guide-link { min-height: auto; padding: 0; border: 0; background: transparent; color: var(--accent); text-decoration: underline; font: inherit; }
 #research-endpoint-fields { min-width: 0; border: 1px solid var(--border); border-radius: .5rem; padding: .65rem; margin: 0; }
 #research-model-visibility > summary { cursor: pointer; }
 #research-visible-models { max-height: 15rem; overflow: auto; margin-block: .4rem; }

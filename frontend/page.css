@@ -24,9 +24,6 @@
   --accent: #14694b;
   --accent-text: #fff;
 }
-:root[data-theme="light"] .filabrain-mark [stroke="#45D7BC"] { stroke: #087F74; }
-:root[data-theme="light"] .filabrain-mark [stroke="#F449A4"] { stroke: #BF2679; }
-:root[data-theme="light"] .filabrain-mark [fill="#F449A4"] { fill: #BF2679; }
 :root[data-theme="dark"] {
   --bg: #191e28;
   --bg-elevated: #212734;
@@ -98,6 +95,8 @@ h1, h2, h3 { line-height: 1.2; }
   padding: .65rem 1rem; background: var(--bg-soft); border-bottom: 1px solid var(--border);
 }
 .fm-section-header h2 { margin: 0; font-size: 1rem; font-weight: 700; }
+.page-heading { display: flex; align-items: center; gap: .4rem; }
+.page-heading::before { content: ''; width: 1.125rem; height: 1.125rem; flex: none; background: currentColor; mask: var(--heading-icon) center / contain no-repeat; -webkit-mask: var(--heading-icon) center / contain no-repeat; }
 .fm-card.fm-section { padding: 0; overflow: hidden; }
 .fm-section-body { display: grid; gap: .75rem; min-width: 0; padding: 1rem; }
 .fm-section-body > :is(p, #library-research) { margin: 0; }

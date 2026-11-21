@@ -260,6 +260,7 @@ async def collect_context(
     db: DBSession, question: str, permissions: set[str], *,
     filament_id: int | None = None, printer_id: int | None = None,
     nozzle_mm: float | None = None, web_search: bool = False, previous_questions: list[str] | None = None,
+    auto_web_search: bool = False,
 ) -> ChatContext | None:
     if not web_search and NAVIGATION.search(question):
         return None
@@ -377,8 +378,10 @@ async def collect_context(
             context.evidence.append(_source(row))
             seen.add(row["source_id"])
 
-    if context.search_requested:
+    if context.search_requested or auto_web_search:
         context.search_target = _search_target(filament, catalog, printer_model, settings, question)
+        if auto_web_search and context.search_target:
+            context.search_requested = True
     return context
 
 

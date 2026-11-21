@@ -86,6 +86,24 @@ try {
     assert.ok(composer.y >= 0 && composer.y + composer.height <= height, 'composer fits short phone windows')
     await noOverflow()
   }
+  for (const theme of ['brand', 'light', 'dark']) {
+    await page.evaluate(value => document.documentElement.dataset.theme=value, theme)
+    const colors=await page.locator('#plugin-header .filabrain-mark').evaluate(svg=>({
+      text:getComputedStyle(svg).color,
+      strokes:[...svg.querySelectorAll('g[stroke]')].map(el=>getComputedStyle(el).stroke),
+      fill:getComputedStyle(svg.querySelector('g[fill]:not([fill="none"])')).fill,
+    }))
+    assert.ok(colors.strokes.every(stroke=>stroke===colors.text))
+    assert.equal(colors.fill,colors.text)
+  }
+  await page.evaluate(()=>document.documentElement.dataset.theme='brand')
+  await page.locator('#research-chat-title').evaluate(async heading=>{
+    const value=getComputedStyle(heading,'::before').maskImage
+    if(value==='none') throw new Error('Chat header icon missing')
+    const image=new Image()
+    image.src=value.slice(5,-2)
+    await image.decode()
+  })
   // Changing the available width switches between a docked guide and drawer.
 
   await page.setViewportSize({ width: 1920, height: 1000 })

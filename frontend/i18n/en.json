@@ -59,6 +59,10 @@
   },
   "filaBrain": {
     "chatWebSearch": "Search the web",
+    "searchSetupGuide": "Setup guide",
+    "autoLiveSourcesSetup": "Set up SearXNG to enable automatic checks.",
+    "autoLiveSources": "Check live sources automatically",
+    "autoLiveSourcesHint": "Checks known manufacturer pages for product and printer questions. SearXNG can discover additional sources.",
     "chatContextHint": "Optionally choose a printer, filament, and nozzle so answers use your setup.",
     "dictate": "Dictate a message",
     "dictateStop": "Stop dictation",
