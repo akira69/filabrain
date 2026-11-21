@@ -305,7 +305,11 @@
     "manual_datasheet": "Review this PDF datasheet manually.",
     "differentProduct": "The search names a different product than the form. Update the form or search for its current product.",
     "paletteColor": "Library color",
-    "color_required": "Select or add the color in the form: {name}"
+    "color_required": "Select or add the color in the form: {name}",
+    "microphoneSettings": "Microphone",
+    "microphoneEnabled": "Enable microphone dictation",
+    "microphoneHelp": "Uses your browser’s speech-recognition service to put editable text in the chat. The browser may send audio to its online transcription service. Only text is sent to your chosen model, after you press Send. Requires HTTPS and a supported browser.",
+    "microphoneOsHelp": "You can use your device’s keyboard dictation independently, even when this microphone is disabled. FilaBrain cannot start OS keyboard dictation for you."
   },
   "researchBatches": {
     "title": "Research runs",

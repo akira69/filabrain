@@ -305,7 +305,11 @@
     "manual_datasheet": "Prüfe dieses PDF-Datenblatt manuell.",
     "differentProduct": "Die Suche nennt ein anderes Produkt als das Formular. Ändere das Formular oder suche das aktuelle Produkt.",
     "paletteColor": "Bibliotheksfarbe",
-    "color_required": "Wähle die Farbe im Formular oder füge sie hinzu: {name}"
+    "color_required": "Wähle die Farbe im Formular oder füge sie hinzu: {name}",
+    "microphoneSettings": "Mikrofon",
+    "microphoneEnabled": "Mikrofondiktat aktivieren",
+    "microphoneHelp": "Die Spracherkennung des Browsers fügt bearbeitbaren Text in den Chat ein. Der Browser kann Audio an seinen Online-Transkriptionsdienst senden. Erst nach dem Klick auf Senden wird Text an das gewählte Modell gesendet. Erfordert HTTPS und einen unterstützten Browser.",
+    "microphoneOsHelp": "Das Tastaturdiktat Ihres Geräts funktioniert unabhängig davon, auch bei deaktiviertem Mikrofon. FilaBrain kann das Tastaturdiktat des Betriebssystems nicht starten."
   },
   "researchBatches": {
     "title": "Rechercheläufe",

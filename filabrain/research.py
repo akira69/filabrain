@@ -144,12 +144,14 @@ async def research_status(db: DBSession, principal: PrincipalDep):
             if exc.status_code != 403:
                 raise
     can_chat = enabled and principal.auth_type == "session" and "filaments:read" in permissions
+    microphone_enabled = False
     chat_model = None
     endpoint_id = None
     if enabled and principal.auth_type == "session" and (
         can_chat or permissions.intersection({"filaments:create", "filaments:update"})
     ):
         _, config = await config_record(db)
+        microphone_enabled = config.get("microphone_enabled", True)
         chat_model = (config["model_id"] or None) if config["model_url"] else None
         endpoint_id = default_endpoint_id(config)
     return {
@@ -166,6 +168,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         "can_configure": enabled and "admin:plugins_manage" in permissions,
         "can_chat": can_chat,
         "chat_model": chat_model,
+        "microphone_enabled": microphone_enabled,
         "chat_endpoint_id": endpoint_id,
     }
 

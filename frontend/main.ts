@@ -11,6 +11,7 @@ import { initI18n, t } from './shared/i18n'
 export type Status = {
   enabled: boolean
   can_chat: boolean
+  microphone_enabled?: boolean
   chat_model?: string | null
   chat_endpoint_id?: string | null
   can_create: boolean
@@ -340,6 +341,10 @@ async function main() {
       message.textContent = ''
       return
     }
+    document.addEventListener('filaman:model-change', event => {
+      const detail = (event as CustomEvent<Status>).detail
+      if (typeof detail.microphone_enabled === 'boolean') status.microphone_enabled = detail.microphone_enabled
+    })
     const header = element('plugin-header')
     const nav = header.querySelector('nav')!
     let chat: ReturnType<typeof mountChat> | undefined

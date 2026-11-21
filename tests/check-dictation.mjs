@@ -78,6 +78,19 @@ try {
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await page.getByRole('button', { name: 'Context: 160 tokens', exact: true }).click()
   await page.getByText(/did not report its context limit/).waitFor()
+  const beforeDisable = await input.inputValue()
+  await mic.click()
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: {
+    chat_model: 'test', chat_endpoint_id: 'local', microphone_enabled: false,
+  } })))
+  assert.equal(await mic.isVisible(), false, 'disabling the microphone hides it immediately')
+  assert.equal(await page.evaluate(() => window.recognitions.at(-1).aborted), true)
+  await page.evaluate(() => window.recognitions.at(-1).onresult({ results: [[{ transcript: 'disabled microphone' }]] }))
+  assert.equal(await input.inputValue(), beforeDisable)
+  await page.evaluate(() => document.dispatchEvent(new CustomEvent('filaman:model-change', { detail: {
+    chat_model: 'test', chat_endpoint_id: 'local', microphone_enabled: true,
+  } })))
+  assert.equal(await mic.isVisible(), true)
   canCreate = false
   await page.goto('https://fila.test/plugin-page/filabrain')
   await page.getByRole('button', { name: 'Add a filament', exact: true }).click()

@@ -43,6 +43,7 @@ try {
   const savePaths = []
   let searchUrl = ''
   let chatLiveSources = true
+  let microphoneEnabled = true
   let supplierDownloadMiB = 8
   let supplierSites = []
   let savedManufacturerWebsite
@@ -348,6 +349,7 @@ try {
       if (settings) {
         searchUrl = settings.search_url
         chatLiveSources = settings.chat_live_sources ?? chatLiveSources
+        microphoneEnabled = settings.microphone_enabled ?? microphoneEnabled
         supplierDownloadMiB = settings.supplier_download_mib
         supplierSites = settings.supplier_sites ?? supplierSites
         if (settings.model_endpoints) {
@@ -359,7 +361,7 @@ try {
       return route.fulfill({ json: {
         model_url: endpoints.find(endpoint => endpoint.id === defaultEndpoint)?.model_url || '', model_id: chatModelId,
         model_endpoints: endpoints, default_endpoint_id: defaultEndpoint,
-        search_url: searchUrl, chat_live_sources: chatLiveSources, has_key: false,
+        search_url: searchUrl, chat_live_sources: chatLiveSources, microphone_enabled: microphoneEnabled, has_key: false,
         supplier_sites: supplierSites, supplier_download_mib: supplierDownloadMiB,
       } })
     }
@@ -828,6 +830,20 @@ try {
   assert.equal(await guideClose.locator('svg[aria-hidden="true"]').count(), 1)
   await guideClose.click()
   await guide.waitFor({ state: 'hidden' })
+  const microphoneSetting = page.getByRole('checkbox', { name: 'Enable microphone dictation' })
+  assert.equal(await microphoneSetting.isChecked(), true)
+  const savePreferences = page.locator('#filabrain-settings').getByRole('button', { name: 'Save', exact: true })
+  assert.equal(await savePreferences.isDisabled(), true)
+  await microphoneSetting.uncheck()
+  assert.equal(await savePreferences.isEnabled(), true)
+  await savePreferences.click()
+  await page.getByText('Settings saved.').waitFor()
+  assert.equal(microphoneEnabled, false)
+  assert.equal(await savePreferences.isDisabled(), true)
+  await microphoneSetting.check()
+  await savePreferences.click()
+  await page.getByText('Settings saved.').waitFor()
+  assert.equal(microphoneEnabled, true)
   const enableSearch = page.getByRole('button', { name: 'Set up search' })
   const searchField = page.getByRole('textbox', { name: 'SearXNG URL (optional)' })
   const sources = page.getByRole('region', { name: 'Research sources' })

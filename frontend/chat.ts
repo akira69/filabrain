@@ -124,12 +124,12 @@ function evidenceLink(title: string, url: string) {
   return element
 }
 
-export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: () => void } = {}) {
+export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean; microphone_enabled?: boolean }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: () => void } = {}) {
   const root = options.root ?? document.querySelector<HTMLElement>('[data-view="chat"]')!
   let model = statusModel.chat_model
   const form = root.querySelector<HTMLFormElement>('[data-chat-form]')!
   const input = form.querySelector('textarea')!
-  const dictation = mountDictation(form, input)
+  const dictation = mountDictation(form, input, statusModel.microphone_enabled !== false)
   const usageMeter = mountContextUsage(form.querySelector<HTMLElement>('[data-chat-usage]')!)
   const chatContext = mountChatContext(form, statusModel, !researchOnly)
   const submit = form.querySelector<HTMLButtonElement>('.chat-send')!
@@ -695,6 +695,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
 
   document.addEventListener('filaman:model-change', event => {
     const detail = (event as CustomEvent<typeof statusModel>).detail
+    if (typeof detail.microphone_enabled === 'boolean') dictation.setEnabled(detail.microphone_enabled)
     model = detail.chat_model
     void modelPicker.setDefault(model, detail.chat_endpoint_id)
     updateControls()

@@ -8,7 +8,7 @@ type Recognition = {
   start(): void; abort(): void
 }
 
-export function mountDictation(form: HTMLFormElement, input: HTMLTextAreaElement) {
+export function mountDictation(form: HTMLFormElement, input: HTMLTextAreaElement, enabled = true) {
   const button = form.querySelector<HTMLButtonElement>('[data-chat-mic]')!
   const status = form.querySelector<HTMLElement>('[data-chat-dictation-status]')!
   const host = window as Window & {
@@ -17,6 +17,11 @@ export function mountDictation(form: HTMLFormElement, input: HTMLTextAreaElement
   }
   const Speech = host.SpeechRecognition || host.webkitSpeechRecognition
   let active: Recognition | undefined
+  function setEnabled(value: boolean) {
+    enabled = value
+    button.hidden = !enabled
+    if (!enabled) stop()
+  }
 
   function stop() {
     const previous = active
@@ -30,6 +35,7 @@ export function mountDictation(form: HTMLFormElement, input: HTMLTextAreaElement
   button.title = t(!isSecureContext ? 'filaBrain.dictateSecure' : !Speech ? 'filaBrain.dictateUnavailable' : 'filaBrain.dictatePrivacy')
   button.setAttribute('aria-disabled', String(!isSecureContext || !Speech))
   button.addEventListener('click', () => {
+    if (!enabled) return
     if (active) { stop(); return }
     if (!isSecureContext || !Speech) {
       status.textContent = t(!isSecureContext ? 'filaBrain.dictateSecure' : 'filaBrain.dictateUnavailable')
@@ -77,5 +83,6 @@ export function mountDictation(form: HTMLFormElement, input: HTMLTextAreaElement
   }, { capture: true })
   window.addEventListener('pagehide', stop)
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop() })
-  return { stop, setBusy(busy: boolean) { button.disabled = busy || input.disabled; if (busy || input.disabled) stop() } }
+  setEnabled(enabled)
+  return { stop, setEnabled, setBusy(busy: boolean) { button.disabled = busy || input.disabled; if (busy || input.disabled) stop() } }
 }

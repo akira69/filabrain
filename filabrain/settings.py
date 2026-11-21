@@ -114,6 +114,7 @@ class ModelEndpointInput(ModelConnection):
 
 
 class SettingsInput(ModelConnection):
+    microphone_enabled: StrictBool = True
     chat_live_sources: StrictBool = True
     search_url: str = Field("", max_length=500)
     supplier_download_mib: int = Field(DEFAULT_SUPPLIER_DOWNLOAD_MIB, ge=1, le=32, strict=True)
@@ -156,6 +157,7 @@ async def config_record(db: DBSession) -> tuple[FilamentResearchSettings | None,
         "supplier_sites": [],
         "supplier_download_mib": DEFAULT_SUPPLIER_DOWNLOAD_MIB,
         "chat_live_sources": True,
+        "microphone_enabled": True,
     }
     stored = row.config or {} if row else {}
     config = fallback | stored
@@ -211,6 +213,7 @@ def public_config(config: dict) -> dict:
         "supplier_sites": config["supplier_sites"],
         "supplier_download_mib": config["supplier_download_mib"],
         "chat_live_sources": config.get("chat_live_sources", True),
+        "microphone_enabled": config.get("microphone_enabled", True),
         "has_key": bool(config.get("encrypted_key") or deployment_key(config)),
         "default_endpoint_id": config.get("default_endpoint_id", model_endpoints[0]["id"] if model_endpoints else None),
         "model_revision": config.get("model_revision", "initial"),
@@ -233,7 +236,7 @@ async def save_settings(data: SettingsInput, db: DBSession, _principal=admin):
     await lock_research_plugin(db)
     row, old = await config_record(db)
     config = dict(row.config or {}) if row else {}
-    for key in ("search_url", "supplier_sites", "supplier_download_mib", "chat_live_sources"):
+    for key in ("search_url", "supplier_sites", "supplier_download_mib", "chat_live_sources", "microphone_enabled"):
         if key in data.model_fields_set:
             config[key] = data.model_dump(include={key})[key]
     if data.model_endpoints is not None:

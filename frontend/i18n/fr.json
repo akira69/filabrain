@@ -305,7 +305,11 @@
     "manual_datasheet": "Consultez cette fiche technique PDF manuellement.",
     "differentProduct": "La recherche indique un produit différent de celui du formulaire. Modifiez le formulaire ou recherchez le produit actuel.",
     "paletteColor": "Couleur de la bibliothèque",
-    "color_required": "Sélectionnez ou ajoutez la couleur dans le formulaire : {name}"
+    "color_required": "Sélectionnez ou ajoutez la couleur dans le formulaire : {name}",
+    "microphoneSettings": "Microphone",
+    "microphoneEnabled": "Activer la dictée au microphone",
+    "microphoneHelp": "La reconnaissance vocale du navigateur insère du texte modifiable dans le chat. Le navigateur peut envoyer l’audio à son service de transcription en ligne. Seul le texte est envoyé au modèle choisi, après un clic sur Envoyer. Nécessite HTTPS et un navigateur compatible.",
+    "microphoneOsHelp": "La dictée du clavier de votre appareil reste disponible indépendamment, même si ce microphone est désactivé. FilaBrain ne peut pas démarrer la dictée du système à votre place."
   },
   "researchBatches": {
     "title": "Suivi des recherches",

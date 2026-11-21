@@ -30,6 +30,7 @@ export async function mountSettings() {
   let sites: SupplierSite[] = []
   const models = mountModelSettings(form, refresh)
   const sourceValues = () => ({
+    microphone_enabled: field('microphone_enabled').checked,
     chat_live_sources: field('chat_live_sources').checked,
     search_url: field('search_url').value.trim(),
     supplier_sites: sites,
@@ -39,6 +40,7 @@ export async function mountSettings() {
   function refresh() {
     const ready = savedSources !== undefined
     const sources = sourceValues()
+    field('microphone_enabled').disabled = saving || !ready
     const searchReady = !!sources.search_url && field('search_url').validity.valid
     field('chat_live_sources').disabled = saving || !ready || !searchReady
     document.getElementById('research-auto-search-setup')!.hidden = searchReady
@@ -127,9 +129,10 @@ export async function mountSettings() {
     model_endpoints: ModelEndpoint[]; default_endpoint_id: string | null
     model_revision?: string
     supplier_sites?: SupplierSite[]; supplier_download_mib: number
-    chat_live_sources?: boolean
+    chat_live_sources?: boolean; microphone_enabled?: boolean
   }) {
     field('search_url').value = config.search_url
+    field('microphone_enabled').checked = config.microphone_enabled ?? true
     field('chat_live_sources').checked = config.chat_live_sources ?? true
     field('supplier_download_mib').valueAsNumber = config.supplier_download_mib
     enableSearch.hidden = !!config.search_url
@@ -171,7 +174,7 @@ export async function mountSettings() {
       if (isSave) {
         fill(data)
         document.dispatchEvent(new CustomEvent('filaman:model-change', {
-          detail: { chat_model: data.model_id, chat_endpoint_id: data.default_endpoint_id },
+          detail: { chat_model: data.model_id, chat_endpoint_id: data.default_endpoint_id, microphone_enabled: data.microphone_enabled },
         }))
       }
       feedback.textContent = t(isSave ? 'filaBrain.settingsSaved' : 'filaBrain.searchTestPassed')
@@ -197,7 +200,7 @@ export async function mountSettings() {
     testSearch.addEventListener('click', () => void send('test-search'))
     form.addEventListener('input', event => {
       if (event.target === field('search_url')) searchMessage.textContent = ''
-      if (event.target === field('search_url') || event.target === field('supplier_download_mib') || event.target === field('chat_live_sources')) refresh()
+      if (event.target === field('search_url') || event.target === field('supplier_download_mib') || event.target === field('chat_live_sources') || event.target === field('microphone_enabled')) refresh()
     })
   } catch {
     message.textContent = t('filaBrain.failed')
