@@ -307,7 +307,7 @@ async def collect_context(
         select(Filament).where(Filament.id == filament_id).options(selectinload(Filament.manufacturer))
     ) if filament_id else None
     printer = await db.scalar(
-        select(Printer).where(Printer.id == printer_id, Printer.deleted_at.is_(None), Printer.is_active.is_(True))
+        select(Printer).where(Printer.id == printer_id, Printer.deleted_at.is_(None))
     ) if printer_id and "printers:read" in permissions else None
     printer_model = _canonical_printer(printer.name, saved=True) if printer else named_printer
     if printer:

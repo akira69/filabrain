@@ -159,13 +159,14 @@ async def test_inventory_follow_up_resolves_localized_weight(
     "Use 999 °C [saved-profile-2].",
     "Use the matching profile [source-made-up].",
 ])
-async def test_settings_use_only_the_selected_nozzle_profile_and_strip_unverified_numbers(chat_db, monkeypatch, reply):
+@pytest.mark.parametrize("active", [True, False])
+async def test_settings_use_only_the_selected_nozzle_profile_and_strip_unverified_numbers(chat_db, monkeypatch, reply, active):
     db, _, _ = chat_db
     filament = Filament(
         manufacturer=Manufacturer(name="Other Brand"), designation="Fixture PLA",
         material_type="PLA", diameter_mm=1.75,
     )
-    printer = Printer(name="My Bambu A1", driver_key="manual", driver_config={"token": "private-token"})
+    printer = Printer(name="My Bambu A1", driver_key="manual", is_active=active, driver_config={"token": "private-token"})
     db.add_all([
         FilamentPrinterProfile(
             filament=filament, printer=printer, profile_name="Smaller nozzle",

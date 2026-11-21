@@ -11,7 +11,7 @@ const result = await build({
   write: false,
   target: ['es2022'],
 })
-const css = await Promise.all(['page', 'chat', 'settings', 'batches', 'docs'].map(name => read(name + '.css')))
+const css = await Promise.all(['page', 'chat', 'settings', 'batches', 'docs', 'context-usage', 'tabs'].map(name => read(name + '.css')))
 let html = (await read('page.html')).replace('<!-- styles -->', () => css.join('\n'))
 for (const section of ['chat', 'settings', 'batches', 'docs']) {
   const fragment = await read(section + '.html')

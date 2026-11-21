@@ -10,7 +10,7 @@ type Recognition = {
 
 export function mountDictation(form: HTMLFormElement, input: HTMLTextAreaElement) {
   const button = form.querySelector<HTMLButtonElement>('[data-chat-mic]')!
-  const status = form.querySelector<HTMLElement>('#chat-dictation-status')!
+  const status = form.querySelector<HTMLElement>('[data-chat-dictation-status]')!
   const host = window as Window & {
     SpeechRecognition?: new () => Recognition
     webkitSpeechRecognition?: new () => Recognition
@@ -77,5 +77,5 @@ export function mountDictation(form: HTMLFormElement, input: HTMLTextAreaElement
   }, { capture: true })
   window.addEventListener('pagehide', stop)
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop() })
-  return { setBusy(busy: boolean) { button.disabled = busy || input.disabled; if (busy || input.disabled) stop() } }
+  return { stop, setBusy(busy: boolean) { button.disabled = busy || input.disabled; if (busy || input.disabled) stop() } }
 }

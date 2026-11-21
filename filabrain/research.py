@@ -137,6 +137,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "spools:create",
                 "spools:read",
                 "printers:read",
+                "display:read",
                 "admin:plugins_manage",
             )
         except HTTPException as exc:
@@ -158,6 +159,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         and {"filaments:read", "spools:create"} <= permissions,
         "can_read_spools": enabled and principal.auth_type == "session" and "spools:read" in permissions,
         "can_read_printers": enabled and principal.auth_type == "session" and "printers:read" in permissions,
+        "can_read_display": enabled and principal.auth_type == "session" and "display:read" in permissions,
         "can_update": "filaments:update" in permissions,
         "can_update_manufacturer": enabled and principal.auth_type == "session"
         and {"filaments:update", "manufacturers:update"} <= permissions,

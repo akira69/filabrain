@@ -1,10 +1,12 @@
-import { api, fetchAllPages } from './shared/api'
+import { api } from './shared/api'
 import { getLang, t } from './shared/i18n'
 import { researchFieldLabel } from './shared/filabrain'
 import { spoolProfileCards, type SpoolProfile } from './shared/spool-profiles'
 import { mountModelPicker, type ModelSelection } from './shared/model-picker'
 import { identity, type ResearchDraft } from './research'
 import { mountDictation } from './dictation'
+import { mountChatContext, type ChatContextSnapshot } from './chat-context'
+import { mountContextUsage, type ChatUsage } from './context-usage'
 
 const pageLabels = {
   new_filament: 'filaments.newFilament',
@@ -27,12 +29,13 @@ type Message = {
   role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal']; savedDraftId?: string
   grounding?: Grounding; spoolProfiles?: SpoolProfile[]; selectedSpoolProfile?: string; confirmedSpoolProfile?: string
   activeSpoolChoice?: true; spoolLookupFilamentId?: number | null; spoolLookupId?: string
-  usage?: { prompt_tokens: number; completion_tokens?: number; context_window?: number }
+  usage?: ChatUsage
   usageModel?: ModelSelection
 }
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
   researching?: true; model?: string | ModelSelection; updatedAt?: number
+  draft?: string; context?: ChatContextSnapshot
 }
 type Research = {
   start(): void
@@ -121,12 +124,14 @@ function evidenceLink(title: string, url: string) {
   return element
 }
 
-export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined) {
+export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean }, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: () => void } = {}) {
+  const root = options.root ?? document.querySelector<HTMLElement>('[data-view="chat"]')!
   let model = statusModel.chat_model
-  const form = document.querySelector<HTMLFormElement>('[data-chat-form]')!
+  const form = root.querySelector<HTMLFormElement>('[data-chat-form]')!
   const input = form.querySelector('textarea')!
   const dictation = mountDictation(form, input)
-  const usageLabel = form.querySelector<HTMLElement>('[data-chat-usage]')!
+  const usageMeter = mountContextUsage(form.querySelector<HTMLElement>('[data-chat-usage]')!)
+  const chatContext = mountChatContext(form, statusModel, !researchOnly)
   const submit = form.querySelector<HTMLButtonElement>('.chat-send')!
   const contextPanel = form.querySelector<HTMLDetailsElement>('[data-chat-context]')!
   const printer = contextPanel.querySelector<HTMLSelectElement>('[data-chat-printer]')!
@@ -134,23 +139,25 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   const filamentSearch = contextPanel.querySelector<HTMLInputElement>('[data-chat-filament-search]')!
   const nozzle = contextPanel.querySelector<HTMLSelectElement>('[data-chat-nozzle]')!
   const contextStatus = contextPanel.querySelector<HTMLElement>('[data-chat-context-status]')!
-  const status = document.querySelector<HTMLElement>('[data-chat-status]')!
-  const transcript = document.querySelector<HTMLElement>('[data-chat-transcript]')!
-  const log = document.querySelector<HTMLElement>('[data-chat-log]')!
-  const prompts = document.querySelector<HTMLElement>('[data-chat-prompts]')!
-  const setup = document.querySelector<HTMLElement>('[data-chat-setup]')!
-  const setupHint = document.querySelector<HTMLElement>('[data-chat-setup-hint]')!
-  const setupButton = document.querySelector<HTMLButtonElement>('[data-chat-setup-button]')!
-  const newChat = document.querySelector<HTMLButtonElement>('[data-chat-new]')!
-  const history = document.querySelector<HTMLDetailsElement>('[data-chat-history]')!
-  const historyList = document.querySelector<HTMLElement>('[data-chat-history-list]')!
-  const researchInput = document.querySelector<HTMLElement>('[data-chat-research-input]')!
-  const researchResults = document.querySelector<HTMLElement>('[data-chat-research-results]')!
+  const status = root.querySelector<HTMLElement>('[data-chat-status]')!
+  const transcript = root.querySelector<HTMLElement>('[data-chat-transcript]')!
+  const log = root.querySelector<HTMLElement>('[data-chat-log]')!
+  const prompts = root.querySelector<HTMLElement>('[data-chat-prompts]')!
+  const setup = root.querySelector<HTMLElement>('[data-chat-setup]')!
+  const setupHint = root.querySelector<HTMLElement>('[data-chat-setup-hint]')!
+  const setupButton = root.querySelector<HTMLButtonElement>('[data-chat-setup-button]')!
+  const newChat = root.querySelector<HTMLButtonElement>('[data-chat-new]')!
+  const history = root.querySelector<HTMLDetailsElement>('[data-chat-history]')!
+  const historyList = root.querySelector<HTMLElement>('[data-chat-history-list]')!
+  const researchInput = root.querySelector<HTMLElement>('[data-chat-research-input]')!
+  const researchResults = root.querySelector<HTMLElement>('[data-chat-research-results]')!
+  const bubbles = new Map<Message, HTMLElement>()
   let current: Conversation = { id: '', title: '', messages: [] }
   let saved: Conversation[] = []
   let storageKey: string | undefined
   const historyStorage = () => editorScope === '' ? sessionStorage : localStorage
   let request: AbortController | undefined
+  const pending = new Map<string, { conversation: Conversation; controller: AbortController; question: Message }>()
   let busyResearch = false
   let staging = false
   let researching = false
@@ -158,9 +165,6 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   let activeAnswer: HTMLElement | undefined
   let forkNextResearchTurn = false
   let evidenceCount = 0
-  let filamentQuery = 0
-  let queryTimer: number | undefined
-  let printersLoaded = false
   const modelPicker = mountModelPicker(form, model, openSettings, statusModel.chat_endpoint_id, updateControls)
   const picker = form.querySelector<HTMLElement>('.chat-model-picker')!
   status.removeAttribute('data-i18n')
@@ -184,18 +188,15 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     submit.toggleAttribute('data-busy', !!request)
     input.readOnly = !!request || busyResearch || staging
     dictation.setBusy(input.readOnly)
-    const usage = current.messages.at(-1)?.usage
-    const usedModel = current.messages.at(-1)?.usageModel
-    usageLabel.hidden = !usage || researching || usedModel?.model_id !== modelPicker.selected?.model_id
-      || usedModel?.endpoint_id !== modelPicker.selected?.endpoint_id
-    if (usage) {
-      const count = usage.prompt_tokens + (usage.completion_tokens ?? 0)
-      const limit = usage.context_window
-      usageLabel.textContent = t(limit ? 'filaBrain.contextPercent' : 'filaBrain.contextTokens', {
-        count: count.toLocaleString(), limit: limit?.toLocaleString() ?? '', percent: limit ? Math.round(count / limit * 100) : '',
-      })
-      usageLabel.title = t(limit ? 'filaBrain.contextUsageHint' : 'filaBrain.contextUsageUnknown')
-    }
+    const answer = current.messages.at(-1)
+    const usedModel = answer?.usageModel
+    usageMeter.update(answer?.usage, { visible: answer?.role === 'assistant' && !researching
+      && usedModel?.model_id === modelPicker.selected?.model_id && usedModel?.endpoint_id === modelPicker.selected?.endpoint_id,
+      model: usedModel?.model_id })
+    const title = current.title || t('filaBrain.chatNew')
+    history.querySelector<HTMLElement>('[data-chat-title]')!.textContent = title
+    history.querySelector('summary')!.setAttribute('aria-label', t('filaBrain.chatConversation', { name: title }))
+    history.querySelector('summary')!.title = title
     modelPicker.setBusy(!!request || busyResearch || staging)
     status.toggleAttribute('data-chat-running', !!request)
     newChat.disabled = busyResearch || staging || !researching && !request && !current.messages.length && !input.value
@@ -204,54 +205,6 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     setup.hidden = researching || modelPicker.hasOptions || current.messages.length > 0
     researchInput.hidden = researchResults.hidden = !researching
   }
-
-  const setOptions = (select: HTMLSelectElement, options: [number, string][]) => {
-    const selected = select.selectedOptions[0]
-    const selectedId = Number(selected?.value)
-    select.replaceChildren(new Option(t('filaBrain.chatNoSelection'), ''))
-    if (selectedId && !options.some(([id]) => id === selectedId)) select.append(selected)
-    for (const [id, name] of options) select.add(new Option(name, String(id)))
-    if (selectedId) select.value = String(selectedId)
-  }
-  setOptions(printer, [])
-  setOptions(filament, [])
-  contextPanel.querySelector<HTMLElement>('[data-chat-printer-field]')!.hidden = !statusModel.can_read_printers
-  contextPanel.addEventListener('toggle', async () => {
-    if (!contextPanel.open || printersLoaded || !statusModel.can_read_printers) return
-    printersLoaded = true
-    try {
-      const { items } = await fetchAllPages<{ id: number; name: string; is_active: boolean }>('/api/v1/printers')
-      setOptions(printer, items.filter(item => item.is_active).map(item => [item.id, item.name]))
-    } catch {
-      printersLoaded = false
-      contextStatus.textContent = t('filaBrain.chatContextUnavailable')
-    }
-  })
-  filamentSearch.addEventListener('keydown', event => {
-    if (event.key === 'Enter') event.preventDefault()
-  })
-  filamentSearch.addEventListener('input', () => {
-    const generation = ++filamentQuery
-    const search = filamentSearch.value.trim()
-    window.clearTimeout(queryTimer)
-    if (!search) {
-      setOptions(filament, [])
-      return
-    }
-    queryTimer = window.setTimeout(async () => {
-      const query = new URLSearchParams({ search, page_size: '25' })
-      try {
-        const { items } = await api.get<{ items: { id: number; designation: string; manufacturer?: { name: string } }[] }>(
-          `/filaments?${query}`, { cache: 'no-store' },
-        )
-        if (generation !== filamentQuery) return
-        contextStatus.textContent = ''
-        setOptions(filament, items.map(item => [item.id, [item.manufacturer?.name, item.designation].filter(Boolean).join(' · ')]))
-      } catch {
-        if (generation === filamentQuery) contextStatus.textContent = t('filaBrain.chatContextUnavailable')
-      }
-    }, 200)
-  })
 
   function appendEvidence(paragraph: HTMLParagraphElement, content: string, grounding: Grounding) {
     const facts = document.createElement('details')
@@ -376,6 +329,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     }
     if (message.grounding || message.spoolProfiles?.length) transcript.scrollTop = paragraph.offsetTop - 8
     else scrollToEnd()
+    bubbles.set(message, paragraph)
     return paragraph
   }
 
@@ -397,10 +351,11 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       const button = document.createElement('button')
       button.type = 'button'
       button.disabled = busyResearch || staging
-      button.textContent = conversation.title || conversation.messages[0].content.slice(0, 100)
+      button.textContent = conversation.title || conversation.messages[0]?.content.slice(0, 100) || conversation.draft || t('filaBrain.chatNew')
       if (conversation.id === current.id) button.setAttribute('aria-current', 'true')
       button.addEventListener('click', async () => {
         if (busyResearch || staging) return
+        saveDraft()
         let selected = conversation
         try {
           const latest = readHistory().find(item => item.id === conversation.id)
@@ -408,7 +363,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         } catch { /* Keep the in-memory transcript available. */ }
         const researchChat = !!(selected.researching || selected.research)
         reset(researchChat)
-        current = { ...selected, messages: [...selected.messages] }
+        current = pending.get(selected.id)?.conversation ?? { ...selected, messages: [...selected.messages] }
+        request = pending.get(selected.id)?.controller
         let lastResult = -1
         current.messages.forEach((message, index) => { if (message.proposal) lastResult = index })
         if (selected.research) {
@@ -420,6 +376,11 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         updateControls()
         try {
           if (researchChat) research?.start()
+          input.value = request ? '' : current.draft || ''
+          status.textContent = request ? t('filaBrain.chatWorking') : ''
+          if (!researchChat) current.messages.forEach(message => append(message))
+          if (selected.context) await chatContext.restore(selected.context)
+          else await chatContext.reset()
           const draft = current.research
           let resumed = false
           if (draft && research) {
@@ -427,7 +388,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
             catch { status.textContent = t('filaBrain.researchHistoryReadOnly') }
           }
           if (!resumed) current.research = undefined
-          current.messages.forEach((message, index) => {
+          if (researchChat) current.messages.forEach((message, index) => {
             const bubble = append(message)
             if (draft && index === lastResult) {
               if (resumed) {
@@ -466,7 +427,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     if (!storageKey) return []
     const stored: unknown = JSON.parse(historyStorage().getItem(storageKey) || '[]')
     return Array.isArray(stored) ? stored.filter(item => typeof item?.id === 'string' &&
-      Array.isArray(item.messages) && item.messages.length && item.messages.every(
+      Array.isArray(item.messages) && (item.messages.length || typeof item.draft === 'string' && item.draft.trim()) && item.messages.every(
         (message: Message) => (message?.role === 'user' || message?.role === 'assistant') &&
           typeof message.content === 'string')) : []
   }
@@ -501,17 +462,24 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
   }
 
-  function remember() {
-    if (!current.id) {
-      current.id = newId()
-      current.title = current.messages[0].content.slice(0, 100)
+  function remember(conversation = current) {
+    if (conversation === current) {
+      conversation.draft = input.value
+      conversation.context = chatContext.snapshot()
+      conversation.model = modelPicker.selected
     }
-    const selection = current.messages.find(message => message.activeSpoolChoice) ?? current.messages.at(-1)
-    const lookup = selection?.selectedSpoolProfile ? spoolLookupMessage(current.messages, selection) : undefined
-    const messages = chatHistoryWindow(current.messages, 60, lookup)
-    const earlierReceipts = current.messages.slice(0, -60).filter(message => message.savedDraftId && !messages.includes(message))
+    if (!conversation.id) conversation.id = newId()
+    if (!conversation.title) conversation.title = (conversation.messages[0]?.content || conversation.draft || t('filaBrain.chatNew')).slice(0, 100)
+    const selection = conversation.messages.find(message => message.activeSpoolChoice) ?? conversation.messages.at(-1)
+    const lookup = selection?.selectedSpoolProfile ? spoolLookupMessage(conversation.messages, selection) : undefined
+    const running = pending.get(conversation.id)
+    const complete = running && conversation.messages.at(-1) === running.question ? conversation.messages.slice(0, -1) : conversation.messages
+    const messages = chatHistoryWindow(complete, 60, lookup)
+    const earlierReceipts = conversation.messages.slice(0, -60).filter(message => message.savedDraftId && !messages.includes(message))
     messages.unshift(...earlierReceipts)
-    const snapshot = { ...current, model: modelPicker.selected, updatedAt: Date.now(), messages }
+    conversation.updatedAt = Math.max(Date.now(), (conversation.updatedAt ?? 0) + 1,
+      (saved.find(item => item.id === conversation.id)?.updatedAt ?? 0) + 1)
+    const snapshot = { ...conversation, draft: running?.question.content || conversation.draft, messages }
     saved = [snapshot, ...saved.filter(item => item.id !== snapshot.id)].slice(0, 20)
     if (storageKey) {
       try {
@@ -525,6 +493,22 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       } catch { status.textContent = t('filaBrain.chatHistoryFailed') }
     }
     renderHistory()
+  }
+
+  function saveDraft() {
+    dictation.stop()
+    if (!root.getClientRects().length || busyResearch || staging || forkNextResearchTurn) return
+    const context = chatContext.snapshot()
+    if (input.value === (current.draft ?? '') && JSON.stringify(context) === JSON.stringify(current.context ?? {})
+        && JSON.stringify(modelPicker.selected) === JSON.stringify(current.model)) return
+    if (!current.messages.length && !input.value.trim()) return
+    if (!pending.has(current.id)) {
+      try {
+        const stored = readHistory().find(item => item.id === current.id)
+        if (stored) current = mergeConversation(current, stored)
+      } catch { /* Preserve the in-memory draft if storage is unavailable. */ }
+    }
+    remember()
   }
 
   function lastUpdated(item: Conversation) {
@@ -552,7 +536,6 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   })
 
   function reset(useResearch: boolean) {
-    request?.abort()
     request = undefined
     current = { id: '', title: '', messages: [] }
     forkNextResearchTurn = false
@@ -563,13 +546,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     log.after(researchResults)
     activeAnswer = undefined
     log.replaceChildren()
+    bubbles.clear()
     input.value = ''
     contextPanel.open = false
-    filamentQuery++
-    filamentSearch.value = ''
-    filament.value = printer.value = nozzle.value = ''
-    setOptions(filament, [])
-    contextStatus.textContent = ''
+    void chatContext.reset()
     status.textContent = ''
     history.open = false
     renderHistory()
@@ -589,8 +569,9 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   })
   for (const button of prompts.querySelectorAll<HTMLButtonElement>('[data-chat-prompt]')) {
     button.addEventListener('click', () => {
-      if (button.dataset.chatPrompt === 'chatPromptAdd' && research) {
-        research.start()
+      if (button.dataset.chatPrompt === 'chatPromptAdd' && (research || options.openResearch)) {
+        if (research) research.start()
+        else options.openResearch!()
         return
       }
       input.value = t(`filaBrain.${button.dataset.chatPrompt}`)
@@ -602,6 +583,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   if (openSettings) setupButton.addEventListener('click', openSettings)
   setupHint.textContent = t(openSettings ? 'filaBrain.chatSetup' : 'filaBrain.chatAskAdmin')
   newChat.addEventListener('click', () => {
+    saveDraft()
     reset(researchOnly)
     if (researching) researchInput.querySelector<HTMLElement>('input, select')?.focus()
     else input.focus()
@@ -623,22 +605,29 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       status.textContent = t('filaBrain.chooseModel')
       return
     }
+    const conversation = current
+    if (!conversation.id) conversation.id = newId()
+    if (!conversation.title) conversation.title = content.slice(0, 100)
+    const choiceModel = modelPicker.selected
     const question: Message = { role: 'user', content }
     modelPicker.preserve(modelPicker.selected)
     const bubble = append(question)
     const controller = request = new AbortController()
+    pending.set(conversation.id, { conversation, controller, question })
     input.value = ''
     status.textContent = t('filaBrain.chatWorking')
     updateControls()
     try {
-      const choice = current.messages.find(message => message.activeSpoolChoice)
-      const selection = choice ?? current.messages.at(-1)
+      const choice = conversation.messages.find(message => message.activeSpoolChoice)
+      const selection = choice ?? conversation.messages.at(-1)
       const selectedProfileId = selection?.selectedSpoolProfile
-      const lookup = selection && selectedProfileId ? spoolLookupMessage(current.messages, selection) : undefined
+      const lookup = selection && selectedProfileId ? spoolLookupMessage(conversation.messages, selection) : undefined
       const lookupFilamentId = lookup?.spoolLookupFilamentId
       const filamentId = filament.value ? Number(filament.value) : null
-      const history = chatHistoryWindow(current.messages, 10, lookup)
+      const history = chatHistoryWindow(conversation.messages, 10, lookup)
       const lookupMessageIndex = lookup ? history.indexOf(lookup) : -1
+      conversation.messages.push(question)
+      remember(conversation)
       const { reply, action, spool_profiles, selected_spool_profile_id, usage, ...grounding } = await api.post<{
         reply: string; action: Action | null; spool_profiles?: SpoolProfile[]; selected_spool_profile_id?: string
         usage?: Message['usage']
@@ -646,7 +635,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         messages: [...history, question].map(({ role, content, confirmedSpoolProfile }) => ({
           role, content, ...(confirmedSpoolProfile ? { confirmed_spool_profile_id: confirmedSpoolProfile } : {}),
         })),
-        ...modelPicker.selected,
+        ...choiceModel,
         ...(typeof selectedProfileId === 'string' ? { selected_spool_profile_id: selectedProfileId } : {}),
         ...(lookupMessageIndex >= 0 ? { spool_lookup_message_index: lookupMessageIndex } : {}),
         ...(lookupFilamentId !== undefined ? { spool_lookup_filament_id: lookupFilamentId } : {}),
@@ -654,7 +643,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         ...(filamentId !== null ? { filament_id: filamentId } : {}),
         ...(nozzle.value ? { nozzle_mm: Number(nozzle.value) } : {}),
       }, { signal: controller.signal })
-      if (request !== controller) return
+      if (pending.get(conversation.id)?.controller !== controller) return
       if (choice?.activeSpoolChoice && choice.selectedSpoolProfile === selectedProfileId &&
           (selectedProfileId === undefined || selected_spool_profile_id !== selectedProfileId)) {
         choice.activeSpoolChoice = undefined
@@ -664,7 +653,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       const answer: Message = {
         role: 'assistant', content: reply, action: action ?? undefined,
         usage,
-        usageModel: modelPicker.selected,
+        usageModel: choiceModel,
         grounding: Array.isArray(grounding.evidence) ? grounding as Grounding : undefined,
         spoolProfiles,
         spoolLookupFilamentId: spoolProfiles?.length
@@ -674,21 +663,33 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         confirmedSpoolProfile: selected_spool_profile_id,
         spoolLookupId: spoolProfiles?.length ? (selected_spool_profile_id && lookup?.spoolLookupId || newId()) : undefined,
       }
-      current.messages.push(question, answer)
-      append(answer)
-      status.textContent = ''
-      remember()
+      conversation.messages.push(answer)
+      pending.delete(conversation.id)
+      if (current === conversation) {
+        append(answer)
+        status.textContent = ''
+      }
+      remember(conversation)
     } catch {
-      if (request !== controller) return
-      bubble.remove()
-      input.value = content
-      status.textContent = t(controller.signal.aborted ? 'filaBrain.chatStopped' : 'filaBrain.chatFailed')
+      if (pending.get(conversation.id)?.controller !== controller) return
+      if (conversation.messages.at(-1) === question) conversation.messages.pop()
+      conversation.draft = content
+      pending.delete(conversation.id)
+      if (current === conversation) {
+        bubbles.get(question)?.remove()
+        bubbles.delete(question)
+        input.value = content
+        status.textContent = t(controller.signal.aborted ? 'filaBrain.chatStopped' : 'filaBrain.chatFailed')
+      }
+      remember(conversation)
     } finally {
-      if (request === controller) {
+      if (pending.get(conversation.id)?.controller === controller) pending.delete(conversation.id)
+      if (current === conversation) {
         request = undefined
         updateControls()
-        input.focus()
+        if (root.getClientRects().length) input.focus()
       }
+      renderHistory()
     }
   })
 
@@ -713,6 +714,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
 
   updateControls()
   return {
+    root,
+    saveDraft,
     get model() { return modelPicker.selected },
     get needsModelSelection() { return modelPicker.needsSelection },
     preserveModel() { modelPicker.preserve(modelPicker.selected) },

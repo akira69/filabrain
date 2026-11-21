@@ -5,10 +5,11 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright-c
 const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE_PATH })
 let calls = 0
 let knownWindow = true
+let canCreate = true
 const fixture = route => {
   const path = new URL(route.request().url()).pathname
   if (path.startsWith('/plugin-page/')) return route.fulfill({ contentType: 'text/html', body: html })
-  if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, can_configure: false, chat_model: 'test' } })
+  if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, can_create: canCreate, can_configure: false, chat_model: 'test' } })
   if (path.endsWith('/filabrain/models')) return route.fulfill({ json: { groups: [{ id: 'local', name: 'Test', models: ['test', 'other'] }], default_endpoint_id: 'local', default_model_id: 'test' } })
   if (path.endsWith('/chat')) {
     calls++
@@ -48,7 +49,7 @@ try {
   assert.equal(await input.inputValue(), 'Existing draft. Print PETG', 'late results after stop are ignored')
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
   await page.getByText('Answer', { exact: true }).waitFor()
-  await page.getByText('Context: 4% · 160 / 4,096 tokens', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Context: 3.9% · 160 / 4,096 tokens', exact: true }).waitFor()
   await page.getByRole('button', { name: /^Model for this conversation/ }).click()
   await page.getByRole('menuitemradio', { name: 'other', exact: true }).click()
   assert.equal(await page.locator('[data-chat-usage]').isVisible(), false, 'changing models hides the previous model’s context meter')
@@ -65,11 +66,22 @@ try {
   await page.getByRole('button', { name: 'New chat', exact: true }).click()
   await page.evaluate(() => window.recognitions.at(-1).onresult({ results: [[{ transcript: 'wrong conversation' }]] }))
   assert.equal(await input.inputValue(), '')
+  await mic.click()
+  await page.getByRole('tab', { name: 'Chat', exact: true }).focus()
+  await page.keyboard.press('ArrowRight')
+  await page.evaluate(() => window.recognitions.at(-1).onresult({ results: [[{ transcript: 'hidden recording' }]] }))
+  assert.equal(await page.evaluate(() => window.recognitions.at(-1).aborted), true)
+  await page.getByRole('tab', { name: 'Chat', exact: true }).click()
+  assert.equal(await input.inputValue(), '')
   knownWindow = false
   await input.fill('Second question')
   await page.getByRole('button', { name: 'Send message', exact: true }).click()
-  await page.getByText('Context: 160 tokens', { exact: true }).waitFor()
-  assert.match(await page.locator('[data-chat-usage]').getAttribute('title'), /did not report/)
+  await page.getByRole('button', { name: 'Context: 160 tokens', exact: true }).click()
+  await page.getByText(/did not report its context limit/).waitFor()
+  canCreate = false
+  await page.goto('https://fila.test/plugin-page/filabrain')
+  await page.getByRole('button', { name: 'Add a filament', exact: true }).click()
+  assert.notEqual(await input.inputValue(), '', 'read-only users get the starter prompt without dead navigation')
   await page.goto('http://fila.test/plugin-page/filabrain')
   await input.waitFor()
   await mic.click({ force: true })

@@ -1,0 +1,134 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+const html=await readFile(new URL('../filabrain/page.html',import.meta.url),'utf8')
+const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright-core')
+const browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE_PATH})
+let release
+const held=new Promise(resolve=>release=resolve)
+let restoreRelease, restoreRequested, replyRelease, replyRequested
+const restoreHeld=new Promise(resolve=>restoreRelease=resolve)
+const restoreStarted=new Promise(resolve=>restoreRequested=resolve)
+const replyHeld=new Promise(resolve=>replyRelease=resolve)
+const replyStarted=new Promise(resolve=>replyRequested=resolve)
+let stopRelease, stopRequested
+const stopHeld=new Promise(resolve=>stopRelease=resolve)
+const stopStarted=new Promise(resolve=>stopRequested=resolve)
+let requested
+const started=new Promise(resolve=>requested=resolve)
+try{
+ const context=await browser.newContext()
+ await context.route('https://fila.test/**',async route=>{
+  const path=new URL(route.request().url()).pathname
+  if(path.startsWith('/plugin-page/'))return route.fulfill({contentType:'text/html',body:html})
+  if(path.endsWith('/status'))return route.fulfill({json:{enabled:true,can_chat:true,can_create:true,can_update:true,can_configure:true,chat_model:'test'}})
+  if(path.endsWith('/models'))return route.fulfill({json:{groups:[{id:'local',name:'Test',models:['test']}],default_endpoint_id:'local',default_model_id:'test'}})
+  if(path.endsWith('/me'))return route.fulfill({json:{id:1}})
+  if(path.endsWith('/batches'))return route.fulfill({json:[]})
+  if(path.endsWith('/chat')){
+   const content=route.request().postDataJSON().messages.at(-1).content
+   if(content==='First question'){requested();await held}
+   if(content==='Slow question'){replyRequested();await replyHeld}
+   if(content==='Stop question'){stopRequested();await stopHeld}
+   return route.fulfill({json:{reply:'Reply to '+content,action:null,usage:{prompt_tokens:120,completion_tokens:40,context_window:4096}}})
+  }
+  if(path.endsWith('/filaments/26')){restoreRequested();await restoreHeld;return route.fulfill({json:{id:26,designation:'Rare filament'}})}
+  if(path.endsWith('/filaments')&&new URL(route.request().url()).searchParams.has('search'))return route.fulfill({json:{items:[{id:26,designation:'Rare filament'}],total:1}})
+  if(path.endsWith('/manufacturers')||path.endsWith('/colors')||path.endsWith('/filaments'))return route.fulfill({json:{items:[],total:0}})
+  return route.fulfill({status:404,json:{}})
+ })
+ const page=await context.newPage()
+ await page.setViewportSize({width:390,height:844})
+ page.setDefaultTimeout(5000)
+ await page.goto('https://fila.test/plugin-page/filabrain')
+ const tabs=page.getByRole('tablist',{name:'FilaBrain'})
+ await tabs.waitFor()
+ const chat=page.locator('[data-view=chat]')
+ const research=page.locator('[data-view=new]')
+ const question=chat.getByRole('textbox',{name:'Your question'})
+ await question.waitFor()
+ await question.fill('First question')
+ await chat.getByRole('button',{name:'Send message',exact:true}).click()
+ await started
+ await tabs.getByRole('tab',{name:'New',exact:true}).click()
+ await research.getByLabel('Product name',{exact:true}).fill('Paramount sample')
+ release()
+ await tabs.getByRole('tab',{name:'Chat',exact:true}).click()
+ await chat.getByText('Reply to First question',{exact:true}).waitFor()
+ assert.match(await page.locator('[data-chat-history]:visible summary').innerText(),/First question/)
+ await question.fill('Unsent draft')
+ await tabs.getByRole('tab',{name:'New',exact:true}).click()
+ assert.equal(await research.getByLabel('Product name',{exact:true}).inputValue(),'Paramount sample')
+ await tabs.getByRole('tab',{name:'Chat',exact:true}).click()
+ assert.equal(await question.inputValue(),'Unsent draft')
+ await page.getByRole('button',{name:'New chat',exact:true}).click()
+ await question.fill('Second question')
+ await chat.getByRole('button',{name:'Send message',exact:true}).click()
+ await chat.getByText('Reply to Second question',{exact:true}).waitFor()
+ const selector=page.locator('[data-chat-history]:visible summary')
+ await selector.click()
+ await page.locator('[data-chat-history-list]:visible').getByRole('button',{name:/^First question/}).click()
+ await chat.getByText('Reply to First question',{exact:true}).waitFor()
+ assert.equal(await question.inputValue(),'Unsent draft')
+ assert.equal(await chat.getByText('Reply to Second question',{exact:true}).count(),0)
+ // A late reply during context restoration is rendered exactly once.
+ await chat.locator('[data-chat-context] summary').click()
+ await chat.getByRole('searchbox').fill('Rare')
+ await chat.locator('[data-chat-filament] option[value="26"]').waitFor({state:'attached'})
+ await chat.locator('[data-chat-filament]').selectOption('26')
+ await question.fill('Slow question')
+ await chat.getByRole('button',{name:'Send message',exact:true}).click()
+ await replyStarted
+ await page.getByRole('button',{name:'New chat',exact:true}).click()
+ await selector.click()
+ await page.locator('[data-chat-history-list]:visible').getByRole('button',{name:/^First question/}).click()
+ await restoreStarted
+ replyRelease()
+ await chat.getByText('Reply to Slow question',{exact:true}).waitFor()
+ restoreRelease()
+ await chat.getByRole('button',{name:'Send message',exact:true}).waitFor()
+ assert.equal(await chat.getByText('Reply to Slow question',{exact:true}).count(),1)
+ assert.equal(await question.inputValue(),'')
+ // Stopping a reselected pending chat removes its currently rendered question.
+ await question.fill('Stop question')
+ await chat.getByRole('button',{name:'Send message',exact:true}).click()
+ await stopStarted
+ await page.getByRole('button',{name:'New chat',exact:true}).click()
+ await selector.click()
+ await page.locator('[data-chat-history-list]:visible').getByRole('button',{name:/^First question/}).click()
+ const stop=chat.getByRole('button',{name:'Stop waiting',exact:true})
+ await stop.click()
+ await chat.getByText('Stopped. You can edit and resend your question.',{exact:true}).waitFor()
+ assert.equal(await chat.getByText('Stop question',{exact:true}).count(),0)
+ assert.equal(await question.inputValue(),'Stop question')
+ stopRelease()
+ // A stale browser page must not replace a newer transcript on navigation.
+ const stale=await context.newPage()
+ await stale.goto('https://fila.test/plugin-page/filabrain')
+ await stale.locator('[data-chat-history]:visible summary').click()
+ await stale.locator('[data-chat-history-list]:visible').getByRole('button',{name:/^First question/}).click()
+ await stale.getByText('Reply to Slow question',{exact:true}).waitFor()
+ await question.fill('Newest question')
+ await chat.getByRole('button',{name:'Send message',exact:true}).click()
+ await chat.getByText('Reply to Newest question',{exact:true}).waitFor()
+ await stale.getByRole('tab',{name:'Research library',exact:true}).click()
+ const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('filabrain:chat:1')))
+ assert.ok(stored.find(item=>item.title==='First question').messages.some(item=>item.content==='Reply to Newest question'))
+ await stale.close()
+ await tabs.getByRole('tab',{name:'Chat',exact:true}).focus()
+ await page.keyboard.press('ArrowRight')
+ assert.equal(await tabs.getByRole('tab',{name:'New',exact:true}).getAttribute('aria-selected'),'true')
+ await page.keyboard.press('Home')
+ assert.equal(await tabs.getByRole('tab',{name:'Chat',exact:true}).getAttribute('aria-selected'),'true')
+ const rect=await page.locator('#research-chat-title').boundingBox()
+ assert.ok(!rect||rect.width<=1,'selected tab supplies the visible page title')
+ for(const width of [320,390,768,1280,1920]){
+  await page.setViewportSize({width,height:844})
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),width)
+  await question.waitFor()
+  const composer=await chat.locator('[data-chat-form]').boundingBox()
+  assert.ok(composer.y+composer.height<=844)
+  assert.ok((await tabs.getByRole('tab',{selected:true}).boundingBox()).height>=44)
+ }
+ assert.equal(await page.locator('[id]').evaluateAll(nodes=>new Set(nodes.map(node=>node.id)).size===nodes.length),true,'chat roots have unique IDs')
+ console.log('Connected tabs, keyboard navigation, pending replies, independent research draft, named conversations and draft restoration passed.')
+}finally{release();replyRelease();restoreRelease();stopRelease();await browser.close()}

@@ -208,10 +208,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   followUpScope.id = followUpLabel.htmlFor = 'research-follow-up-scope'
   followUpLabel.textContent = t('filaBrain.followUpScope')
   followUpControls.append(followUpLabel, followUpScope)
-  document.querySelector('[data-chat-form] textarea')!.before(followUpControls)
+  chat.root.querySelector('[data-chat-form] textarea')!.before(followUpControls)
   const inputs = element('research-inputs')
-  const chatInput = document.querySelector('[data-chat-research-input]')!
-  const chatResults = document.querySelector('[data-chat-research-results]')!
+  const chatInput = chat.root.querySelector('[data-chat-research-input]')!
+  const chatResults = chat.root.querySelector('[data-chat-research-results]')!
   const proposalTarget = (context: EditorContext) => ({
     mode: context.mode, filament_id: context.filament_id, identity: identity(context.fields),
     ...(context.mode === 'create' && typeof context.fields.color_id === 'number'
@@ -232,7 +232,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
 
   function showInChat(movePicker = true, reveal = true, newDraft = false) {
     if (reveal) openChat()
-    if (movePicker) document.querySelector('[data-chat-form] .chat-toolbar')!.prepend(chat.picker)
+    if (movePicker) chat.root.querySelector('[data-chat-form] .chat-toolbar')!.prepend(chat.picker)
     if (inputs.parentElement !== chatInput) chatInput.append(inputs)
     if (conversation.parentElement !== chatResults) chatResults.append(conversation)
     return chat.startResearch(newDraft)

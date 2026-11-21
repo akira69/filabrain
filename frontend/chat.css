@@ -186,12 +186,12 @@
   .chat-send[data-busy] [data-send-icon], .chat-send:not([data-busy]) [data-stop-icon] { display: none; }
   .chat-send:disabled { color: var(--text-muted); background: var(--bg-soft); border-color: var(--border); box-shadow: none; transform: none; cursor: default; }
 
-  main:has(> [data-view="chat"]:not([hidden])):not(:has(> .docs-panel[open]:not(:modal))) {
+  main:has(> :is([data-view="chat"], [data-view="new"]):not([hidden])):not(:has(> .docs-panel[open]:not(:modal))) {
     display: flex;
     flex-direction: column;
     height: 100dvh;
   }
-  [data-view="chat"] { display: flex; flex: 1; min-height: 0; }
+  :is([data-view="chat"], [data-view="new"]) { display: flex; flex: 1; min-height: 0; }
   .research-chat { flex: 1; }
 
 .chat-history summary {
@@ -258,3 +258,10 @@ main:has([data-tab="new"][aria-current]) .message-composer:has(textarea:disabled
   }
   @keyframes chat-progress-sweep { to { background-position: 0; } }
 }
+
+.chat-history { min-width: 0; }
+.chat-history summary { display: flex; align-items: center; gap: .4rem; min-width: 0; list-style: none; }
+.chat-history summary::-webkit-details-marker { display: none; }
+.chat-history summary [data-chat-title] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-history summary svg { flex: none; }
+.chat-history[open] summary svg { transform: rotate(180deg); }

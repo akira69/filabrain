@@ -65,8 +65,8 @@ try {
     const after = await chat.boundingBox()
     assert.equal(after.width, before.width, 'opening the guide does not squeeze chat')
     const bounds = await guide.boundingBox()
-    assert.equal(await page.locator('.docs-header').evaluate(el => getComputedStyle(el).backgroundColor), await page.locator('.chat-header').evaluate(el => getComputedStyle(el).backgroundColor))
-    assert.ok(Math.abs((await page.locator('.docs-header').boundingBox()).height - (await page.locator('.chat-header').boundingBox()).height) <= 1, 'guide and chat header heights match')
+    assert.equal(await page.locator('.docs-header').evaluate(el => getComputedStyle(el).backgroundColor), await page.locator('[data-view=settings] .fm-section-header').first().evaluate(el => getComputedStyle(el).backgroundColor))
+    assert.ok((await page.locator('.docs-header').boundingBox()).height <= 64, 'guide uses the compact section header')
     assert.equal(await guide.locator('.docs-content dl').evaluate(el => getComputedStyle(el).display), 'block', 'guide text spans one column')
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1)
     assert.ok(bounds.y + bounds.height <= 1000)
@@ -82,7 +82,7 @@ try {
   }
   for (const [width, height] of [[390, 540], [844, 390]]) {
     await page.setViewportSize({ width, height })
-    const composer = await page.locator('[data-chat-form]').boundingBox()
+    const composer = await page.locator('[data-chat-form]:visible').boundingBox()
     assert.ok(composer.y >= 0 && composer.y + composer.height <= height, 'composer fits short phone windows')
     await noOverflow()
   }
@@ -154,7 +154,7 @@ try {
   assert.ok((await phoneUrl.boundingBox()).height >= 44)
   assert.ok((await phone.locator('#research-add-endpoint').boundingBox()).height >= 44)
   assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 390)
-  await phone.getByRole('button', { name: 'Chat', exact: true }).click()
+  await phone.getByRole('tab', { name: 'Chat', exact: true }).click()
   await phone.getByRole('textbox', { name: 'Your question' }).waitFor()
   assert.ok((await phone.locator('[data-chat-new]').boundingBox()).height >= 44)
   assert.ok((await phone.locator('.chat-header').boundingBox()).height <= 64)

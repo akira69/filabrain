@@ -1,5 +1,6 @@
 import { mountChat } from './chat'
 import { mountDocs } from './docs'
+import { mountWorkspaceTabs } from './tabs'
 import { mountSettings } from './settings'
 import { mountSpoolIntake, type SpoolResearchInput } from './spool-intake'
 import { mountResearch, type EditorContext, type SelectionContext } from './research'
@@ -15,6 +16,7 @@ export type Status = {
   can_create: boolean
   can_add_spool?: boolean
   can_read_spools?: boolean
+  can_read_display?: boolean
   can_read_printers?: boolean
   can_update: boolean
   can_update_manufacturer?: boolean
@@ -261,6 +263,7 @@ function mountLibrary(context?: SelectionContext) {
 
 async function main() {
   await initI18n()
+  const chatTemplate = document.querySelector<HTMLElement>('[data-view="chat"] .research-chat')!.cloneNode(true) as HTMLElement
   for (const [headingId, selector] of [
     ['research-chat-title', '[data-tab="chat"] svg'], ['research-heading', '[data-tab="new"] svg'],
     ['spool-intake-heading', '[data-tab="spool"] svg'], ['library-heading', '[data-tab="library"] svg'],
@@ -339,31 +342,46 @@ async function main() {
     }
     const header = element('plugin-header')
     const nav = header.querySelector('nav')!
-    const utilities = header.querySelector('.header-utilities')!
-    const stackedHeader = matchMedia('(max-width: 1120px)')
-    function syncHeaderOrder() {
-      const focused = document.activeElement
-      if (stackedHeader.matches) nav.before(utilities)
-      else nav.after(utilities)
-      if (focused instanceof HTMLElement && utilities.contains(focused)) focused.focus({ preventScroll: true })
-    }
-    if (stackedHeader.matches) syncHeaderOrder()
-    stackedHeader.addEventListener('change', syncHeaderOrder)
-
     let chat: ReturnType<typeof mountChat> | undefined
+    let researchChat: ReturnType<typeof mountChat> | undefined
     let startResearch: ReturnType<typeof mountResearch> | undefined
     let stopSpoolIntake: (() => void) | undefined
     function openConversation() {
       const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
       view.hidden = false
-      chat ??= mountChat(status, status.can_configure ? openSettings : undefined, undefined, !status.can_chat)
-      if (status.can_create && !startResearch) {
-        startResearch = mountResearch(status, chat, () => setGuide('new'))
+      if (!chat) {
+        chat = mountChat(status, status.can_configure ? openSettings : undefined, undefined, false,
+          { root: view, openResearch: status.can_create ? () => show('new') : undefined })
+        workspace.attachChat('chat', view)
+      }
+    }
+    function openResearch() {
+      const view = document.querySelector<HTMLElement>('[data-view="new"]')!
+      view.hidden = false
+      if (!researchChat) {
+        const clone = chatTemplate.cloneNode(true) as HTMLElement
+        const ids = new Map<string, string>()
+        for (const element of clone.querySelectorAll<HTMLElement>('[id]')) {
+          ids.set(element.id, 'research-chat-' + element.id)
+          element.id = ids.get(element.id)!
+        }
+        for (const element of clone.querySelectorAll<HTMLElement>('*')) {
+          for (const attribute of ['for', 'aria-labelledby', 'aria-describedby', 'aria-controls']) {
+            const value = element.getAttribute(attribute)
+            if (value) element.setAttribute(attribute, value.split(' ').map(id => ids.get(id) ?? id).join(' '))
+          }
+        }
+        clone.setAttribute('aria-labelledby', ids.get('research-chat-title')!)
+        clone.querySelector('form')!.id = 'filabrain-research-chat-form'
+        view.append(clone)
+        researchChat = mountChat(status, status.can_configure ? openSettings : undefined, undefined, true, { root: view })
+        startResearch = mountResearch(status, researchChat, () => setGuide('new'))
+        workspace.attachChat('new', view)
       }
     }
     const mount: Record<string, (() => void) | false> = {
       chat: status.can_chat && (() => { openConversation(); chat?.showChat() }),
-      new: status.can_create && (() => { openConversation(); startResearch?.() }),
+      new: status.can_create && (() => { openResearch(); startResearch?.() }),
       spool: !!status.can_add_spool && (() => {
         const researchFromSpool = status.can_create ? (input: SpoolResearchInput) => {
           show('new', input)
@@ -392,10 +410,13 @@ async function main() {
         else button.removeAttribute('aria-current')
       }
       setGuide(tab)
-      const activeView = tab === 'new' ? 'chat' : tab
+      chat?.saveDraft()
+      researchChat?.saveDraft()
+      workspace.select(tab)
+      const activeView = tab
       for (const view of document.querySelectorAll<HTMLElement>('[data-view]')) view.hidden = view.dataset.view !== activeView
       if (tab === 'new' && spoolInput) {
-        openConversation()
+        openResearch()
         startResearch?.(spoolInput)
       } else if (tab === 'chat' || tab === 'new') {
         run()
@@ -404,6 +425,7 @@ async function main() {
         run()
       }
     }
+    const workspace = mountWorkspaceTabs(header, show)
     function openSettings() {
       show('settings')
       const form = element('filabrain-settings')
@@ -430,6 +452,7 @@ async function main() {
         if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
         else button.removeAttribute('aria-current')
       }
+      workspace.select(tab)
       setGuide(tab)
     })
     const tab = params.get('tab') || available
