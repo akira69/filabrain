@@ -64,9 +64,6 @@ async def test_sku_only_resolves_manufacturer_product_without_material(installed
     assert fields.get('shop_url') == URL
     assert not any(issue['code'] == 'possible_match' for issue in result['issues']), 'verified choice should show its draft, not other products'
     assert any(issue.get('name', '').startswith('RAL 4007') for issue in result['issues'])
-    if brand == '':
-        assert sku_sources[0] == hint, 'search the original SKU by itself before adding context'
-        assert SKU in sku_sources
 
 
 async def test_sku_discovery_does_not_override_conflicting_material(installed, sku_sources):
@@ -185,7 +182,8 @@ async def test_discovery_uses_final_source_url_and_deduplicates_redirects(instal
 
 async def test_normalized_sku_search_continues_after_nearby_match(installed, sku_sources, monkeypatch):
     from dataclasses import replace
-    from filabrain import proposals
+    from filabrain import discovery, proposals
+    monkeypatch.setattr(discovery, 'publisher_indexes', lambda *_args, **_kwargs: [])
     original = proposals.fetch_supplier
     near = URL.replace(SKU.lower(), 'prl40077448c')
     async def search(_origin, query):

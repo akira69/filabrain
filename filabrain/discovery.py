@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.models import Manufacturer
 
 from . import proposals as product
-from .knowledge import lookup_catalog_code, lookup_named_catalog
+from .knowledge import lookup_catalog_code, lookup_named_catalog, publisher_indexes
 from .settings import config_record
 
 
@@ -23,6 +23,7 @@ def _queries(query: str, sku: str) -> list[str]:
 async def discover_products(db, identity: product.Identity, query: str = "", sku_hint: str = "", guidance: str = "") -> dict:
     query = query.strip() or sku_hint.strip() or identity.sku.strip()
     search_query = " ".join(filter(None, (query, guidance.strip())))
+    code_query = re.sub(r"(?<![\w.])\d+(?:[.,]\d+)?\s*(?:mm|cm|kg|g|lb|oz)\b", " ", query, flags=re.IGNORECASE).strip()
     sku = sku_hint.strip() or identity.sku.strip()
     clue_sku = not sku
     _, config = await config_record(db)
@@ -34,13 +35,43 @@ async def discover_products(db, identity: product.Identity, query: str = "", sku
         matches = [name for name, _ in makers if set(product._product_key(name)) <= words]
         if len(matches) == 1:
             known = matches[0]
-    if (not sku and len(query) >= 6 and product._sku_key(query) and not re.search(r"\s", query)
+    if (not sku and code_query == query and len(query) >= 6 and product._sku_key(query) and not re.search(r"\s", query)
             and len(re.findall(r"\d", query)) >= 2
             and product._norm(query) != product._norm(known)
-            and not product.normalize_reference(query)
+            and not product.normalize_reference(query) and not product.normalize_reference(f"Pantone {query}")
             and not re.fullmatch(r"PA(?:6|11|12|66|612)(?:[-+]?(?:CF|GF)\d*)?", query, re.I)):
         sku = query
+    query_codes = [term.strip('.,;()[]') for term in code_query.split()
+                   if re.search(r'\d', term) and product._sku_key(term.strip('.,;()[]'))][:4]
+    code_terms = [sku] if sku else [term for term in [code_query, *query_codes]
+                                     if product._sku_key(term) and re.search(r'\d', term)]
+    indexes = publisher_indexes(identity.manufacturer, context=query)
+    if not identity.manufacturer and known and not indexes and publisher_indexes(known):
+        known = ""
+    if known:
+        indexes = [index for index in indexes if index in publisher_indexes(known)]
+    matched_indexes = []
+    matched_codes = []
+    for index in indexes:
+        codes = [term for term in code_terms if product._sku_key(term)
+                 and len(re.findall(r'\d', term)) >= 2
+                 and not product.normalize_reference(term) and not product.normalize_reference(f'Pantone {term}')
+                 and (sku or not product.normalize_reference(query))
+                 and any(product._sku_in_url(term, url) for url in index['product_urls'])]
+        named = any(set(product._product_key(alias)) <= words
+                    for alias in [index['manufacturer'], *index['aliases']])
+        if codes or known or named:
+            matched_indexes.append(index)
+            matched_codes.extend(codes)
+    if len({index['manufacturer'] for index in matched_indexes}) == 1:
+        known = matched_indexes[0]['manufacturer']
+        if not sku and matched_codes:
+            specific = max(matched_codes, key=lambda term: len(product._sku_key(term)))
+            if all(product._sku_key(term) in product._sku_key(specific) for term in matched_codes):
+                sku = specific
     site = next((url for name, url in makers if product._norm(name) == product._norm(known)), None)
+    if not site and matched_indexes and known:
+        site = matched_indexes[0]['website']
     inferred = identity.model_copy(update={"manufacturer": known, "designation": identity.designation or search_query})
     if not inferred.material:
         materials = [material for material in product.MATERIAL_ACRONYMS if product._literal_in(material, query)]
@@ -91,7 +122,7 @@ async def discover_products(db, identity: product.Identity, query: str = "", sku
             if not candidate.designation or not candidate.manufacturer:
                 continue
             if any(known and found and product._norm(known) != product._norm(found) for known, found in (
-                (identity.manufacturer, candidate.manufacturer), (identity.material, candidate.material),
+                (inferred.manufacturer, candidate.manufacturer), (inferred.material, candidate.material),
                 (identity.color, candidate.color),
             )):
                 continue
@@ -130,10 +161,6 @@ async def discover_products(db, identity: product.Identity, query: str = "", sku
 
     try:
         async with asyncio.timeout(25):
-            code_terms = [sku] if sku else [
-                term.strip('.,;()[]') for term in query.split()
-                if re.search(r'\d', term) and product._sku_key(term.strip('.,;()[]'))
-            ][:4]
             bundled = [row for term in code_terms for row in lookup_catalog_code(term, known, context=query, limit=24)]
             if not bundled and not sku:
                 bundled = lookup_named_catalog(query, limit=24)
@@ -153,6 +180,14 @@ async def discover_products(db, identity: product.Identity, query: str = "", sku
                 if domain == 'paramount-3d.com':
                     try:
                         urls = await product._paramount_candidates(inferred, sku, strict=True)
+                        if not urls and not sku and not inferred.material and matched_indexes:
+                            aliases = {word for alias in [known, *matched_indexes[0]['aliases']]
+                                       for word in product._product_key(alias)}
+                            clues = set(product._product_key(code_query)) - aliases - {'filament', 'filaments'}
+                            ranked = [(len(clues & set(product._product_key(url))), -len(product._product_key(url)), url)
+                                      for url in await product.paramount_product_urls(strict=True)
+                                      if clues and clues <= set(product._product_key(url))]
+                            urls = [url for _, _, url in sorted(ranked, reverse=True)[:3]]
                     except ValueError as error:
                         urls = []
                         issues.append({'code': 'unavailable_source', 'source': known, 'reason': str(error)})

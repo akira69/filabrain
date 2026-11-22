@@ -79,6 +79,28 @@ def _catalog_rows(maker_key):
     ]
 
 
+def publisher_indexes(maker: str = "", *, context: str = "") -> list[dict]:
+    """Public link indexes only; product identity still requires a current page."""
+    try:
+        indexes = _data("publisher_indexes.json")
+    except (OSError, ValueError):
+        return []
+    if maker:
+        return [entry for entry in indexes
+                if _maker_key(maker) in {_maker_key(alias) for alias in [entry["manufacturer"], *entry["aliases"]]}]
+    mentioned = {key for key, aliases in _data("makers.json").items()
+                 if any(_includes(_words(context), _words(alias)) for alias in aliases)}
+    mentioned.update(_maker_key(entry["manufacturer"]) for entry in indexes
+                     if any(_includes(_words(context), _words(alias))
+                            for alias in [entry["manufacturer"], *entry["aliases"]]))
+    return [entry for entry in indexes if not mentioned
+            or len(mentioned) == 1 and _maker_key(entry["manufacturer"]) in mentioned]
+
+
+def publisher_index_urls(maker: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(url for entry in publisher_indexes(maker) for url in entry["product_urls"]))
+
+
 def lookup_catalog(maker: str, product: str, *, limit: int = 5) -> list[dict]:
     """Find candidates by known maker and product, variant, SKU, or barcode."""
     maker_key = _maker_key(maker)

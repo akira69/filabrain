@@ -13,6 +13,7 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 - Open the same Chat and Research workspace from the sidebar or a filament editor. Editor research keeps its current target separate from new-filament drafts, and chat preloads the selected filament.
 - Create a manufacturer or palette color while building a filament. RAL/Pantone previews offer matching swatches by hex, independent of their names, while keeping the manufacturer's color name.
 - Explicit spool choices can replace reviewed measurements, and color/spool selections remain in the final saved draft.
+- Find Paramount products from sparse descriptions or formatted SKUs using official product indexes, with bundled links available during index outages. Current pages still verify each candidate.
 
 Standalone creation works on FilaMan 2.2.2 or later. Staging new palette records or changing a color inside the native editor requires FilaMan's updated palette-staging support. Older hosts show color previews without unsupported staging actions.
 
