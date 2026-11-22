@@ -108,3 +108,14 @@
   .swatch-review-chip { flex-wrap: nowrap; align-items: start; }
   .swatch-review-color { width: 1.5rem; height: 1.5rem; }
 }
+.swatch-rename { display: grid; gap: .5rem; margin-block-start: .65rem; padding-block-start: .65rem; border-block-start: 1px solid var(--border); font-size: .8rem; }
+.swatch-rename > p { margin: 0; }
+.swatch-rename .fm-btn { justify-self: start; max-width: 100%; white-space: normal; }
+.swatch-name-change { overflow-wrap: anywhere; }
+.swatch-rename-dialog { max-height: calc(100dvh - 2rem); overflow: auto; overflow-wrap: anywhere; }
+.swatch-rename-dialog h2 { margin-block-start: 0; font-size: 1rem; }
+.swatch-rename-dialog .fm-modal-actions { flex-wrap: wrap; }
+.swatch-rename-dialog .fm-btn { min-height: 44px; white-space: normal; }
+.swatch-review-chip > span:last-child { min-width: 0; }
+
+.swatch-rename-conflict { margin-block: .65rem 0; font-size: .8rem; }

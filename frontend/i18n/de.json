@@ -62,10 +62,17 @@
     "create": "Farbe erstellen",
     "saveReference": "Referenz speichern",
     "applySwatch": "Farbe übernehmen",
+    "savedReference": "Gespeicherte Referenz",
     "savedTag": "Gespeichert",
     "saved": "Farbauswahl gespeichert.",
     "saveFailed": "Die Farbauswahl konnte nicht gespeichert werden.",
-    "loadFailed": "Die Farben konnten nicht geladen werden."
+    "loadFailed": "Die Farben konnten nicht geladen werden.",
+    "rename": "Gemeinsames Farbfeld umbenennen",
+    "renameConfirm": "Überall umbenennen",
+    "renameUsage": "Filamente mit diesem Farbfeld: {count}, auch außerhalb dieser Auswahl.",
+    "renameConflicts": "Das gemeinsame Farbfeld hat auch widersprüchliche Referenzen: {codes}. Verwende ein anderes Farbfeld oder erstelle eines, um nur dieses Filament zu ändern.",
+    "renameScope": "Dieser Name ändert sich überall, wo das gemeinsame Farbfeld verwendet wird. Nur der Name ändert sich; HEX, Zuordnungen und Herstellerfarbnamen bleiben erhalten.",
+    "renamed": "Gemeinsames Farbfeld umbenannt."
   },
   "filaBrain": {
     "createManufacturer": "Hersteller erstellen",
@@ -364,7 +371,8 @@
     "chooseMode": "Recherchemodus wählen",
     "mode": {
       "fill": "Fehlende Daten ergänzen",
-      "standardize": "Einträge vereinheitlichen"
+      "standardize": "Einträge vereinheitlichen",
+      "colors": "Farben prüfen"
     },
     "fillFields": "Artikelnummer, Herstellerfarbe, Dichte, Nettogewicht, Düsen- und Betttemperatur, Trocknung und Datenblatt.",
     "standardizeFields": "Bezeichnung, Material und Untergruppe sowie Schreibweise der Herstellerfarbe.",
@@ -387,6 +395,7 @@
     "retry": "Recherche wiederholen",
     "back": "Zurück",
     "reopen": "Prüfung wieder öffnen",
+    "done": "Fertig und weiter",
     "skip": "Überspringen und weiter",
     "approve": "Freigeben und weiter",
     "progress": "{mode} · {ready} prüfbereit · {working} in Recherche · {total} gesamt",
@@ -425,6 +434,7 @@
       "canceled": "Abgebrochen",
       "queued": "In Warteschlange",
       "running": "In Recherche",
+      "reviewed": "Geprüft",
       "ready": "Prüfbereit",
       "no_change": "Keine Änderungen gefunden",
       "needs_match": "Zuordnung prüfen",

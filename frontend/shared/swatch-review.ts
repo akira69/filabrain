@@ -4,19 +4,23 @@ import { escapeHtml as escape } from './extra-fields'
 import { t } from './i18n'
 
 export type Swatch = { id: number; name: string; hex_code: string }
+type NameChange = { color_id: number; current_name: string; proposed_name: string; usage_count: number; token: string }
 export type Reference = {
   code: string
   name: string
   hex_code: string | null
   manufacturer_source: string | null
   from_product_url?: boolean
+  saved_reference?: boolean
   source: string | null
   saved: boolean
   matches: Swatch[]
   token: string
+  name_changes?: NameChange[]
+  rename_conflicts?: string[]
 }
-export type Review = { current: Swatch[]; can_save: boolean; can_assign: boolean; can_create: boolean; references: Reference[] }
-const tr = (key: string) => t('swatchReview.' + key)
+export type Review = { current: Swatch[]; can_save: boolean; can_assign: boolean; can_create: boolean; can_update?: boolean; references: Reference[] }
+const tr = (key: string, vars?: Record<string, string | number>) => t('swatchReview.' + key, vars)
 const label = (key: string) => escape(tr(key))
 
 function chip(name: string, hex: string) {
@@ -41,6 +45,30 @@ export async function mountSwatchReview(panel: HTMLElement, path: string | Draft
   const content = panel.querySelector<HTMLElement>('[data-swatch-content]')!
   const status = panel.querySelector<HTMLElement>('[data-swatch-status]')!
 
+  function confirmRename(change: NameChange) {
+    const dialog = document.createElement('dialog')
+    dialog.className = 'swatch-rename-dialog'
+    dialog.setAttribute('aria-label', tr('rename'))
+    dialog.innerHTML = `<h2>${label('rename')}</h2>
+      <p class="swatch-name-change"><span>${escape(change.current_name)}</span> <span aria-hidden="true">→</span> <strong>${escape(change.proposed_name)}</strong></p>
+      <p>${escape(tr('renameUsage', { count: change.usage_count }))}</p>
+      <p>${label('renameScope')}</p>
+      <div class="fm-modal-actions"><button type="button" class="fm-btn fm-btn-outline" data-cancel>${escape(t('common.cancel'))}</button>
+      <button type="button" class="fm-btn fm-btn-primary" data-confirm>${label('renameConfirm')}</button></div>`
+    panel.append(dialog)
+    return new Promise<boolean>(resolve => {
+      dialog.querySelector('[data-cancel]')!.addEventListener('click', () => dialog.close())
+      dialog.querySelector('[data-confirm]')!.addEventListener('click', () => dialog.close('confirm'))
+      dialog.addEventListener('close', () => {
+        const confirmed = dialog.returnValue === 'confirm'
+        dialog.remove()
+        resolve(confirmed)
+      }, { once: true })
+      dialog.showModal()
+      dialog.querySelector<HTMLButtonElement>('[data-cancel]')!.focus()
+    })
+  }
+
   async function load() {
     const review = typeof path === 'string' ? await api.get<Review>(path, { cache: 'no-store' }) : await path.load()
     if (!panel.isConnected) return
@@ -52,11 +80,19 @@ export async function mountSwatchReview(panel: HTMLElement, path: string | Draft
           ${current.length ? current.map(swatch => chip(swatch.name, swatch.hex_code)).join('') : `<p>${label('noCurrent')}</p>`}
         </div>
         <div class="swatch-matches">
-          ${review.references.map(reference => `<div class="swatch-preview">
+          ${review.references.map((reference, index) => `<div class="swatch-preview">
             <p class="swatch-label">${label('reference')}${reference.saved ? ' · ' + label('savedTag') : ''}</p>
             ${reference.hex_code ? chip(reference.code === reference.name ? reference.code : reference.name + ' · ' + reference.code, reference.hex_code)
               : `<p><strong>${escape(reference.code)}</strong> · ${label('unavailable')}</p>`}
-            <div class="swatch-sources">${source(reference.source, 'paletteSource')}${source(reference.manufacturer_source, reference.from_product_url ? 'manufacturerProductUrl' : 'manufacturerSource')}</div>
+            <div class="swatch-sources">${source(reference.source, 'paletteSource')}${reference.saved_reference ? `<span>${label('savedReference')}</span>` : source(reference.manufacturer_source, reference.from_product_url ? 'manufacturerProductUrl' : 'manufacturerSource')}</div>
+            ${reference.rename_conflicts?.length ? `<p class="swatch-rename-conflict">${escape(tr('renameConflicts', { codes: reference.rename_conflicts.join(', ') }))}</p>` : ''}
+            ${typeof path === 'string' && review.can_update ? (reference.name_changes || []).map((change, changeIndex) => `
+              <div class="swatch-rename">
+                <p class="swatch-name-change"><span>${escape(change.current_name)}</span> <span aria-hidden="true">→</span> <strong>${escape(change.proposed_name)}</strong></p>
+                <p>${escape(tr('renameUsage', { count: change.usage_count }))}</p>
+                <p>${label('renameScope')}</p>
+                <button type="button" class="fm-btn fm-btn-outline" data-rename-reference="${index}" data-rename-change="${changeIndex}">${label('rename')}</button>
+              </div>`).join('') : ''}
           </div>`).join('')}
         </div>
       </div>
@@ -77,6 +113,33 @@ export async function mountSwatchReview(panel: HTMLElement, path: string | Draft
           <button type="submit" class="fm-btn fm-btn-outline">${label(typeof path === 'string' ? 'saveReference' : 'useSwatch')}</button>
         </form>`
       }).join('') : ''}`
+    content.querySelectorAll<HTMLButtonElement>('[data-rename-reference]').forEach(button => {
+      const reference = review.references[Number(button.dataset.renameReference)]
+      const change = reference.name_changes![Number(button.dataset.renameChange)]
+      button.addEventListener('click', async () => {
+        if (typeof path !== 'string' || content.inert) return
+        status.textContent = ''
+        if (!await confirmRename(change) || !panel.isConnected || !button.isConnected || content.inert) return
+        content.inert = true
+        try {
+          await api.post(path, { code: reference.code, token: change.token, action: 'rename', color_id: change.color_id, color_name: change.current_name })
+          for (const key of [CACHE_KEYS.COLORS, CACHE_KEYS.FILAMENTS, CACHE_KEYS.FILAMENT_FILTER_OPTIONS, CACHE_KEYS.SPOOL_FILTER_OPTIONS]) invalidateCache(key)
+          // The previous token must never be reused if refreshing the review fails.
+          content.replaceChildren()
+          await load()
+          status.textContent = tr('renamed')
+        } catch (error) {
+          status.textContent = error instanceof Error ? error.message : tr('saveFailed')
+          if (error instanceof ApiError && [403, 409].includes(error.status)) {
+            content.replaceChildren()
+            try { await load() } catch { status.textContent += ' ' + tr('loadFailed') }
+          }
+        } finally {
+          content.inert = false
+          if (panel.isConnected) status.focus()
+        }
+      })
+    })
     content.querySelectorAll<HTMLFormElement>('form').forEach(form => {
       const reference = review.references[Number(form.dataset.swatchIndex)]
       const select = form.querySelector('select')!
