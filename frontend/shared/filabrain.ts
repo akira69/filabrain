@@ -26,7 +26,7 @@ export type ResearchProposal = {
   suggestions: Array<ResearchOption & { field: string }>
   issues: Array<{
     code: string; filament_id?: number; source?: string; name?: string; field?: string
-    url?: string; product_url?: string; source_product_code?: string; options?: ResearchOption[]; requires_product_choice?: boolean; reason?: string
+    reference_code?: string | null; from_product_url?: boolean; url?: string; product_url?: string; source_product_code?: string; options?: ResearchOption[]; requires_product_choice?: boolean; reason?: string
     match_kind?: 'sku_exact' | 'sku_format' | 'similar_sku' | 'search'; identity?: Partial<ResearchIdentity>
   }>
   proposals?: Array<{

@@ -124,7 +124,7 @@ function evidenceLink(title: string, url: string) {
   return element
 }
 
-export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean; microphone_enabled?: boolean } & DictationSettings, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: () => void } = {}) {
+export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean; microphone_enabled?: boolean } & DictationSettings, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: () => void; context?: ChatContextSnapshot } = {}) {
   const root = options.root ?? document.querySelector<HTMLElement>('[data-view="chat"]')!
   let model = statusModel.chat_model
   const form = root.querySelector<HTMLFormElement>('[data-chat-form]')!
@@ -132,6 +132,17 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   const dictation = mountDictation(form, input, statusModel)
   const usageMeter = mountContextUsage(form.querySelector<HTMLElement>('[data-chat-usage]')!)
   const chatContext = mountChatContext(form, statusModel, !researchOnly)
+  let contextReady = true
+  let contextInitialization = Promise.resolve()
+  function restoreChatContext(saved?: ChatContextSnapshot) {
+    const pending = saved ? chatContext.restore(saved) : chatContext.reset()
+    contextReady = false
+    contextInitialization = pending
+    const ready = () => { if (contextInitialization === pending) { contextReady = true; updateControls() } }
+    void pending.then(ready, ready)
+    return pending
+  }
+  if (options.context) void restoreChatContext(options.context)
   const submit = form.querySelector<HTMLButtonElement>('.chat-send')!
   const contextPanel = form.querySelector<HTMLDetailsElement>('[data-chat-context]')!
   const printer = contextPanel.querySelector<HTMLSelectElement>('[data-chat-printer]')!
@@ -179,7 +190,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     input.maxLength = researching ? 400 : 2000
     input.placeholder = t(researching ? 'filaBrain.followUpHint' : 'filaBrain.chatPlaceholder')
     input.setAttribute('aria-label', t(researching ? 'filaBrain.followUp' : 'filaBrain.chatQuestion'))
-    submit.disabled = busyResearch || staging || !request && (input.disabled || !input.value.trim())
+    submit.disabled = !contextReady || busyResearch || staging || !request && (input.disabled || !input.value.trim())
     contextPanel.hidden = researchOnly || researching
     for (const field of [printer, filament, filamentSearch, nozzle]) field.disabled = !!request
     const label = t(request ? 'filaBrain.chatStop' : researching ? 'filaBrain.sendFollowUp' : 'filaBrain.chatSend')
@@ -379,8 +390,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
           input.value = request ? '' : current.draft || ''
           status.textContent = request ? t('filaBrain.chatWorking') : ''
           if (!researchChat) current.messages.forEach(message => append(message))
-          if (selected.context) await chatContext.restore(selected.context)
-          else await chatContext.reset()
+          if (selected.context) await restoreChatContext(selected.context)
+          else await restoreChatContext()
           const draft = current.research
           let resumed = false
           if (draft && research) {
@@ -549,7 +560,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     forkNextResearchTurn = false
     researching = useResearch
     research?.reset()
-    document.dispatchEvent(new CustomEvent('filabrain:chat-mode', { detail: useResearch }))
+    root.dispatchEvent(new CustomEvent('filabrain:chat-mode', { bubbles: true, detail: useResearch }))
     modelPicker.reset()
     log.after(researchResults)
     activeAnswer = undefined
@@ -557,7 +568,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     bubbles.clear()
     input.value = ''
     contextPanel.open = false
-    void chatContext.reset()
+    void restoreChatContext(options.context)
     status.textContent = ''
     history.open = false
     renderHistory()
@@ -604,6 +615,9 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     }
     const content = input.value.trim()
     if (!content || busyResearch || staging) return
+    const pendingContext = contextInitialization
+    await pendingContext
+    if (!root.isConnected || request || busyResearch || staging || pendingContext !== contextInitialization || input.value.trim() !== content) return
     if (researching) {
       try { await research?.followUp(content) }
       catch { status.textContent = t('filaBrain.failed') }
@@ -713,10 +727,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     if (fresh || !researching && (current.messages.length || input.value || request)) reset(true)
     else if (!researching) {
       researching = true
-      document.dispatchEvent(new CustomEvent('filabrain:chat-mode', { detail: true }))
+      root.dispatchEvent(new CustomEvent('filabrain:chat-mode', { bubbles: true, detail: true }))
     }
     updateControls()
-    const field = researchInput.querySelector<HTMLElement>('input[name="designation"]:not([type="hidden"])')
+    const field = researchInput.querySelector<HTMLElement>('input[name="query"]') || researchInput.querySelector<HTMLElement>('input[name="designation"]:not([readonly])')
     if (field?.getClientRects().length) field.focus()
     return true
   }
@@ -768,7 +782,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     setResearch(value: Research) { research = value; renderHistory() },
     showChat() {
       if (busyResearch) {
-        document.dispatchEvent(new CustomEvent('filabrain:chat-mode', { detail: researching }))
+        root.dispatchEvent(new CustomEvent('filabrain:chat-mode', { bubbles: true, detail: researching }))
       } else if (researching) reset(false)
     },
     async researchTurn(content: string, run: () => Promise<{ reply: string; draft?: ResearchDraft }>) {

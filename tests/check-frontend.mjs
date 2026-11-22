@@ -69,6 +69,14 @@ try {
   let account = 7
   let chatRequests = 0
   let proposalRequests = 0
+  let draftColorMode = false
+  const colorWrites = []
+  const manufacturerWrites = []
+  let makerResponse
+  let heldContextLoad
+  const sharedChatRequests = []
+  let colorResponse
+  let canCreatePalette = true
   let duplicateSpoolLookup = false
   let supplierDefaultSku = 'FIX-123'
   let conflictingSpoolWidth = false
@@ -127,7 +135,7 @@ try {
           if (event.origin !== location.origin || event.source !== document.querySelector('iframe').contentWindow) return
           const { type, request_id, units } = event.data;
           if (type === 'filaman:filament-context') event.source.postMessage({type, request_id, mode:'${editorMode}',
-            filament_id:${editorMode === 'edit' ? 10 : 'null'}, record_token:${JSON.stringify(hostEditorToken)}, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75, ...window.editorEdits }}, location.origin)
+            filament_id:${editorMode === 'edit' ? 10 : 'null'}, record_token:${JSON.stringify(hostEditorToken)}, capabilities:{color_staging:true,manufacturer_staging:true}, fields:{ designation:'Fixture PLA', manufacturer_id:7, manufacturer_name:'Fixture Brand', material_type:'PLA', diameter_mm:1.75, ...window.editorEdits }}, location.origin)
           if (type === 'filaman:filament-stage') {
             window.staged = units;
             const reply = () => event.source.postMessage({type, request_id, staged:units.flatMap(unit => Object.keys(unit)), skipped:[]}, location.origin)
@@ -209,7 +217,7 @@ try {
       ], total: 2 } })
     }
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: canUseFilaments, chat_model: chatModelId, chat_endpoint_id: chatModelId ? defaultEndpoint : null,
-      can_create: canUseFilaments, can_add_spool: canAddSpool, can_read_spools: canAddSpool, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure } })
+      can_create: canUseFilaments, can_create_color: canCreatePalette, can_create_manufacturer: true, can_add_spool: canAddSpool, can_read_spools: canAddSpool, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure } })
     if (path.endsWith('/filaments/10/research-record')) return recordUnavailable
       ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { record_token: editorRecordToken } })
@@ -235,6 +243,10 @@ try {
               ? ['fixture:default', 'fixture:alternate'] : []),
           ])].filter(model => !hidden_models.includes(model)) })),
       } })
+    if (path.endsWith('/chat') && req.postDataJSON().messages.at(-1)?.content === 'Explain this filament') {
+      sharedChatRequests.push(req.postDataJSON())
+      return route.fulfill({ json: { reply: 'PLA is easier to print.', action: null } })
+    }
     if (path.endsWith('/chat')) {
       assert.equal(req.postDataJSON().messages[0].content, 'Compare these materials')
       if (chatRequests++ === 0) {
@@ -275,7 +287,7 @@ try {
       if (target.query) {
         assert.equal(target.model_id, undefined, 'discovery does not use an LLM')
         assert.equal(target.endpoint_id, undefined)
-        assert.equal(target.mode, 'create')
+        assert.equal(target.mode, target.filament_id ? 'edit' : 'create')
         assert.equal(target.identity.sku, target.query === 'explicit SKU fixture' ? 'FIX-12X' : '')
         assert.equal(target.sku_hint, '')
         const candidate = {
@@ -347,7 +359,7 @@ try {
         ...(conflictingSpoolWidth ? [{ field: 'spool_width_mm', value: 72, sources: evidence }] : []),
         ...(differentSpoolPackage ? [{ field: 'raw_material_weight_g', value: 500, sources: evidence }] : []),
         ...(!chatModelId ? [{ field: 'drying_temp_c', value: 50, sources: evidence }] : []),
-      ], issues: target.mode === 'edit' ? [
+      ], issues: draftColorMode ? [{ code: 'manufacturer_color_reference', name: 'RAL 4007 Purple / Decepticon', reference_code: 'RAL 4007', url: evidence[0].url }] : target.mode === 'edit' ? [
         { code: 'manufacturer_page', name: 'Fixture datasheet', url: evidence[0].url },
         { code: 'manufacturer_page', name: 'Fixture datasheet', url: evidence[0].url },
         { code: 'manufacturer_color_reference', name: 'RAL 9005 Signal Black', url: evidence[0].url },
@@ -393,9 +405,30 @@ try {
         supplier_sites: supplierSites, supplier_download_mib: supplierDownloadMiB,
       } })
     }
+    if (path.endsWith('/manufacturers') && req.method() === 'POST') {
+      const data = req.postDataJSON(); manufacturerWrites.push(data); if (makerResponse) await makerResponse
+      return route.fulfill({ status: 201, json: { id: 9 + manufacturerWrites.length, ...data } })
+    }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
+    if (path.endsWith('/color-previews')) {
+      const data = req.postDataJSON()
+      return route.fulfill({ json: { current: [], can_save: true, can_assign: true, can_create: canCreatePalette,
+        references: data.references.map(reference => ({ ...reference, name: 'Purple violet', hex_code: '#44263C',
+          source: 'https://www.ral-farben.de/en/colour/ral-classic/ral-4007', saved: false, token: '',
+          matches: [{ id: 1, name: 'RAL4007', hex_code: '#44263C' }],
+        })),
+      } })
+    }
+    if (path === '/api/v1/colors/1') return route.fulfill({ json: { id: 1, name: 'RAL4007', hex_code: '#44263c' } })
+    if (path.endsWith('/colors') && req.method() === 'POST') {
+      const data = req.postDataJSON()
+      colorWrites.push(data)
+      if (colorResponse) await colorResponse
+      return route.fulfill({ status: 201, json: { id: 22 + colorWrites.length, ...data } })
+    }
     if (path.endsWith('/colors')) return route.fulfill({ json: { items: [{ id: 1, name: 'Fixture Red' }], total: 1 } })
     if (path.endsWith('/filaments') && req.method() === 'GET') {
+      if (heldContextLoad) await heldContextLoad
       libraryReads++
       const requestedToken = new URL(req.url()).searchParams.get('include_record_token') === 'true'
       const record_token = requestedToken && supportsRecordToken ? pickerRecordToken : undefined
@@ -1007,6 +1040,7 @@ try {
   })
   await page.goto('https://fila.test/editor-fixture')
   const frame = page.frameLocator('iframe')
+  await frame.getByRole('searchbox', { name: 'SKU, product link, or description' }).waitFor()
   const followUp = frame.getByRole('textbox', { name: 'Follow up on this search' })
   const drawerGuide = frame.getByRole('dialog', { name: 'Guide' })
   await frame.getByRole('button', { name: 'Guide', exact: true }).click()
@@ -1014,9 +1048,9 @@ try {
   assert.equal(await drawerGuide.evaluate(el => el.matches(':modal')), true)
   await page.locator('iframe').evaluate(el => { el.style.width = '960px' })
   await frame.locator('#filabrain-docs:modal').waitFor()
-  const drawerBounds = await frame.locator('.research-chat').boundingBox()
+  const drawerBounds = await frame.locator('.research-chat:visible').boundingBox()
   await drawerGuide.getByRole('button', { name: 'Close' }).click()
-  assert.equal((await frame.locator('.research-chat').boundingBox()).width, drawerBounds.width, 'the editor guide does not resize chat')
+  assert.equal((await frame.locator('.research-chat:visible').boundingBox()).width, drawerBounds.width, 'the editor guide does not resize chat')
   await frame.getByRole('button', { name: 'FilaBrain settings' }).click()
   await frame.getByRole('button', { name: 'Guide', exact: true }).click()
   await frame.locator('#filabrain-docs:modal').waitFor()
@@ -1026,7 +1060,7 @@ try {
   await settingsGuide.locator('xpath=self::*[@aria-expanded="false"]').waitFor()
   assert.equal(await settingsGuide.evaluate(el => el === el.ownerDocument.activeElement), true)
   await page.locator('iframe').evaluate(el => { el.style.width = '640px' })
-  await frame.getByRole('button', { name: 'Back to chat' }).click()
+  await frame.locator('[data-tab=editor]').click()
   const researchModel = frame.getByRole('button', { name: /^Model for this conversation/ })
   const researchMenu = frame.getByRole('menu', { name: 'Model for this conversation' })
   await researchModel.click()
@@ -1037,10 +1071,10 @@ try {
   await researchMenu.waitFor({ state: 'hidden' })
   assert.equal(await frame.getByText('Advanced options', { exact: true }).count(), 0)
   assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).count(), 0)
-  assert.equal(await followUp.isVisible(), false)
+  assert.equal(await followUp.isDisabled(), true)
   assert.match(await researchModel.innerText(), /fixture:alternate/)
   await frame.getByRole('button', { name: 'Find specifications' }).click()
-  await frame.getByRole('heading', { name: 'Chat', exact: true }).waitFor()
+  await frame.locator('[data-tab=editor][aria-selected=true]').waitFor()
   const densityChoice = frame.getByRole('checkbox', { name: /Density/ })
   await densityChoice.waitFor()
   const checks = frame.getByText('Sources checked (1)', { exact: true })
@@ -1068,22 +1102,22 @@ try {
   })
   await frame.getByRole('button', { name: 'Stage 1 field' }).click()
   await page.waitForFunction(() => !!window.finishStage)
-  assert.equal(await frame.locator('[data-chat-new]').isDisabled(), true)
-  const unstagedSku = frame.locator('#research-results').getByRole('checkbox', { name: /FIX-123/ })
+  assert.equal(await frame.locator('[data-chat-new]:visible').isDisabled(), true)
+  const unstagedSku = frame.locator('[data-view=editor]').locator('[data-research-id=research-results]').getByRole('checkbox', { name: /FIX-123/ })
   assert.equal(await unstagedSku.isDisabled(), true)
   await frame.locator('[data-chat-history]:visible summary').click()
   assert.equal(await frame.locator('[data-chat-history-list]:visible').getByRole('button', { name: 'Find specifications' }).isDisabled(), true)
   await page.evaluate(() => { const reply = window.finishStage; delete window.finishStage; reply() })
   await frame.getByText('1 field staged.', { exact: false }).waitFor()
-  assert.equal(await frame.locator('[data-chat-new]').isDisabled(), false)
+  assert.equal(await frame.locator('[data-chat-new]:visible').isDisabled(), false)
   const stagedFindings = frame.locator('.research-history').filter({ hasText: 'Density (g/cm³): 1.24' }).first()
   await stagedFindings.locator('summary').click()
   assert.equal(await stagedFindings.locator('.research-history-value').filter({ hasText: 'Density (g/cm³): 1.24' })
     .getByRole('link', { name: evidence[0].title }).getAttribute('href'), evidence[0].url)
-  assert.equal(await frame.locator('#research-results').getByRole('checkbox', { name: /Density/ }).count(), 0)
+  assert.equal(await frame.locator('[data-view=editor]').locator('[data-research-id=research-results]').getByRole('checkbox', { name: /Density/ }).count(), 0)
   assert.equal(await unstagedSku.isEnabled(), true)
   assert.deepEqual(await page.evaluate(() => window.staged), [{ density_g_cm3: { old: null, value: 1.24 } }])
-  await frame.locator('#research-options > summary').click()
+  await frame.locator('[data-view=editor]').locator('[data-research-id=research-options] > summary').click()
   await frame.getByRole('button', { name: 'Find specifications' }).click()
   const researchPage = frame.getByRole('button', { name: 'Research this page' })
   await researchPage.waitFor()
@@ -1093,22 +1127,22 @@ try {
   await frame.getByRole('button', { name: 'Stop dictation', exact: true }).waitFor()
   await frame.getByRole('button', { name: 'FilaBrain settings', exact: true }).click()
   assert.equal(await frame.locator('body').evaluate(() => window.editorRecognition.aborted), true, 'embedded settings stops capture before hiding the chat')
-  await frame.getByRole('button', { name: 'Back to chat', exact: true }).click()
+  await frame.locator('[data-tab=editor]').click()
   assert.equal(await researchPage.locator('svg[aria-hidden=true]').count(), 1)
   recordUnavailable = true
   const requestsBeforeFailedClick = proposalRequests
   await researchPage.click()
-  await frame.locator('#research-status').getByText(/HTTP 503/).waitFor()
+  await frame.locator('[data-view=editor]').locator('[data-research-id=research-status]').getByText(/HTTP 503/).waitFor()
   assert.equal(proposalRequests, requestsBeforeFailedClick)
   recordUnavailable = false
   await researchPage.click()
   await frame.getByRole('log').getByText('Research this page', { exact: true }).waitFor()
   await densityChoice.waitFor()
-  const currentVariants = frame.locator('#research-results').getByRole('group', { name: 'Drying temperature (°C)', exact: true })
+  const currentVariants = frame.locator('[data-view=editor]').locator('[data-research-id=research-results]').getByRole('group', { name: 'Drying temperature (°C)', exact: true })
   await currentVariants.getByText(variantWarning, { exact: true }).waitFor()
   assert.equal(await currentVariants.getByRole('radio').count(), 0)
   assert.equal(await currentVariants.getByRole('link').count(), 2)
-  await frame.locator('#research-options > summary').click()
+  await frame.locator('[data-view=editor]').locator('[data-research-id=research-options] > summary').click()
   await frame.getByRole('button', { name: 'Standardize this filament' }).click()
   await frame.getByRole('checkbox', { name: /Fixture-PLA.*Matte/ }).check()
   await followUp.fill('Check an unavailable source')
@@ -1330,7 +1364,7 @@ try {
   assert.equal(followUpPayload.model_id, undefined)
   assert.equal(followUpPayload.endpoint_id, undefined)
 
-  const activeResearch = frame.locator('#research-results')
+  const activeResearch = frame.locator('[data-view=editor]').locator('[data-research-id=research-results]')
   const reviewedSku = activeResearch.getByRole('checkbox', { name: /FIX-123/ })
   await reviewedSku.check()
   const reviewedDrying = activeResearch.getByRole('checkbox', { name: /Drying temperature.*50/ })
@@ -1411,12 +1445,13 @@ try {
   await activeResearch.getByRole('checkbox', { name: /Density.*1\.27/ }).waitFor()
   assert.equal(await activeResearch.getByRole('button', { name: 'Selected: Fixture Brand PLA 1 kg' }).count(), 1)
   assert.equal(await page.evaluate(() => window.staged), undefined)
-  await frame.getByRole('button', { name: 'Stage 2 fields' }).click()
+  await frame.getByRole('button', { name: 'Stage 3 fields' }).click()
   await page.waitForFunction(() => window.staged)
   assert.deepEqual(await page.evaluate(() => window.staged), [
     { default_spool_weight_g: { old: null, value: 233 } },
     { spool_outer_diameter_mm: { old: null, value: 200 } },
-  ], 'spool profile only stages supported blank fields after the explicit Stage action')
+    { spool_width_mm: { old: 62, value: 66 } },
+  ], 'explicit spool choice stages reviewed replacements as well as missing dimensions')
 
   const spoolDraft = await context.newPage()
   spoolDraft.setDefaultTimeout(5_000)
@@ -1717,6 +1752,135 @@ try {
   assert.equal(explicitChoicePayload.sku_hint, '', 'a card cannot add a conflicting inferred hint to an explicit SKU')
   await discovery.close()
   chatModelId = discoveryDefaultModel
+
+  draftColorMode = true
+  const colorDraft = await context.newPage()
+  await colorDraft.goto(url)
+  await colorDraft.getByRole('tab', { name: 'New filament', exact: true }).click()
+  const colorForm = colorDraft.locator('#product-research')
+  await colorForm.locator('#research-options').evaluate(el => { el.open = true })
+  await colorDraft.getByLabel('Manufacturer', { exact: true }).fill(manufacturer.name)
+  await colorDraft.getByLabel('Product name', { exact: true }).fill('PLA (Decepticon Purple)')
+  await colorForm.locator('[name=manufacturer_color_name]').fill('Decepticon Purple')
+  await colorDraft.locator('#research-advanced-fields').evaluate(el => { el.open = true })
+  await colorDraft.getByRole('textbox', { name: 'Material', exact: true }).fill('PLA')
+  await colorDraft.getByRole('spinbutton', { name: 'Diameter (mm)', exact: true }).fill('1.75')
+  await colorDraft.getByRole('button', { name: 'Find specifications' }).click()
+  const swatches = colorDraft.locator('[data-draft-swatches]')
+  await swatches.getByText('RAL 4007', { exact: false }).first().waitFor()
+  await swatches.getByRole('combobox').selectOption('reuse:1')
+  await swatches.getByRole('button', { name: 'Use swatch', exact: true }).click()
+  await colorDraft.getByRole('checkbox', { name: /Library color/ }).waitFor()
+  assert.equal(await colorDraft.getByRole('checkbox', { name: /Library color/ }).isChecked(), true)
+  await swatches.getByRole('combobox').selectOption('create')
+  let releaseColor
+  colorResponse = new Promise(resolve => { releaseColor = resolve })
+  await swatches.getByRole('button', { name: 'Use swatch', exact: true }).click()
+  await colorDraft.locator('#save-filament:disabled').waitFor()
+  assert.equal(await colorDraft.locator('#create-confirm').evaluate(el => el.open), false, 'pending color creation cannot open a stale save confirmation')
+  releaseColor()
+  colorResponse = undefined
+  await colorDraft.locator('#save-filament:enabled').waitFor()
+  assert.equal(colorWrites.at(-1).hex_code, '#44263C')
+  assert.equal(colorWrites.at(-1).name, 'Purple violet (RAL 4007)')
+  assert.equal(await colorDraft.getByRole('checkbox', { name: /Library color/ }).isChecked(), true)
+  await colorDraft.getByRole('button', { name: 'Find spool specs' }).click()
+  await colorDraft.getByRole('button', { name: 'This matches: Fixture Brand PLA 1 kg', exact: true }).click()
+  await colorDraft.getByRole('button', { name: 'Save new filament', exact: true }).click()
+  await colorDraft.locator('#create-confirm[open]').waitFor()
+  await colorDraft.locator('#create-filament').click()
+  await colorDraft.getByRole('link', { name: 'Open saved filament' }).waitFor()
+  assert.deepEqual(writes.at(-1).colors, [{ color_id: 23 }])
+  assert.equal(writes.at(-1).manufacturer_color_name, 'Decepticon Purple')
+  assert.equal(writes.at(-1).default_spool_weight_g, 233)
+  assert.equal(writes.at(-1).spool_outer_diameter_mm, 200)
+  assert.equal(writes.at(-1).spool_width_mm, 66)
+  await colorDraft.close()
+  const manualDraft = await context.newPage()
+  manualDraft.setDefaultTimeout(5000)
+  await manualDraft.goto(`${url}?tab=new`)
+  await openResearchDetails(manualDraft)
+  await manualDraft.getByLabel('Manufacturer', { exact: true }).fill(manufacturer.name)
+  await manualDraft.getByLabel('Product name', { exact: true }).fill('Manual swatch PLA')
+  await manualDraft.locator('#research-advanced-fields').evaluate(el => { el.open = true })
+  await manualDraft.getByLabel('Material', { exact: true }).fill('PLA')
+  await manualDraft.getByLabel('Diameter (mm)', { exact: true }).fill('1.75')
+  await manualDraft.locator('#draft-palette').selectOption('1')
+  await manualDraft.getByRole('button', { name: 'Find specifications' }).click()
+  await manualDraft.locator('#save-filament:enabled').waitFor()
+  await openResearchDetails(manualDraft)
+  await manualDraft.locator('#create-draft-color').click()
+  const manualDialog = manualDraft.locator('#draft-color-dialog')
+  await manualDialog.getByLabel('Color name', { exact: true }).fill('My purple')
+  await manualDialog.getByLabel('Color hex', { exact: true }).fill('#123ABC')
+  await manualDialog.getByRole('button', { name: 'Create swatch', exact: true }).click()
+  await manualDialog.waitFor({ state: 'hidden' })
+  assert.equal(await manualDraft.getByRole('checkbox', { name: /Library color.*My purple/ }).isChecked(), true, 'an explicit manual swatch replaces the selected draft color')
+  await manualDraft.getByRole('button', { name: 'Save new filament', exact: true }).click()
+  await manualDraft.locator('#create-confirm[open]').waitFor()
+  await manualDraft.locator('#create-filament').click()
+  await manualDraft.getByRole('link', { name: 'Open saved filament' }).waitFor()
+  assert.deepEqual(writes.at(-1).colors, [{ color_id: 24 }])
+  await manualDraft.close()
+
+  const makerDraft = await context.newPage()
+  makerDraft.setDefaultTimeout(5000)
+  await makerDraft.goto(`${url}?tab=new`)
+  await openResearchDetails(makerDraft)
+  const makerName = makerDraft.getByLabel('Manufacturer', { exact: true })
+  await makerName.fill('Manufacturer A')
+  let releaseMaker
+  makerResponse = new Promise(resolve => { releaseMaker = resolve })
+  const creatingMaker = makerDraft.waitForRequest(request => request.url().endsWith('/manufacturers') && request.method() === 'POST')
+  await makerDraft.locator('#create-draft-manufacturer').click()
+  await creatingMaker
+  await makerName.fill('Manufacturer B')
+  releaseMaker()
+  makerResponse = undefined
+  await makerDraft.locator('#create-draft-manufacturer:enabled').waitFor()
+  assert.equal(await makerName.inputValue(), 'Manufacturer B', 'a delayed manufacturer response cannot overwrite newer typing')
+  await makerDraft.locator('#create-draft-manufacturer').click()
+  await makerDraft.locator('#create-draft-manufacturer').waitFor({ state: 'hidden' })
+  assert.equal(manufacturerWrites.at(-1).name, 'Manufacturer B')
+  await makerDraft.close()
+  draftColorMode = false
+
+  editorMode = 'edit'
+  chatModelId = 'fixture:default'
+  hostEditorToken = editorRecordToken
+  const sharedEditor = await context.newPage()
+  sharedEditor.setDefaultTimeout(5000)
+  await sharedEditor.goto('https://fila.test/editor-fixture')
+  const shared = sharedEditor.frameLocator('iframe')
+  await shared.locator('[data-tab=editor][aria-selected=true]').waitFor()
+  await shared.locator('[data-view=editor] [name=query]').fill('Fixture purple')
+  const editedDiscovery = sharedEditor.waitForRequest(request => request.url().endsWith('/proposals') && request.postDataJSON().query)
+  await shared.getByRole('button', { name: 'Find specifications', exact: true }).click()
+  assert.equal((await editedDiscovery).postDataJSON().filament_id, 10)
+  await shared.locator('[data-view=editor] .research-candidate').waitFor()
+  let releaseContext
+  heldContextLoad = new Promise(resolve => { releaseContext = resolve })
+  await shared.locator('[data-tab=chat]').click()
+  const chatInput = shared.getByRole('textbox', { name: 'Your question', exact: true })
+  const conversationRequest = sharedEditor.waitForRequest(request => request.url().endsWith('/filabrain/chat'))
+  await chatInput.fill('Explain this filament')
+  await chatInput.press('Enter')
+  assert.equal(sharedChatRequests.length, 0, 'a contextual question waits for filament preload')
+  releaseContext()
+  heldContextLoad = undefined
+  assert.equal((await conversationRequest).postDataJSON().filament_id, 10, 'general chat preloads the host filament')
+  await shared.getByText('PLA is easier to print.', { exact: true }).waitFor()
+  await shared.locator('[data-tab=editor]').click()
+  assert.equal(await shared.locator('[data-view=editor] [name=query]').inputValue(), 'Fixture purple')
+  await shared.locator('[data-tab=new]').click()
+  const freshQuery = shared.locator('[data-view=new] [name=query]')
+  await freshQuery.fill('Another product')
+  const freshDiscovery = sharedEditor.waitForRequest(request => request.url().endsWith('/proposals') && request.postDataJSON().query === 'Another product')
+  await shared.getByRole('button', { name: 'Find specifications', exact: true }).click()
+  const freshTarget = (await freshDiscovery).postDataJSON()
+  assert.equal(freshTarget.mode, 'create')
+  assert.equal(freshTarget.filament_id, null, 'fresh creation cannot reuse the bound editor target')
+  await sharedEditor.close()
 
   canUseFilaments = false
   await page.goto(url)

@@ -2175,7 +2175,7 @@ async def test_paramount_uses_matched_color_family_url_only(installed, db_sessio
     result = (await installed.post(f"{BASE}/proposals", json={"mode": "edit", "filament_id": filament.id})).json()
     refs = [issue for issue in result["issues"] if issue["code"] == "manufacturer_color_reference"]
     expected = [] if unresolved_sibling else [{
-        "code": "manufacturer_color_reference", "name": "Pantone 7764 C", "url": sibling, "from_product_url": True,
+        "code": "manufacturer_color_reference", "name": "Pantone 7764 C", "url": sibling, "from_product_url": True, "reference_code": "Pantone 7764 C",
     }]
     assert refs == expected
     assert not {"bed_temp_range_c", "extruder_temp_range_c"} & {entry["field"] for entry in result["suggestions"]}

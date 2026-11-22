@@ -1,10 +1,11 @@
-import { element, errorText, hostRequest, type Status } from './main'
+import { errorText, hostRequest, type Status } from './main'
 import { api, fetchAllPages } from './shared/api'
 import { researchFieldLabel, researchOptionValue, researchRecommendation, type ResearchIdentity, type ResearchOption, type ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
 import type { Chat } from './chat'
 import type { ExpectedFilament } from './shared/filabrain-batches'
 import type { SpoolResearchInput } from './spool-intake'
+import { mountSwatchReview, type Review, type Swatch } from './shared/swatch-review'
 import { spoolProfileCards, spoolSource, type SpoolProfile } from './shared/spool-profiles'
 
 type Value = ResearchOption['value'] | boolean | null
@@ -13,6 +14,7 @@ type Unit = Record<string, { old: Value; value: Value }>
 
 export type EditorContext = {
   mode: 'create' | 'edit'; filament_id: number | null; fields: Fields; record_token?: string | null
+  capabilities?: { color_staging?: boolean; manufacturer_staging?: boolean }
 }
 export type ResearchDraft = {
   fields: Record<string, string>
@@ -182,7 +184,10 @@ function issueText(issue: ResearchProposal['issues'][number]) {
   return explanation + (issue.reason ? ` (${issue.reason})` : '')
 }
 
-export function mountResearch(status: Status, chat: Chat, openChat: () => void, editor?: EditorContext) {
+export function mountResearch(status: Status, chat: Chat, openChat: () => void, editor?: EditorContext,
+  root = document.querySelector<HTMLElement>('[data-view="new"]')!) {
+  const element = <T extends HTMLElement = HTMLElement>(id: string) => root.querySelector<T>(`[data-research-id="${id}"]`) || root.querySelector<T>(`#${id}`)!
+  for (const node of root.querySelectorAll<HTMLElement>('[id]')) node.classList.add(node.dataset.researchId || node.id)
   const form = element<HTMLFormElement>('product-research')
   const researchMark = document.querySelector<SVGElement>('#plugin-header .filabrain-mark')!
   const results = element('research-results')
@@ -230,6 +235,86 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   let lastProductUrl = ''
   let lastSku = ''
   let formRevision = 0
+  const newManufacturer = element<HTMLButtonElement>('create-draft-manufacturer')
+  const newColor = element<HTMLButtonElement>('create-draft-color')
+  const colorDialog = element<HTMLDialogElement>('draft-color-dialog')
+  const colorForm = element<HTMLFormElement>('draft-color-form')
+  const colorName = colorForm.elements.namedItem('color_name') as HTMLInputElement
+  const colorHex = colorForm.elements.namedItem('color_hex') as HTMLInputElement
+  const colorPicker = colorForm.elements.namedItem('color_picker') as HTMLInputElement
+  const colorMessage = colorForm.querySelector<HTMLElement>('[data-color-message]')!
+  let creatingColor = false
+  newColor.hidden = !status.can_create_color
+
+  async function createColor(name: string, hex_code: string, custom_fields?: object) {
+    const color = await api.post<Swatch>('/colors', { name, hex_code, custom_fields })
+    if (![...palette.options].some(option => option.value === String(color.id))) palette.add(new Option(color.name, String(color.id)))
+    return color
+  }
+
+  function offerManufacturer() {
+    const name = manufacturer.value.trim()
+    newManufacturer.hidden = !!editor || !status.can_create_manufacturer || !name ||
+      manufacturers.some(item => item.name.toLowerCase() === name.toLowerCase())
+    newManufacturer.disabled = busy || saving
+  }
+  newManufacturer.addEventListener('click', async () => {
+    await pendingOptions
+    const name = manufacturer.value.trim()
+    if (busy || saving || !name || manufacturers.some(item => item.name.toLowerCase() === name.toLowerCase())) return
+    busy = true
+    updateSave()
+    const again = !!boundProposal
+    const revision = formRevision
+    try {
+      const maker = await api.post<{ id: number; name: string }>('/manufacturers', { name })
+      manufacturers.push(maker)
+      manufacturerOptions.append(new Option(maker.name))
+      if (revision !== formRevision || !root.isConnected) return
+      manufacturer.value = maker.name
+      formRevision++
+      clearResults()
+    } catch (error) { showResearchError(error) }
+    finally { busy = false; updateSave() }
+    if (again && manufacturers.some(item => item.name.toLowerCase() === name.toLowerCase())) await search('fill')
+  })
+  newColor.addEventListener('click', () => {
+    colorName.value = String(form.elements.namedItem('manufacturer_color_name') instanceof HTMLInputElement
+      ? (form.elements.namedItem('manufacturer_color_name') as HTMLInputElement).value : '') ||
+      String(boundProposal?.suggestions.find(item => item.field === 'manufacturer_color_name')?.value || '')
+    colorMessage.textContent = ''
+    colorDialog.showModal()
+    colorName.focus()
+  })
+  colorPicker.addEventListener('input', () => { colorHex.value = colorPicker.value })
+  colorHex.addEventListener('input', () => { if (/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(colorHex.value)) colorPicker.value = colorHex.value.slice(0, 7) })
+  colorForm.querySelector('[data-color-cancel]')!.addEventListener('click', () => colorDialog.close())
+  colorDialog.addEventListener('cancel', event => { if (creatingColor) event.preventDefault() })
+  colorForm.addEventListener('submit', async event => {
+    event.preventDefault()
+    if (creatingColor || !colorForm.reportValidity()) return
+    creatingColor = true
+    saving = true
+    updateSave()
+    const revision = formRevision, context = bound, proposal = boundProposal
+    const selection = selected().filter(unit => !('color_id' in unit))
+    for (const control of colorForm.querySelectorAll<HTMLButtonElement>('button')) control.disabled = true
+    try {
+      const color = await createColor(colorName.value.trim(), colorHex.value)
+      if (revision !== formRevision || bound !== context || boundProposal !== proposal) throw new Error(t('filaBrain.identityChanged'))
+      if (proposal && context) {
+        const sources = [{ title: color.name, evidence: color.hex_code }]
+        proposal.suggestions = [...proposal.suggestions.filter(item => item.field !== 'color_id'), { field: 'color_id', value: color.id, sources }]
+        selection.push({ color_id: { old: context.fields.color_id ?? null, value: color.id } })
+        render(proposal, context, lastAction, '', selection)
+        restoreSelection(selection)
+        chat.saveSelection(selected())
+      } else palette.value = String(color.id)
+      colorDialog.close()
+    } catch (error) { colorMessage.textContent = errorText(error) }
+    finally { creatingColor = false; saving = false; updateSave(); for (const control of colorForm.querySelectorAll<HTMLButtonElement>('button')) control.disabled = false }
+  })
+
 
   function showInChat(movePicker = true, reveal = true, newDraft = false) {
     if (reveal) openChat()
@@ -239,23 +324,36 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     return chat.startResearch(newDraft)
   }
 
+  function preloadEditor(context: EditorContext) {
+    manufacturer.value = String(context.fields.manufacturer_name || '')
+    manufacturer.readOnly = true
+    for (const name of [...draftFields, 'material_type']) {
+      const control = form.elements.namedItem(name)
+      if (control instanceof HTMLInputElement) {
+        control.value = String(context.fields[name] ?? '')
+        control.readOnly = true
+      }
+    }
+    palette.disabled = true
+    const colorId = context.fields.color_id
+    if (typeof colorId === 'number') {
+      if (![...palette.options].some(option => option.value === String(colorId))) {
+        palette.add(new Option(String(context.fields.manufacturer_color_name || colorId), String(colorId)))
+      }
+      palette.value = String(colorId)
+    }
+  }
+
   let pendingOptions: Promise<unknown> = Promise.resolve()
   if (editor) {
-    document.documentElement.dataset.researchEditor = ''
-    buttons[0].before(chat.picker)
-    element('draft-fields').hidden = true
-    advanced.hidden = true
-    discovery.hidden = true
-    searchOptions.open = true
-    optionsSummary.hidden = true
-    optionsSummary.textContent = t('filaBrain.editSearch')
-    element('research-identity').append(element('research-sku-hint'))
+    preloadEditor(editor)
     element('research-heading').textContent = t(editor.mode === 'edit' ? 'filaBrain.editorResearchExisting' : 'filaBrain.editorResearchDraft')
     const target = element('research-target')
     target.hidden = !editor.fields.designation
     target.textContent = [editor.fields.designation, editor.fields.manufacturer_name].filter(Boolean).join(' · ')
     buttons[1].hidden = editor.mode !== 'edit'
-  } else {
+  }
+  {
     async function options(path: string, select: HTMLSelectElement) {
       try {
         const { items } = await fetchAllPages<{ id: number; name: string }>(path)
@@ -269,6 +367,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       fetchAllPages<{ id: number; name: string }>('/api/v1/manufacturers').then(({ items }) => {
         manufacturers = items
         manufacturerOptions.append(...items.map(item => new Option(item.name)))
+        offerManufacturer()
       }).catch(showResearchError),
       options('/api/v1/colors', palette),
     ])
@@ -313,6 +412,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       return { mode: 'create', filament_id: null, fields: localFields() }
     }
     const context = await hostRequest<EditorContext>('filaman:filament-context')
+    preloadEditor(context)
     if (!context.filament_id) return context
     await initialRecord
     const token = await recordToken(context.filament_id)
@@ -365,11 +465,15 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   }
 
   function updateSave() {
+    offerManufacturer()
+    newColor.disabled = busy || saving
+    newColor.hidden = !status.can_create_color || !!editor && editor.capabilities?.color_staging !== true || !!((bound?.fields.color_mode || editor?.fields.color_mode) && (bound?.fields.color_mode || editor?.fields.color_mode) !== 'single')
     const count = editor ? selected().reduce((total, unit) => total + Object.keys(unit).length, 0) : 0
     const candidatesOnly = !editor && !boundProposal?.suggestions.length && !boundProposal?.proposals?.length &&
       boundProposal?.issues.some(issue => issue.code === 'possible_match' || issue.code === 'search_incomplete')
     save.disabled = !bound || duplicate || candidatesOnly || busy || saving || (!!editor && count === 0)
     followUpScope.disabled = busy || saving
+    for (const panel of results.querySelectorAll<HTMLElement>('[data-draft-swatches]')) panel.inert = busy || saving
     for (const control of results.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
       '.chat-spool-picker button, input[type=checkbox], input[type=radio]',
     )) control.disabled = busy || saving
@@ -448,7 +552,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       if (profile && source) {
         for (const [field, measurement] of spoolFields) {
           const value = profile[measurement]
-          if (!blank(fields[field]) || typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue
+          if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || equal(fields[field], value)) continue
           if (fromClick) clearMeasurementChoices(field)
           const row = option({ [field]: { old: fields[field] ?? null, value } }, [{
             title: profile.source, url: source.href, evidence: profile.title,
@@ -486,12 +590,88 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     refreshSpoolProfiles = () => refresh(selected())
   }
 
+  function renderColors(proposal: ResearchProposal, context: EditorContext) {
+    const references = proposal.issues.filter(issue => issue.code === 'manufacturer_color_reference')
+      .map(issue => ({ code: issue.reference_code || issue.name?.match(/^(?:RAL\s+\d{4}|Pantone\s+\d{2,4}(?:-\d{4})?\s+(?:TCX|TPG|TPX|CP|UP|C|U))\b/i)?.[0],
+        manufacturer_source: issue.url, from_product_url: issue.from_product_url || false }))
+      .filter((reference): reference is typeof reference & { code: string } => !!reference.code)
+      .filter((reference, index, all) => all.findIndex(other => other.code === reference.code) === index).slice(0, 4)
+    if (!references.length) return
+    const revision = formRevision
+    const panel = document.createElement('section')
+    panel.className = 'swatch-review'
+    panel.dataset.draftSwatches = ''
+    const title = document.createElement('h3')
+    title.textContent = t('swatchReview.title')
+    const content = document.createElement('div')
+    content.dataset.swatchContent = ''
+    const note = document.createElement('p')
+    note.className = 'research-note'
+    note.dataset.swatchStatus = ''
+    note.setAttribute('role', 'status')
+    panel.append(title, content, note)
+    const chosen = document.createElement('div')
+    results.append(panel, chosen)
+    const live = () => bound === context && boundProposal === proposal && revision === formRevision && panel.isConnected
+    void mountSwatchReview(panel, {
+      async load() {
+        const review = await api.post<Review>(route + '/color-previews', {
+          references, color_id: context.fields.color_id || undefined,
+        })
+        if (editor && editor.capabilities?.color_staging !== true) {
+          review.can_save = review.can_assign = false
+          note.textContent = t('swatchReview.hostUpdate')
+        }
+        if (context.fields.color_mode === 'multi' || proposal.suggestions.some(item => item.field === 'color_mode' && item.value === 'multi')) review.can_assign = false
+        return review
+      },
+      async choose(reference, action, match) {
+        if (!live() || busy || saving) throw new Error(t('filaBrain.identityChanged'))
+        saving = true
+        updateSave()
+        try {
+          let color: Swatch | undefined
+          if (action === 'reuse' && match) {
+            color = await api.get<Swatch>(`/colors/${match.id}`, { cache: 'no-store' })
+            if (color.name !== match.name || color.hex_code.toUpperCase() !== reference.hex_code) throw new Error(t('swatchReview.choiceChanged'))
+          } else if (action === 'create' && reference.hex_code) {
+            const suffix = ` (${reference.code})`
+            color = await createColor(reference.name === reference.code ? reference.code : reference.name.slice(0, 100 - suffix.length).trim() + suffix,
+              reference.hex_code, { filabrain_color_references: [{ code: reference.code, name: reference.name,
+                hex_code: reference.hex_code, source: reference.source, manufacturer_source: reference.manufacturer_source }] })
+          }
+          if (!live()) throw new Error(t('filaBrain.identityChanged'))
+          for (const [control, unit] of choices) if ('color_id' in unit) control.checked = false
+          for (const control of chosen.querySelectorAll<HTMLInputElement>('input')) choices.delete(control)
+          chosen.replaceChildren()
+          proposal.suggestions = proposal.suggestions.filter(item => item.field !== 'color_id')
+          if (color) {
+            const sources = [{ title: reference.code, url: reference.source || undefined, evidence: `${color.name} · ${reference.hex_code}` }]
+            proposal.suggestions.push({ field: 'color_id', value: color.id, sources })
+            if (![...palette.options].some(option => option.value === String(color.id))) palette.add(new Option(color.name, String(color.id)))
+            const row = option({ color_id: { old: context.fields.color_id ?? null, value: color.id } }, [{
+              title: reference.code, url: reference.source || undefined, evidence: `${color.name} · ${reference.hex_code}`,
+            }])
+            row.querySelector('input')!.checked = true
+            chosen.append(row)
+          }
+          updateSave()
+          chat.saveSelection(selected())
+        } finally { saving = false; updateSave() }
+      },
+    })
+  }
+
   function render(proposal: ResearchProposal, context: EditorContext, action = 'fill', field = '', selection: Unit[] = []) {
     clearResults()
     bound = context
     boundProposal = proposal
     const fields = context.fields
+    const missingMaker = proposal.issues.find(issue => issue.code === 'manufacturer_required')
+    if (!editor && missingMaker?.name && !manufacturer.value.trim()) manufacturer.value = missingMaker.name
+    offerManufacturer()
     renderSpoolProfiles(proposal, fields, selection)
+    renderColors(proposal, context)
     const unitFor = (field: string, value: Value): Unit => ({ [field]: { old: fields[field] ?? null, value } })
     duplicate = proposal.issues.some(issue => issue.code === 'duplicate')
     const alternatives = new Set<string>()
@@ -502,7 +682,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     const seenChecks = new Set<string>()
     const seenCandidates = new Set<string>()
     for (const issue of proposal.issues) {
-      if (!editor && issue.code === 'possible_match') {
+      if (issue.code === 'possible_match') {
         const productUrl = issue.product_url && /^https?:\/\//i.test(issue.product_url) ? issue.product_url : undefined
         const sourceUrl = issue.url && /^https?:\/\//i.test(issue.url) ? issue.url : productUrl
         const key = productUrl || sourceUrl || JSON.stringify([issue.name, issue.source])
@@ -657,7 +837,8 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       }
     }
     for (const { field, value, sources } of proposal.suggestions) {
-      if (!nativeFields.has(field) || alternatives.has(field) || !blank(fields[field])) continue
+      const explicitColor = field === 'color_id' && selection.some(unit => unit.color_id && equal(unit.color_id.old, fields[field]) && equal(unit.color_id.value, value))
+      if (!nativeFields.has(field) || alternatives.has(field) || !blank(fields[field]) && !explicitColor) continue
       if (field === 'color_id' && fields.color_mode && fields.color_mode !== 'single') continue
       results.append(option(unitFor(field, value), sources))
     }
@@ -698,7 +879,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     if (revision !== formRevision || busy || saving) return
     const formData = new FormData(form)
     const productInput = form.elements.namedItem('product_url') as HTMLInputElement
-    const query = editor ? '' : discovery.value.trim()
+    const query = discovery.value.trim()
     const queryUrl = /^https?:\/\/\S+$/i.test(query) ? query : ''
     const productUrl = choice?.url || String(formData.get('product_url') || '').trim() || queryUrl
     const discoveryQuery = productUrl ? '' : query
@@ -726,8 +907,8 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       : context
     const lookupProduct = identity(lookupContext.fields)
     const lookupHint = !product.sku && lookupProduct.sku ? '' : sku
-    const discovering = context.mode === 'create' && !spoolLookup && !productUrl &&
-      (!!discoveryQuery || !lookupProduct.designation.trim() && !!(lookupProduct.sku.trim() || lookupHint))
+    const discovering = action === 'fill' && !spoolLookup && !productUrl &&
+      (!!discoveryQuery || context.mode === 'create' && !lookupProduct.designation.trim() && !!(lookupProduct.sku.trim() || lookupHint))
     const actionLabel = spoolLookup ? t('filaBrain.findSpoolSpecs') : buttons[action === 'standardize' ? 1 : 0].textContent?.trim() || ''
     const proposalTitle = discoveryQuery || [lookupProduct.manufacturer, lookupProduct.designation].filter(Boolean).join(' ') || productUrl || lookupHint
     if (!lookupProduct.designation && !lookupProduct.sku && !productUrl && !lookupHint && !discoveryQuery) {
@@ -839,13 +1020,13 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     formRevision++
     form.reset()
     validateDiscovery()
-    searchOptions.open = !!editor
-    optionsSummary.hidden = !!editor
+    searchOptions.open = false
+    optionsSummary.hidden = false
     conversation.hidden = true
     clearResults()
     notice.textContent = ''
     lastAction = 'fill'
-    if (editor) buttons[0].before(chat.picker)
+    if (editor) preloadEditor(editor)
   }
 
   function archivedValue(field: string, value: Value, sources: ResearchOption['sources']) {
@@ -871,6 +1052,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     }
     formRevision++
     clearResults()
+    offerManufacturer()
     notice.textContent = ''
   })
 
@@ -1090,7 +1272,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       }
     } catch { /* Keep the last known settings while the server is unreachable. */ }
   })
-  if (editor) showInChat(false)
+  if (editor) showInChat()
   return (input?: SpoolResearchInput) => {
     if (!showInChat(true, true, !!input) || !input) return
     manufacturer.value = input.manufacturer || ''

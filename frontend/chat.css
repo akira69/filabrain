@@ -186,12 +186,12 @@
   .chat-send[data-busy] [data-send-icon], .chat-send:not([data-busy]) [data-stop-icon] { display: none; }
   .chat-send:disabled { color: var(--text-muted); background: var(--bg-soft); border-color: var(--border); box-shadow: none; transform: none; cursor: default; }
 
-  main:has(> :is([data-view="chat"], [data-view="new"]):not([hidden])):not(:has(> .docs-panel[open]:not(:modal))) {
+  main:has(> :is([data-view="chat"], [data-view="new"], [data-view="editor"]):not([hidden])):not(:has(> .docs-panel[open]:not(:modal))) {
     display: flex;
     flex-direction: column;
     height: 100dvh;
   }
-  :is([data-view="chat"], [data-view="new"]) { display: flex; flex: 1; min-height: 0; }
+  :is([data-view="chat"], [data-view="new"], [data-view="editor"]) { display: flex; flex: 1; min-height: 0; }
   .research-chat { flex: 1; }
 
 .chat-history summary {
@@ -225,20 +225,20 @@
 main:has([data-tab="new"][aria-current]) .chat-transcript { padding: .65rem; }
 main:has([data-tab="new"][aria-current]) [data-chat-research-input] { width: 100%; }
 main:has([data-tab="new"][aria-current]) .research-input-body { padding: .65rem; font-size: .875rem; }
-main:has([data-tab="new"][aria-current]) #product-research,
-main:has([data-tab="new"][aria-current]) #product-research .field-grid { gap: .5rem; }
-main:has([data-tab="new"][aria-current]) #product-research :is(input, button) { padding-block: .35rem; }
+main:has([data-tab="new"][aria-current]) .product-research,
+main:has([data-tab="new"][aria-current]) .product-research .field-grid { gap: .5rem; }
+main:has([data-tab="new"][aria-current]) .product-research :is(input, button) { padding-block: .35rem; }
 main:has([data-tab="new"][aria-current]) .chat-composer { padding: .25rem .65rem max(.5rem, env(safe-area-inset-bottom)); }
 main:has([data-tab="new"][aria-current]) .message-composer textarea:disabled,
 main:has([data-tab="new"][aria-current]) .message-composer:has(textarea:disabled) .chat-send { display: none; }
 @media (min-width: 360px) and (max-width: 620px) {
-  main:has([data-tab="new"][aria-current]) #research-identity { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  main:has([data-tab="new"][aria-current]) .research-identity { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (pointer: coarse) {
-  main:has([data-tab="new"][aria-current]) #product-research :is(input, select) { font-size: max(1rem, 16px); }
-  main:has([data-tab="new"][aria-current]) #research-start-actions button { min-height: 44px; }
+  main:has([data-tab="new"][aria-current]) .product-research :is(input, select) { font-size: max(1rem, 16px); }
+  main:has([data-tab="new"][aria-current]) .research-start-actions button { min-height: 44px; }
 }
-[data-chat-research-results] #research-conversation { margin-block-end: 0; }
+[data-chat-research-results] .research-conversation { margin-block-end: 0; }
 .research-history { padding: .35rem .55rem; border: 1px solid var(--border); border-radius: .45rem; }
 .research-history summary { cursor: pointer; }
 .research-history p { margin: .15rem 0; }

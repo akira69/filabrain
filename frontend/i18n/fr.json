@@ -37,6 +37,16 @@
     "chooseManual": "Choisissez dans FilaMan ou recherchez un nouveau filament."
   },
   "swatchReview": {
+    "hostUpdate": "Cette version de FilaMan ne peut pas transférer les couleurs dans l’éditeur. Utilisez Nouveau filament ou mettez FilaMan à jour.",
+    "colorName": "Nom de la couleur",
+    "colorHex": "Code hexadécimal",
+    "colorPicker": "Sélecteur de couleur",
+    "paletteNotice": "Créer une couleur l’ajoute à la palette. Le filament change uniquement lors de l’enregistrement ou du transfert du brouillon.",
+    "useSwatch": "Utiliser la couleur",
+    "noChange": "Garder la couleur actuelle",
+    "unchanged": "Couleur actuelle inchangée.",
+    "draftSelected": "Couleur sélectionnée pour ce brouillon. Vérifiez puis enregistrez le filament ou transférez-le dans l’éditeur.",
+    "choiceChanged": "La couleur a changé. Rechargez les choix et vérifiez à nouveau.",
     "title": "Correspondance couleur",
     "current": "Couleur enregistrée",
     "reference": "Aperçu de la référence",
@@ -58,6 +68,8 @@
     "loadFailed": "Impossible de charger les couleurs."
   },
   "filaBrain": {
+    "createManufacturer": "Cr\u00e9er le fabricant",
+    "navResearch": "Recherche",
     "discoveryQueryLimit": "Limitez les descriptions et SKU à 400 caractères. Les liens produit peuvent contenir jusqu’à 2048 caractères.",
     "sourceProductCode": "Code produit de la source : {code}",
     "discoveryQuery": "SKU, lien produit ou description",

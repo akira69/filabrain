@@ -8,7 +8,16 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 **Development preview.** Verified on stock FilaMan 2.2.2. Review researched values before applying them to your inventory.
 
-### What's new in 0.1.23 (development preview)
+### What's new in 0.1.24 (development preview)
+
+- Open the same Chat and Research workspace from the sidebar or a filament editor. Editor research keeps its current target separate from new-filament drafts, and chat preloads the selected filament.
+- Create a manufacturer or palette color while building a filament. RAL/Pantone previews offer matching swatches by hex, independent of their names, while keeping the manufacturer's color name.
+- Explicit spool choices can replace reviewed measurements, and color/spool selections remain in the final saved draft.
+- Find Paramount products from sparse descriptions or formatted SKUs using official product indexes, with bundled links available during index outages. Current pages still verify each candidate.
+
+Standalone creation works on FilaMan 2.2.2 or later. Staging new palette records or changing a color inside the native editor requires FilaMan's updated palette-staging support. Older hosts show color previews without unsupported staging actions.
+
+### Added in 0.1.23
 
 - Research library color filters overlay the page without enlarging or shifting the filament list.
 - Small side insets separate the table from the panel edges. Table headers stay visible while scrolling through filaments.
@@ -45,6 +54,8 @@ python3 scripts/package_plugin.py
 FilaBrain checks saved product links and searches using the product name, material, color, and any SKU. It also recognizes imported article numbers and can check a manufacturer's sitemap when it hasn't found a matching product page.
 
 A product page can supply color codes from its text or URL. A related listing can supply a color reference when the manufacturer identifies the same product group, material, and color, and any stated finish matches. Its dimensions, temperatures, and other variant specifications still need evidence for the filament being researched.
+
+RAL and Pantone previews come from the respective publisher’s page or displayed swatch, not a third-party conversion table. The reusable color name includes the standard reference, for example `Purple violet (RAL 4007)` or `Pantone 7449 C`; the filament keeps its manufacturer color name, such as `Decepticon Purple`. HEX is a screen preview, not a measured match to printed plastic. If the publisher preview is unavailable, FilaBrain keeps the reference without inventing a HEX. Existing colors are not renamed or recolored automatically.
 
 ## Model endpoints
 
@@ -115,7 +126,7 @@ When a manufacturer's website is missing, FilaBrain checks FilaManDB first and c
 Run the smoke test with the Python environment from a stock FilaMan 2.2.2 or newer checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.23.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.24.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database. Pass `--previous path/to/old.zip` to test upgrade and rollback. The smoke test covers offline catalog research through FilaMan's built-in MCP and printing chat with a local test model. Use `--live-model` with `FILABRAIN_MODEL_URL` and `FILABRAIN_MODEL_ID` to exercise a configured server.

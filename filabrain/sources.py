@@ -16,6 +16,8 @@ from xml.etree import ElementTree
 import httpx
 from app.core.cache import TTLCache
 
+from .knowledge import publisher_index_urls
+
 OFD = "https://api.openfilamentdatabase.org"
 DEFAULT_SUPPLIER_DOWNLOAD_MIB = 8
 DEFAULT_SUPPLIER_DOWNLOAD_BYTES = DEFAULT_SUPPLIER_DOWNLOAD_MIB * 1024 * 1024
@@ -690,9 +692,12 @@ async def paramount_product_urls(*, strict=False) -> tuple[str, ...]:
             async for chunk in response.aiter_bytes(chunk_size=32_768):
                 body.extend(chunk)
                 if len(body) > 512 * 1024:
-                    return ()
+                    raise ValueError("Manufacturer product index is too large")
         root = ElementTree.fromstring(body)
-    except (httpx.HTTPError, TimeoutError, ElementTree.ParseError):
+    except (httpx.HTTPError, TimeoutError, ElementTree.ParseError, ValueError):
+        if urls := publisher_index_urls("Paramount 3D"):
+            _product_sitemaps.set(sitemap, urls, ttl=300)
+            return urls
         if strict:
             raise ValueError("Manufacturer product index unavailable") from None
         return ()

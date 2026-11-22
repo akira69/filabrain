@@ -328,6 +328,12 @@ def swatch_data(color: Color) -> dict:
     return {"id": color.id, "name": color.name, "hex_code": color.hex_code}
 
 
+async def matching_swatches(db: DBSession, previews: list[dict]) -> list[Color]:
+    hex_codes = {preview["hex_code"] for preview in previews} - {None}
+    return list(await db.scalars(select(Color).where(func.upper(Color.hex_code).in_(hex_codes))
+                                 .order_by(Color.name, Color.id))) if hex_codes else []
+
+
 async def attached_swatches(db: DBSession, filament_id: int, *, locked: bool = False):
     query = (select(FilamentColor, Color).join(Color, Color.id == FilamentColor.color_id)
              .where(FilamentColor.filament_id == filament_id).order_by(FilamentColor.position))
@@ -368,9 +374,7 @@ async def preview_swatches(batch_id: str, item_id: int, db: DBSession, principal
     current = [swatch_data(color) for _, color in assignments]
     current_ids = {color["id"] for color in current}
     saved = saved_color_references(filament)
-    hex_codes = {preview["hex_code"] for preview in previews} - {None}
-    matching = list(await db.scalars(select(Color).where(func.upper(Color.hex_code).in_(hex_codes))
-                                     .order_by(Color.name, Color.id))) if hex_codes else []
+    matching = await matching_swatches(db, previews)
     return {
         "current": current,
         "can_assign": not batch.canceled_at and filament.color_mode != "multi" and len(current) <= 1,

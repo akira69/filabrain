@@ -37,6 +37,16 @@
     "chooseManual": "Use the FilaMan picker or research a new filament."
   },
   "swatchReview": {
+    "hostUpdate": "Your FilaMan version cannot stage color changes. Use New filament, or update FilaMan to enable palette staging in the editor.",
+    "colorName": "Color name",
+    "colorHex": "Color hex",
+    "colorPicker": "Color picker",
+    "paletteNotice": "Creating a swatch adds it to your palette. The filament changes only when you save or stage the draft.",
+    "useSwatch": "Use swatch",
+    "noChange": "Keep current color",
+    "unchanged": "Current color unchanged.",
+    "draftSelected": "Color selected for this draft. Review and save or stage the filament to apply it.",
+    "choiceChanged": "The swatch changed. Reload the color choices and review again.",
     "title": "Color match",
     "current": "Saved swatch",
     "reference": "Standard preview",
@@ -58,6 +68,8 @@
     "loadFailed": "Could not load swatches."
   },
   "filaBrain": {
+    "createManufacturer": "Create manufacturer",
+    "navResearch": "Research",
     "discoveryQueryLimit": "Use at most 400 characters for a description or SKU. Product links may be up to 2048 characters.",
     "sourceProductCode": "Source product code: {code}",
     "discoveryQuery": "SKU, product link, or description",

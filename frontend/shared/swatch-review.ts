@@ -3,8 +3,8 @@ import { CACHE_KEYS, invalidateCache } from './cache'
 import { escapeHtml as escape } from './extra-fields'
 import { t } from './i18n'
 
-type Swatch = { id: number; name: string; hex_code: string }
-type Reference = {
+export type Swatch = { id: number; name: string; hex_code: string }
+export type Reference = {
   code: string
   name: string
   hex_code: string | null
@@ -15,7 +15,7 @@ type Reference = {
   matches: Swatch[]
   token: string
 }
-type Review = { current: Swatch[]; can_save: boolean; can_assign: boolean; can_create: boolean; references: Reference[] }
+export type Review = { current: Swatch[]; can_save: boolean; can_assign: boolean; can_create: boolean; references: Reference[] }
 const tr = (key: string) => t('swatchReview.' + key)
 const label = (key: string) => escape(tr(key))
 
@@ -32,12 +32,18 @@ function source(url: string | null, key: string) {
     ? `<a href="${escape(url)}" target="_blank" rel="noopener noreferrer">${label(key)}</a>` : ''
 }
 
-export async function mountSwatchReview(panel: HTMLElement, path: string) {
+type DraftSwatches = {
+  load: () => Promise<Review>
+  choose: (reference: Reference, action: string, swatch?: Swatch) => Promise<void>
+}
+
+export async function mountSwatchReview(panel: HTMLElement, path: string | DraftSwatches) {
   const content = panel.querySelector<HTMLElement>('[data-swatch-content]')!
   const status = panel.querySelector<HTMLElement>('[data-swatch-status]')!
 
   async function load() {
-    const review = await api.get<Review>(path, { cache: 'no-store' })
+    const review = typeof path === 'string' ? await api.get<Review>(path, { cache: 'no-store' }) : await path.load()
+    if (!panel.isConnected) return
     const current = review.current
     content.innerHTML = `
       <div class="swatch-compare">
@@ -64,11 +70,11 @@ export async function mountSwatchReview(panel: HTMLElement, path: string) {
         return `<form class="swatch-actions" data-swatch-index="${index}">
           <label class="${multiple ? '' : 'research-sr-only'}" for="${control}">${multiple ? escape(reference.code) : label('choice')}</label>
           <select id="${control}" name="swatch_choice" class="fm-input">
-            <option value="keep">${label(current.length ? 'keep' : 'referenceOnly')}</option>
+            <option value="keep">${label(typeof path !== 'string' ? 'noChange' : current.length ? 'keep' : 'referenceOnly')}</option>
             ${options}
             ${canCreate ? `<option value="create">${label('create')}</option>` : ''}
           </select>
-          <button type="submit" class="fm-btn fm-btn-outline">${label('saveReference')}</button>
+          <button type="submit" class="fm-btn fm-btn-outline">${label(typeof path === 'string' ? 'saveReference' : 'useSwatch')}</button>
         </form>`
       }).join('') : ''}`
     content.querySelectorAll<HTMLFormElement>('form').forEach(form => {
@@ -77,7 +83,7 @@ export async function mountSwatchReview(panel: HTMLElement, path: string) {
       const button = form.querySelector('button')!
       if (!select || !button) return
       select.addEventListener('change', () => {
-        button.textContent = tr(select.value === 'keep' ? 'saveReference' : 'applySwatch')
+        button.textContent = tr(typeof path !== 'string' ? 'useSwatch' : select.value === 'keep' ? 'saveReference' : 'applySwatch')
       })
       form.addEventListener('submit', async event => {
         event.preventDefault()
@@ -88,13 +94,18 @@ export async function mountSwatchReview(panel: HTMLElement, path: string) {
         content.inert = true
         status.textContent = ''
         try {
-          await api.post(path, {
-            code: reference.code, token: reference.token, action, color_id: match?.id, color_name: match?.name,
-          })
-          invalidateCache(CACHE_KEYS.FILAMENTS)
-          invalidateCache(CACHE_KEYS.FILAMENT_FILTER_OPTIONS)
-          status.textContent = tr('saved')
-          await load()
+          if (typeof path === 'string') {
+            await api.post(path, {
+              code: reference.code, token: reference.token, action, color_id: match?.id, color_name: match?.name,
+            })
+            invalidateCache(CACHE_KEYS.FILAMENTS)
+            invalidateCache(CACHE_KEYS.FILAMENT_FILTER_OPTIONS)
+            status.textContent = tr('saved')
+            await load()
+          } else {
+            await path.choose(reference, action, match)
+            status.textContent = tr(action === 'keep' ? 'unchanged' : 'draftSelected')
+          }
         } catch (error) {
           status.textContent = error instanceof Error ? error.message : tr('saveFailed')
         } finally {

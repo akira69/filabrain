@@ -2526,7 +2526,8 @@ async def research_products(
                 item for scope in verified_scopes for item in _published_colors(scope.text)
             )
             for color, _ in colors:
-                issue = {"code": "manufacturer_color_reference", "name": color, "url": page.url}
+                issue = {"code": "manufacturer_color_reference", "name": color, "url": page.url,
+                         "reference_code": normalize_reference(color)}
                 if issue not in issues:
                     issues.append(issue)
             if not page.archived_at:
@@ -2595,7 +2596,7 @@ async def research_products(
         if system not in declared_color_systems and len(found) == 1:
             code, url = found[0]
             issues.append({"code": "manufacturer_color_reference", "name": code, "url": url,
-                           "from_product_url": True})
+                           "from_product_url": True, "reference_code": code})
 
     if unresolved_variants:
         evidence = [source for source in evidence if source.shared]
