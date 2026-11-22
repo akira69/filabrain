@@ -371,3 +371,41 @@ async def test_discovery_follow_up_guidance_changes_retrieval(installed, sku_sou
     response = await installed.post(f'{BASE}/proposals', json={'mode': 'create', 'query': query, 'guidance': guidance})
     assert response.is_success
     assert any(guidance in term and query in term for term in sku_sources), 'follow-up instructions must reach discovery search'
+
+
+async def test_existing_filament_uses_shared_discovery_without_changing_target(installed, sku_sources, db_session):
+    from sqlalchemy import select
+    from app.models import Filament
+    maker = await db_session.scalar(select(Manufacturer).where(Manufacturer.name == 'Paramount 3D'))
+    filament = Filament(manufacturer_id=maker.id, designation='PLA (Decepticon Purple)', material_type='PLA',
+                        diameter_mm=1.75, manufacturer_sku=SKU, manufacturer_color_name='Decepticon Purple')
+    db_session.add(filament)
+    await db_session.commit()
+    filament_id = filament.id
+    response = await installed.post(f'{BASE}/proposals', json={
+        'mode': 'edit', 'filament_id': filament_id, 'query': 'PRL4007_7449C',
+    })
+    assert response.is_success, response.text
+    result = response.json()
+    assert result['target']['mode'] == 'edit'
+    assert result['target']['filament_id'] == filament_id
+    assert result['suggestions'] == []
+    assert any(issue.get('product_url') == URL and issue['code'] == 'possible_match' for issue in result['issues'])
+    await db_session.refresh(filament)
+    assert filament.designation == 'PLA (Decepticon Purple)'
+    assert filament.manufacturer_sku == SKU
+
+
+async def test_editor_discovery_keeps_identity_and_record_checks(installed, sku_sources, db_session):
+    from sqlalchemy import select
+    from app.models import Filament
+    maker = await db_session.scalar(select(Manufacturer).where(Manufacturer.name == 'Paramount 3D'))
+    filament = Filament(manufacturer_id=maker.id, designation='PLA Purple', material_type='PLA', diameter_mm=1.75)
+    db_session.add(filament)
+    await db_session.commit()
+    for changed in [{'record_token': '0' * 32}, {'identity': {'manufacturer': 'Another manufacturer'}}]:
+        response = await installed.post(f'{BASE}/proposals', json={
+            'mode': 'edit', 'filament_id': filament.id, 'query': 'Decepticon Purple', **changed,
+        })
+        assert response.status_code == 409
+    assert sku_sources == []

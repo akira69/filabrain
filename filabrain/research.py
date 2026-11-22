@@ -137,6 +137,8 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "filaments:update",
                 "filaments:read",
                 "manufacturers:update",
+                "manufacturers:create",
+                "colors:create",
                 "spools:create",
                 "spools:read",
                 "printers:read",
@@ -173,6 +175,8 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         "can_read_printers": enabled and principal.auth_type == "session" and "printers:read" in permissions,
         "can_read_display": enabled and principal.auth_type == "session" and "display:read" in permissions,
         "can_update": "filaments:update" in permissions,
+        "can_create_manufacturer": enabled and "manufacturers:create" in permissions,
+        "can_create_color": enabled and "colors:create" in permissions,
         "can_update_manufacturer": enabled and principal.auth_type == "session"
         and {"filaments:update", "manufacturers:update"} <= permissions,
         "can_configure": enabled and "admin:plugins_manage" in permissions,
@@ -457,8 +461,8 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
             "target": target, "suggestions": [], "issues": issues,
             "spool_profiles": lookup["spool_profiles"], "spool_reply": lookup["reply"],
         }
-    if filament is None and not data.product_url and (data.query.strip() or (
-        not identity.designation.strip() and (identity.sku.strip() or sku_hint)
+    if data.action == "fill" and not data.product_url and (data.query.strip() or (
+        filament is None and not identity.designation.strip() and (identity.sku.strip() or sku_hint)
     )) and not data.spool_lookup:
         from .discovery import discover_products
         return {"target": target, **await discover_products(db, identity, data.query, sku_hint, data.guidance)}

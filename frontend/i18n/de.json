@@ -37,6 +37,16 @@
     "chooseManual": "Wähle in FilaMan aus oder recherchiere ein neues Filament."
   },
   "swatchReview": {
+    "hostUpdate": "Diese FilaMan-Version kann Farbänderungen nicht in den Editor übernehmen. Verwenden Sie Neues Filament oder aktualisieren Sie FilaMan.",
+    "colorName": "Farbname",
+    "colorHex": "Hex-Farbwert",
+    "colorPicker": "Farbauswahl",
+    "paletteNotice": "Eine neue Farbe wird zur Palette hinzugefügt. Das Filament ändert sich erst beim Speichern oder Übernehmen des Entwurfs.",
+    "useSwatch": "Farbe verwenden",
+    "noChange": "Aktuelle Farbe behalten",
+    "unchanged": "Aktuelle Farbe unverändert.",
+    "draftSelected": "Farbe für diesen Entwurf ausgewählt. Filament prüfen und speichern oder in den Editor übernehmen.",
+    "choiceChanged": "Die Farbe wurde geändert. Farbauswahl neu laden und erneut prüfen.",
     "title": "Farbabgleich",
     "current": "Gespeicherte Farbe",
     "reference": "Normvorschau",
@@ -58,6 +68,8 @@
     "loadFailed": "Die Farben konnten nicht geladen werden."
   },
   "filaBrain": {
+    "createManufacturer": "Hersteller erstellen",
+    "navResearch": "Recherche",
     "discoveryQueryLimit": "Beschreibungen oder SKUs dürfen höchstens 400 Zeichen lang sein. Produktlinks dürfen bis zu 2048 Zeichen lang sein.",
     "sourceProductCode": "Produktcode der Quelle: {code}",
     "discoveryQuery": "SKU, Produktlink oder Beschreibung",

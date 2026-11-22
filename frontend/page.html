@@ -63,6 +63,7 @@
                     <label for="draft-manufacturer" data-i18n="filaBrain.manufacturer">Manufacturer</label>
                     <input id="draft-manufacturer" list="draft-manufacturer-options" autocomplete="off" maxlength="255" placeholder="Choose a manufacturer" data-i18n-placeholder="filaBrain.chooseManufacturer">
                     <datalist id="draft-manufacturer-options"></datalist>
+                    <button id="create-draft-manufacturer" type="button" class="fm-btn fm-btn-outline" data-i18n="filaBrain.createManufacturer" hidden>Create manufacturer</button>
                   </div>
                   <label><span data-i18n="filaBrain.designation">Product name</span><input name="designation" maxlength="255"></label>
                   <label><span data-i18n="filaBrain.color">Color name</span><input name="manufacturer_color_name" maxlength="255"></label>
@@ -74,7 +75,7 @@
                 <div class="field-grid">
                   <label><span data-i18n="filaBrain.material">Material</span><input name="material_type" maxlength="50"></label>
                   <label><span data-i18n="filaBrain.diameter">Diameter (mm)</span><input name="diameter_mm" type="number" step="any" min="0.01"></label>
-                  <div class="form-field"><label for="draft-palette">FilaMan palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select></div>
+                  <div class="form-field"><label for="draft-palette">FilaMan palette color</label><select name="color_id" id="draft-palette"><option value="">Choose a palette color</option></select><button type="button" id="create-draft-color" class="fm-btn fm-btn-outline" data-i18n="swatchReview.create" hidden>Create swatch</button></div>
                   <label>Manufacturer SKU<input name="manufacturer_sku" maxlength="255"></label>
                   <label id="research-sku-hint">SKU to look up<input name="sku_hint" maxlength="255"></label>
                 </div>
@@ -101,6 +102,27 @@
         </div>
       </section>
     </div>
+    <dialog id="create-confirm" aria-labelledby="create-heading">
+      <h2 id="create-heading">Confirm new filament</h2>
+      <dl id="create-preview"></dl>
+      <div class="actions">
+        <button type="button" class="fm-btn fm-btn-outline" id="create-cancel" autofocus>Cancel</button>
+        <button type="button" class="fm-btn fm-btn-primary" id="create-filament">Create filament</button>
+      </div>
+      <p id="create-message" role="status"></p>
+    </dialog>
+
+<dialog id="draft-color-dialog" aria-labelledby="draft-color-title">
+  <form id="draft-color-form">
+    <h2 id="draft-color-title" data-i18n="swatchReview.create">Create swatch</h2>
+    <label><span data-i18n="swatchReview.colorName">Color name</span><input name="color_name" maxlength="100" required></label>
+    <label><span data-i18n="swatchReview.colorHex">Color hex</span><input name="color_hex" pattern="#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?" maxlength="9" value="#808080" required></label>
+    <input name="color_picker" type="color" value="#808080" aria-label="Color picker" data-i18n-aria-label="swatchReview.colorPicker">
+    <p class="research-note" data-i18n="swatchReview.paletteNotice">Creating a swatch adds it to your palette. The filament changes only when you save or stage the draft.</p>
+    <p data-color-message role="status"></p>
+    <div class="fm-modal-actions"><button type="button" data-color-cancel class="fm-btn fm-btn-outline" data-i18n="common.cancel">Cancel</button><button type="submit" class="fm-btn fm-btn-primary" data-i18n="swatchReview.create">Create swatch</button></div>
+  </form>
+</dialog>
   </section>
   <section data-view="spool" hidden>
     <section class="fm-card fm-section" aria-labelledby="spool-intake-heading">
@@ -167,17 +189,10 @@
   </section>
   <section data-view="batches" hidden><!-- batches --></section>
   <section data-view="settings" hidden><!-- settings --></section>
-    <dialog id="create-confirm" aria-labelledby="create-heading">
-      <h2 id="create-heading">Confirm new filament</h2>
-      <dl id="create-preview"></dl>
-      <div class="actions">
-        <button type="button" class="fm-btn fm-btn-outline" id="create-cancel" autofocus>Cancel</button>
-        <button type="button" class="fm-btn fm-btn-primary" id="create-filament">Create filament</button>
-      </div>
-      <p id="create-message" role="status"></p>
-    </dialog>
   <!-- docs -->
 </main>
+
+
 <script><!-- script --></script>
 </body>
 </html>

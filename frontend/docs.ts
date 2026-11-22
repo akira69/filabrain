@@ -1,4 +1,4 @@
-export function mountDocs(editor: boolean) {
+export function mountDocs() {
   const panel = document.querySelector<HTMLDialogElement>('#filabrain-docs')!
   const buttons = document.querySelectorAll<HTMLButtonElement>('[data-open-docs]')
   const compactWorkspace = matchMedia('(width < 96rem)')
@@ -19,7 +19,7 @@ export function mountDocs(editor: boolean) {
   }
 
   for (const button of buttons) {
-    button.hidden = (button.dataset.openDocs === 'editor') !== editor
+    button.hidden = false
     button.addEventListener('click', () => {
       if (panel.open) {
         panel.close()

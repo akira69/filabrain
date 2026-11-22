@@ -24,6 +24,8 @@ export type Status = {
   can_read_printers?: boolean
   can_update: boolean
   can_update_manufacturer?: boolean
+  can_create_manufacturer?: boolean
+  can_create_color?: boolean
   can_configure: boolean
 }
 
@@ -297,6 +299,20 @@ function mountLibrary(context?: SelectionContext) {
   updateSelection()
 }
 
+function scopeResearchIds(root: HTMLElement, prefix: string) {
+  const nodes = [root, ...root.querySelectorAll<HTMLElement>('*')]
+  const ids = new Map<string, string>()
+  for (const node of nodes) if (node.id) {
+    node.dataset.researchId = node.dataset.researchId || node.id
+    ids.set(node.id, prefix + node.id)
+    node.id = ids.get(node.id)!
+  }
+  for (const node of nodes) for (const attribute of ['for', 'aria-labelledby', 'aria-describedby', 'aria-controls']) {
+    const value = node.getAttribute(attribute)
+    if (value) node.setAttribute(attribute, value.split(' ').map(id => ids.get(id) ?? id).join(' '))
+  }
+}
+
 async function main() {
   await initI18n()
   const chatTemplate = document.querySelector<HTMLElement>('[data-view="chat"] .research-chat')!.cloneNode(true) as HTMLElement
@@ -331,51 +347,33 @@ async function main() {
       message.textContent = 'FilaBrain is disabled.'
       return
     }
-    const setGuide = mountDocs(hostMode === 'editor')
+    const setGuide = mountDocs()
+    let editorContext: EditorContext | undefined
     if (hostMode === 'editor' || hostMode === 'selection') {
       const context = await hostRequest<EditorContext | SelectionContext>('filaman:filament-context')
       if (hostMode === 'editor' && (context.mode === 'create' || context.mode === 'edit')) {
         if (context.mode === 'create' ? !status.can_create : !status.can_update) throw new Error('Filament access is required.')
-        element('plugin-header').hidden = true
-        const chatView = document.querySelector<HTMLElement>('[data-view="chat"]')!
-        const settingsView = document.querySelector<HTMLElement>('[data-view="settings"]')!
-        const settingsButton = chatView.querySelector<HTMLButtonElement>('[data-editor-settings]')!
-        const back = element<HTMLButtonElement>('settings-back-to-chat')
-        let settingsMounted = false
-        function showChat() {
-          settingsView.hidden = true
-          chatView.hidden = false
-          setGuide('editor')
+        editorContext = context
+        const source = document.querySelector<HTMLElement>('[data-view="new"]')!
+        const view = source.cloneNode(true) as HTMLElement
+        view.dataset.view = 'editor'
+        scopeResearchIds(view, 'editor-')
+        view.querySelector('[data-research-id="research-heading"]')!.parentElement!.classList.add('workspace-title-only')
+        source.before(view)
+        const researchTab = document.querySelector<HTMLButtonElement>('[data-tab="new"]')!.cloneNode(true) as HTMLButtonElement
+        researchTab.dataset.tab = 'editor'
+        for (const label of researchTab.querySelectorAll<HTMLElement>('span')) {
+          label.dataset.i18n = 'filaBrain.navResearch'
+          label.textContent = t('filaBrain.navResearch')
         }
-        function openEditorSettings() {
-          chat.saveDraft()
-          chatView.hidden = true
-          settingsView.hidden = false
-          setGuide('settings')
-          back.focus()
-          if (status.can_configure && !settingsMounted) {
-            settingsMounted = true
-            void mountSettings()
-          }
-        }
-        settingsButton.hidden = !status.can_configure
-        settingsButton.addEventListener('click', openEditorSettings)
-        back.parentElement!.hidden = false
-        setGuide('editor')
-        back.addEventListener('click', () => {
-          showChat()
-          settingsButton.focus()
-        })
-        const chat = mountChat(status, status.can_configure ? openEditorSettings : undefined,
-          context.filament_id ? 'editor:' + context.filament_id : '')
-        mountResearch(status, chat, showChat, context)
+        document.querySelector('[data-tab="new"]')!.before(researchTab)
       } else if (hostMode === 'selection' && context.mode === 'selection' && status.can_update) {
         element('plugin-header').hidden = true
         document.querySelector<HTMLElement>('[data-view="library"]')!.hidden = false
         mountLibrary(context)
+        message.textContent = ''
+        return
       } else throw new Error('This FilaMan selection is unavailable.')
-      message.textContent = ''
-      return
     }
     document.addEventListener('filaman:model-change', event => {
       const detail = (event as CustomEvent<Status>).detail
@@ -387,45 +385,39 @@ async function main() {
     const header = element('plugin-header')
     const nav = header.querySelector('nav')!
     let chat: ReturnType<typeof mountChat> | undefined
-    let researchChat: ReturnType<typeof mountChat> | undefined
-    let startResearch: ReturnType<typeof mountResearch> | undefined
+    const researchViews = new Map<string, { chat: ReturnType<typeof mountChat>; start: ReturnType<typeof mountResearch> }>()
     let stopSpoolIntake: (() => void) | undefined
     function openConversation() {
       const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
       view.hidden = false
       if (!chat) {
         chat = mountChat(status, status.can_configure ? openSettings : undefined, undefined, false,
-          { root: view, openResearch: status.can_create ? () => show('new') : undefined })
+          { root: view, openResearch: status.can_create ? () => show('new') : undefined,
+            context: editorContext?.filament_id ? { filament_id: editorContext.filament_id } : undefined })
         workspace.attachChat('chat', view)
       }
     }
-    function openResearch() {
-      const view = document.querySelector<HTMLElement>('[data-view="new"]')!
+    function openResearch(tab = 'new') {
+      const view = document.querySelector<HTMLElement>(`[data-view="${tab}"]`)!
+      const context = tab === 'editor' ? editorContext : undefined
       view.hidden = false
-      if (!researchChat) {
+      if (!researchViews.has(tab)) {
         const clone = chatTemplate.cloneNode(true) as HTMLElement
-        const ids = new Map<string, string>()
-        for (const element of clone.querySelectorAll<HTMLElement>('[id]')) {
-          ids.set(element.id, 'research-chat-' + element.id)
-          element.id = ids.get(element.id)!
-        }
-        for (const element of clone.querySelectorAll<HTMLElement>('*')) {
-          for (const attribute of ['for', 'aria-labelledby', 'aria-describedby', 'aria-controls']) {
-            const value = element.getAttribute(attribute)
-            if (value) element.setAttribute(attribute, value.split(' ').map(id => ids.get(id) ?? id).join(' '))
-          }
-        }
-        clone.setAttribute('aria-labelledby', ids.get('research-chat-title')!)
-        clone.querySelector('form')!.id = 'filabrain-research-chat-form'
+        scopeResearchIds(clone, tab + '-chat-')
+        clone.querySelector('form')!.id = 'filabrain-' + tab + '-chat-form'
         view.append(clone)
-        researchChat = mountChat(status, status.can_configure ? openSettings : undefined, undefined, true, { root: view })
-        startResearch = mountResearch(status, researchChat, () => setGuide('new'))
-        workspace.attachChat('new', view)
+        const chat = mountChat(status, status.can_configure ? openSettings : undefined,
+          context ? context.filament_id ? 'editor:' + context.filament_id : '' : undefined, true, { root: view })
+        const start = mountResearch(status, chat, () => setGuide(tab), context, view)
+        researchViews.set(tab, { chat, start })
+        workspace.attachChat(tab, view)
       }
+      return researchViews.get(tab)!
     }
     const mount: Record<string, (() => void) | false> = {
       chat: status.can_chat && (() => { openConversation(); chat?.showChat() }),
-      new: status.can_create && (() => { openResearch(); startResearch?.() }),
+      new: status.can_create && (() => { openResearch().start() }),
+      editor: !!editorContext && (() => { openResearch('editor').start() }),
       spool: !!status.can_add_spool && (() => {
         const researchFromSpool = status.can_create ? (input: SpoolResearchInput) => {
           show('new', input)
@@ -455,14 +447,13 @@ async function main() {
       }
       setGuide(tab)
       chat?.saveDraft()
-      researchChat?.saveDraft()
+      for (const research of researchViews.values()) research.chat.saveDraft()
       workspace.select(tab)
       const activeView = tab
       for (const view of document.querySelectorAll<HTMLElement>('[data-view]')) view.hidden = view.dataset.view !== activeView
       if (tab === 'new' && spoolInput) {
-        openResearch()
-        startResearch?.(spoolInput)
-      } else if (tab === 'chat' || tab === 'new') {
+        openResearch().start(spoolInput)
+      } else if (tab === 'chat' || tab === 'new' || tab === 'editor') {
         run()
       } else if (!visited.has(tab)) {
         visited.add(tab)
@@ -491,7 +482,7 @@ async function main() {
     message.textContent = ''
     document.addEventListener('filabrain:chat-mode', event => {
       const researching = (event as CustomEvent<boolean>).detail
-      const tab = researching ? 'new' : status.can_chat ? 'chat' : 'new'
+      const tab = researching ? (event.target instanceof HTMLElement ? event.target.dataset.view : undefined) || 'new' : status.can_chat ? 'chat' : 'new'
       for (const button of buttons) {
         if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
         else button.removeAttribute('aria-current')
@@ -499,7 +490,7 @@ async function main() {
       workspace.select(tab)
       setGuide(tab)
     })
-    const tab = params.get('tab') || available
+    const tab = params.get('tab') || (editorContext ? 'editor' : available)
     show(Object.hasOwn(mount, tab) && mount[tab] ? tab : available)
     if (mount.batches && tab !== 'batches') {
       const runsButton = nav.querySelector<HTMLButtonElement>('[data-tab="batches"]')!

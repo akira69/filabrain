@@ -27,7 +27,7 @@
 :root[data-workspace-tabs] [data-view]:not([hidden]) > .fm-card { border-top-left-radius: 0; }
 :root[data-workspace-tabs] .research-chat { grid-template-rows: minmax(0, 1fr) auto; }
 .workspace-title-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
-:root[data-workspace-tabs] [data-view=new] #research-inputs { border: 0; background: transparent; }
+:root[data-workspace-tabs] :is([data-view=new], [data-view=editor]) .research-inputs { border: 0; background: transparent; }
 .research-scroll:empty { display: none; }
 @media (max-width: 800px) {
   .workspace-tabs { flex-wrap: wrap; gap: 0; }
@@ -40,5 +40,5 @@
   }
   .workspace-tabs .chat-history { max-width: min(22rem, calc(100% - 3.5rem)); }
   :root[data-workspace-tabs] [data-view=chat] .research-chat,
-  :root[data-workspace-tabs] [data-view=new] .research-chat { border-top: 0; border-radius: 0 0 .65rem .65rem; }
+  :root[data-workspace-tabs] :is([data-view=new], [data-view=editor]) .research-chat { border-top: 0; border-radius: 0 0 .65rem .65rem; }
 }
