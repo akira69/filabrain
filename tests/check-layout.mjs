@@ -17,10 +17,24 @@ try {
     if (path === '/filament-picker/') return route.fulfill({ contentType: 'text/html', body: `<!doctype html>
       <html data-theme="dark"><head><style>
         :root { --bg-elevated: #1b2c24; --gradient-hero: linear-gradient(red, blue); }
-        body { margin: 0; } .fm-page { background: var(--gradient-hero); }
+        body { margin: 0; } .fm-page { background: var(--gradient-hero); min-height: 100vh; }
+        .fm-main { height: 100vh; overflow: auto; }
+        .fm-inventory-table { overflow: auto; }
+        table { border-collapse: collapse; width: 100%; } th, td { height: 48px; }
+        .fm-header-filter-panel-color { display: none; position: fixed; top: 10px; left: 10px; background: white; }
+        .fm-header-filter-panel-color.open { display: block; }
       </style></head><body data-embedded><div id="fm-page" class="fm-page">
-        <div data-filament-picker="1">Filament selection</div>
-      </div></body></html>` })
+        <main class="fm-main"><div class="filter-bar">Search filaments</div>
+          <div class="fm-inventory-table" data-filament-picker="1"><table class="fm-table"><thead><tr>
+            <th class="col-colors" style="position: relative"><button class="fm-header-filter-trigger" aria-expanded="false">Colors</button></th>
+          </tr></thead><tbody>${Array.from({length: 36}, (_, i) => `<tr><td>Filament ${i + 1}</td></tr>`).join('')}</tbody></table></div>
+          <div class="fm-inventory-more">Load more</div>
+        </main></div>
+        <div class="fm-header-filter-panel-color"><input aria-label="Search colors"></div>
+        <script>
+          const trigger = document.querySelector('.fm-header-filter-trigger'), panel = document.querySelector('.fm-header-filter-panel-color');
+          trigger.onclick = () => { const open = panel.classList.toggle('open'); trigger.setAttribute('aria-expanded', String(open)); if (open) panel.querySelector('input').focus(); };
+        </script></body></html>` })
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: true, can_create: true,
       can_add_spool: true, can_update: true, can_configure: true, chat_model: endpoint.model_id, chat_endpoint_id: endpoint.id } })
     if (path.endsWith('/settings')) return route.fulfill({ json: { model_endpoints: [endpoint], default_endpoint_id: endpoint.id,
@@ -143,6 +157,40 @@ try {
   await picker.locator('[data-filament-picker]').waitFor()
   assert.equal(await picker.locator('#fm-page').evaluate(el => getComputedStyle(el).backgroundImage), 'none')
   assert.equal(await picker.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(27, 44, 36)')
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({ width, height: 800 })
+    const before = await picker.locator('#fm-page').boundingBox()
+    await picker.getByRole('button', { name: 'Colors', exact: true }).click()
+    await picker.getByRole('button', { name: 'Close', exact: true }).waitFor()
+    const after = await picker.locator('#fm-page').boundingBox()
+    for (const key of ['x', 'y', 'width', 'height']) {
+      assert.ok(Math.abs(before[key] - after[key]) < 1, `opening colors keeps the table ${key} unchanged at ${width}px`)
+    }
+    assert.equal(await picker.locator('html').evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)', 'only the color panel overlays FilaBrain')
+    await screenshot(`library-colors-${width}`)
+    await picker.getByRole('button', { name: 'Close', exact: true }).click()
+    assert.equal(await page.locator('#library-picker[data-color-overlay]').count(), 0)
+    assert.ok(await picker.getByRole('button', { name: 'Colors', exact: true }).evaluate(el => el === document.activeElement))
+    const table = picker.locator('.fm-inventory-table')
+    const mainBounds = await picker.locator('.fm-main').boundingBox()
+    const tableBounds = await table.boundingBox()
+    assert.ok(tableBounds.x - mainBounds.x >= 4, 'table has a small left inset')
+    assert.ok(mainBounds.x + mainBounds.width - tableBounds.x - tableBounds.width >= 4, 'table has a small right inset')
+    const headerY = (await picker.locator('thead th').boundingBox()).y
+    await table.evaluate(el => { el.scrollTop = 300 })
+    assert.ok(await table.evaluate(el => el.scrollTop) > 0, 'table rows scroll vertically')
+    assert.ok(Math.abs((await picker.locator('thead th').boundingBox()).y - headerY) < 1, 'headers remain visible when rows scroll')
+    await table.evaluate(el => { el.scrollTop = 0 })
+    await picker.getByRole('button', { name: 'Colors', exact: true }).click()
+    await picker.getByRole('button', { name: 'Close', exact: true }).waitFor()
+    await page.keyboard.press('Escape')
+    await page.locator('#library-picker:not([data-color-overlay])').waitFor()
+    await picker.getByRole('button', { name: 'Colors', exact: true }).click()
+    await picker.getByRole('button', { name: 'Close', exact: true }).waitFor()
+    await page.setViewportSize({ width: width + 1, height: 800 })
+    await page.locator('#library-picker:not([data-color-overlay])').waitFor()
+    await noOverflow()
+  }
   await screenshot('library-1280')
   const touch = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   await touch.route(origin + '/**', fixture)

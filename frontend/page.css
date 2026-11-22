@@ -166,7 +166,7 @@ main:has(> [data-view="library"]:not([hidden]) #library-picker:not([hidden])) {
 .library-toolbar p { margin: 0; }
 #library-picker { display: block; width: 100%; flex: 1; height: 16rem; min-height: 16rem; border: 0; }
 #library-picker[data-color-overlay] {
-  position: fixed; inset: 0; width: 100%; height: 100dvh; min-height: 0; z-index: 3; background: var(--bg);
+  position: fixed; inset: 0; width: 100%; height: 100dvh; min-height: 0; z-index: 3; background: transparent;
 }
 #library-research, .library-mode {
   display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .65rem; margin: 0; font-size: .8125rem;

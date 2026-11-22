@@ -163,10 +163,24 @@ function mountLibrary(context?: SelectionContext) {
     const libraryToolbar = picker.parentElement!.querySelector<HTMLElement>('.library-toolbar')!
     const outsidePicker = [element('plugin-header'), libraryToolbar, element('filabrain-docs')]
     function setColorOverlay(open: boolean) {
+      const root = picker.contentDocument?.documentElement
+      if (open && !picker.hasAttribute('data-color-overlay') && root) {
+        const rect = picker.getBoundingClientRect()
+        for (const key of ['left', 'top', 'width', 'height'] as const) {
+          root.style.setProperty(`--filabrain-picker-${key}`, `${rect[key]}px`)
+        }
+      }
+      root?.toggleAttribute('data-filabrain-color-overlay', open)
       picker.toggleAttribute('data-color-overlay', open)
       for (const node of outsidePicker) node.inert = open
     }
     let colorObserver: MutationObserver | undefined
+    let viewportWidth = window.innerWidth
+    window.addEventListener('resize', () => {
+      if (viewportWidth === window.innerWidth) return
+      viewportWidth = window.innerWidth
+      picker.contentDocument?.querySelector<HTMLButtonElement>('th.col-colors .fm-header-filter-trigger[aria-expanded="true"]')?.click()
+    })
     picker.addEventListener('load', () => {
       colorObserver?.disconnect()
       setColorOverlay(false)
@@ -174,8 +188,26 @@ function mountLibrary(context?: SelectionContext) {
         message.textContent = ''
         const doc = picker.contentDocument
         const surface = doc.createElement('style')
-        surface.textContent = 'html, body, #fm-page { background: var(--bg-elevated); }'
+        surface.textContent = `
+          html, body, #fm-page { background: var(--bg-elevated); }
+          html, body { height: 100%; overflow: hidden; }
+          #fm-page { height: 100%; min-height: 0; }
+          #fm-page > .fm-main { box-sizing: border-box; height: 100%; min-height: 0;
+            display: flex; flex-direction: column; overflow: hidden; padding: 0 6px !important; }
+          .fm-main > :not(.fm-inventory-table) { flex-shrink: 0; }
+          .fm-inventory-table { flex: 1; min-height: 0; overflow: auto; margin-bottom: 4px; }
+          /* Column resizing sets position inline; vertical header locking must take precedence. */
+          .fm-inventory-table .fm-table th { position: sticky !important; top: 0; z-index: 4; background: var(--bg-soft); }
+          .fm-inventory-table .fm-table th[data-column-pin] { z-index: 5; }
+          html[data-filabrain-color-overlay], html[data-filabrain-color-overlay] body { background: transparent; }
+          html[data-filabrain-color-overlay] #fm-page { position: absolute;
+            left: var(--filabrain-picker-left); top: var(--filabrain-picker-top);
+            width: var(--filabrain-picker-width); height: var(--filabrain-picker-height); }
+        `
         doc.head.append(surface)
+        const table = doc.querySelector('.fm-inventory-table')
+        const more = doc.querySelector('.fm-inventory-more')
+        if (table && more) table.append(more)
         const count = doc.getElementById('picker-selection-count')
         if (count) count.hidden = true
         picker.hidden = false
