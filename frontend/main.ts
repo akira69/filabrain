@@ -7,6 +7,7 @@ import { mountResearch, type EditorContext, type SelectionContext } from './rese
 import { ApiError, api } from './shared/api'
 import { batchHref, createResearchBatch, listResearchRuns, mountResearchBatches, type BatchMode, type ExpectedFilament } from './shared/filabrain-batches'
 import { initI18n, t } from './shared/i18n'
+import { mountTheme } from './theme'
 
 export type Status = {
   enabled: boolean
@@ -314,6 +315,7 @@ function scopeResearchIds(root: HTMLElement, prefix: string) {
 }
 
 async function main() {
+  mountTheme()
   await initI18n()
   const chatTemplate = document.querySelector<HTMLElement>('[data-view="chat"] .research-chat')!.cloneNode(true) as HTMLElement
   for (const [headingId, selector] of [
@@ -331,9 +333,6 @@ async function main() {
       heading.style.setProperty('--heading-icon', `url("data:image/svg+xml,${encodeURIComponent(svg.outerHTML)}")`)
     }
   }
-  const theme = () => { document.documentElement.dataset.theme = localStorage.getItem('theme') || 'brand' }
-  theme()
-  window.addEventListener('storage', event => { if (event.key === 'theme') theme() })
   const params = new URLSearchParams(location.search)
   const id = params.get('id')
   const hostMode = window.parent === window ? null : params.get('filament_host')

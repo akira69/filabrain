@@ -94,7 +94,7 @@
     width: 9%;
     height: 7%;
     border-radius: 50%;
-    background: radial-gradient(ellipse, #44ffd39c, transparent 72%);
+    background: radial-gradient(ellipse, color-mix(in srgb, var(--accent) 61%, transparent), transparent 72%);
     pointer-events: none;
     animation: docs-link-pulse 2.6s ease-in-out 2;
   }
