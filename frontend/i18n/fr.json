@@ -58,6 +58,16 @@
     "loadFailed": "Impossible de charger les couleurs."
   },
   "filaBrain": {
+    "discoveryQueryLimit": "Limitez les descriptions et SKU à 400 caractères. Les liens produit peuvent contenir jusqu’à 2048 caractères.",
+    "sourceProductCode": "Code produit de la source : {code}",
+    "discoveryQuery": "SKU, lien produit ou description",
+    "discoveryPlaceholder": "Collez un SKU, un lien produit ou les détails connus — ex. Paramount 3D PLA violet",
+    "discoveryDetails": "Détails",
+    "match_sku_exact": "SKU identique",
+    "match_sku_format": "Format de SKU similaire — vérifiez la variante",
+    "match_similar_sku": "SKU similaire — vérifiez la variante",
+    "match_search": "Résultat possible — vérifiez le produit",
+    "search_incomplete": "Certaines sources n’ont pas pu être consultées. Réessayez ou ajoutez un lien produit.",
     "supplier_rate_limited": "Le fournisseur limite les requêtes : {name}. Réessayez plus tard ou utilisez une autre source.",
     "draftInvalidReferences": "Choisissez un fabricant et une couleur de palette déjà disponibles dans FilaMan.",
     "draftRequiredFields": "Choisissez ou saisissez le fabricant, le nom du produit, le matériau et le diamètre avant d’enregistrer.",

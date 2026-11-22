@@ -265,3 +265,9 @@ main:has([data-tab="new"][aria-current]) .message-composer:has(textarea:disabled
 .chat-history summary [data-chat-title] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-history summary svg { flex: none; }
 .chat-history[open] summary svg { transform: rotate(180deg); }
+
+#research-query { width: 100%; min-height: 3rem; font-size: 1rem; }
+.research-candidate { margin-block: .55rem; padding: .75rem; border: 1px solid var(--border); border-radius: .5rem; overflow-wrap: anywhere; }
+.research-candidate h3 { margin: 0 0 .3rem; font-size: 1rem; }
+.research-candidate p { margin-block: .25rem; }
+.research-candidate .research-match-actions { margin-block-start: .5rem; }

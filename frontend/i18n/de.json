@@ -58,6 +58,16 @@
     "loadFailed": "Die Farben konnten nicht geladen werden."
   },
   "filaBrain": {
+    "discoveryQueryLimit": "Beschreibungen oder SKUs dürfen höchstens 400 Zeichen lang sein. Produktlinks dürfen bis zu 2048 Zeichen lang sein.",
+    "sourceProductCode": "Produktcode der Quelle: {code}",
+    "discoveryQuery": "SKU, Produktlink oder Beschreibung",
+    "discoveryPlaceholder": "SKU, Produktlink oder bekannte Angaben einfügen — z. B. Paramount 3D PLA lila",
+    "discoveryDetails": "Details",
+    "match_sku_exact": "Exakte SKU-Übereinstimmung",
+    "match_sku_format": "Ähnliches SKU-Format — Variante prüfen",
+    "match_similar_sku": "Ähnliche SKU — Variante prüfen",
+    "match_search": "Möglicher Treffer — Produkt prüfen",
+    "search_incomplete": "Einige Quellen konnten nicht durchsucht werden. Erneut versuchen oder einen Produktlink ergänzen.",
     "supplier_rate_limited": "Der Anbieter begrenzt Anfragen: {name}. Versuche es später erneut oder nutze eine andere Quelle.",
     "draftInvalidReferences": "Wähle einen in FilaMan vorhandenen Hersteller und eine Farbe aus der Palette.",
     "draftRequiredFields": "Wähle oder ergänze vor dem Speichern Hersteller, Produktname, Material und Durchmesser.",

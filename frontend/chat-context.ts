@@ -22,7 +22,6 @@ export function mountChatContext(form: HTMLFormElement, capabilities: Capabiliti
   status.after(suggestion)
   let printers: Printer[] = []
   let initialFilaments: Filament[] = []
-  let displayPrinters: DisplayPrinter[] = []
   let printerTouched = false
   let revision = 0
   let timer = 0
@@ -55,19 +54,22 @@ export function mountChatContext(form: HTMLFormElement, capabilities: Capabiliti
     clearSuggestion()
     if (!enabled || !capabilities.can_read_printers || !capabilities.can_read_spools || !capabilities.can_read_display) return
     const selected = printer.value
-    const state = displayPrinters.find(item => String(item.id) === selected)
-    if (state?.connected !== true || !Array.isArray(state.ams)) return
-    const slots = state.ams.flatMap(unit => Array.isArray(unit.slots)
-      ? unit.slots.map(slot => ({ ...slot, ams_id: unit.ams_id })) : [])
-    const active = slots.filter(slot => slot.active && !slot.empty)
-    // Two loaded hotends can refer to different materials even while one is feeding.
-    if (active.length !== 1 || new Set(slots.filter(slot => !slot.empty && slot.extruder).map(slot => slot.extruder)).size > 1) return
-    const loaded = active[0]
-    if (!Number.isInteger(loaded.spool_id) || !loaded.spool_id || loaded.spool_id < 1) return
-    if (state.active && (state.active.ams_id !== loaded.ams_id || state.active.slot !== loaded.slot)) return
+    if (!selected) return
     const generation = revision
     const controller = spool = new AbortController()
     try {
+      const display = await api.get<{ printers: DisplayPrinter[] }>('/display?fields=slots', { signal: controller.signal, cache: 'no-store' })
+      if (controller.signal.aborted || generation !== revision || printer.value !== selected) return
+      const state = display.printers?.find(item => String(item.id) === selected)
+      if (state?.connected !== true || !Array.isArray(state.ams)) return
+      const slots = state.ams.flatMap(unit => Array.isArray(unit.slots)
+        ? unit.slots.map(slot => ({ ...slot, ams_id: unit.ams_id })) : [])
+      const active = slots.filter(slot => slot.active && !slot.empty)
+      // Two loaded hotends can refer to different materials even while one is feeding.
+      if (active.length !== 1 || new Set(slots.filter(slot => !slot.empty && slot.extruder).map(slot => slot.extruder)).size > 1) return
+      const loaded = active[0]
+      if (!Number.isInteger(loaded.spool_id) || !loaded.spool_id || loaded.spool_id < 1) return
+      if (state.active && (state.active.ams_id !== loaded.ams_id || state.active.slot !== loaded.slot)) return
       const item = await api.get<{ filament_id: number; filament?: Filament }>(`/spools/${loaded.spool_id}`, { signal: controller.signal, cache: 'no-store' })
       if (controller.signal.aborted || generation !== revision || printer.value !== selected || !item.filament || item.filament.id !== item.filament_id) return
       const note = document.createElement('span')
@@ -106,12 +108,9 @@ export function mountChatContext(form: HTMLFormElement, capabilities: Capabiliti
       if (!search.value) setFilaments(items)
     }).catch(() => { status.textContent = t('filaBrain.chatContextUnavailable') }),
   ]).then(() => {}) : Promise.resolve()
-  if (enabled && capabilities.can_read_printers && capabilities.can_read_display && capabilities.can_read_spools) {
-    void api.get<{ printers: DisplayPrinter[] }>('/display?fields=slots', { cache: 'no-store' }).then(data => {
-      displayPrinters = Array.isArray(data.printers) ? data.printers : []
-      void suggest()
-    }).catch(() => {})
-  }
+  panel.addEventListener('toggle', () => {
+    if (panel.open) void suggest()
+  })
   printer.addEventListener('change', () => {
     printerTouched = true
     cancel()

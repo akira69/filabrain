@@ -53,6 +53,7 @@ from .spool_profiles import (
 from .weights import grams_from_match
 
 router = APIRouter(tags=["FilaBrain"])
+INTERACTIVE_RESEARCH_SECONDS = 100
 PLUGIN_KEY = "filabrain"
 CHAT_PAGES = {
     "new_filament": ("/filaments/new", "filaments:create"),
@@ -70,6 +71,7 @@ DraftId = Annotated[str, Path(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9
 
 
 class ProposalRequest(BaseModel):
+    query: Annotated[str, Field(max_length=400)] = ""
     mode: Literal["create", "edit"]
     filament_id: Annotated[int, Field(gt=0)] | None = None
     identity: Identity | None = None
@@ -388,7 +390,7 @@ async def get_edit_filament(db: DBSession, filament_id: int) -> Filament:
     return filament
 
 
-async def research(db: DBSession, data: ProposalRequest, *, deadline: float | None = None) -> dict:
+async def research(db: DBSession, data: ProposalRequest, *, deadline: float | None = None, release_read: bool = True) -> dict:
     filament = None
     if data.mode == "edit":
         if data.filament_id is None:
@@ -404,12 +406,15 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
     else:
         if data.filament_id is not None:
             raise HTTPException(422, "A new draft cannot target an existing filament")
+        if data.action != "fill":
+            raise HTTPException(422, "Standardization requires an existing filament")
         identity = data.identity or Identity()
         if not (
             identity.designation.strip()
             or identity.sku.strip()
             or data.product_url
             or data.sku_hint.strip()
+            or data.query.strip()
         ):
             raise HTTPException(422, "Enter a product name, SKU or URL")
 
@@ -452,23 +457,26 @@ async def research(db: DBSession, data: ProposalRequest, *, deadline: float | No
             "target": target, "suggestions": [], "issues": issues,
             "spool_profiles": lookup["spool_profiles"], "spool_reply": lookup["reply"],
         }
+    if filament is None and not data.product_url and (data.query.strip() or (
+        not identity.designation.strip() and (identity.sku.strip() or sku_hint)
+    )) and not data.spool_lookup:
+        from .discovery import discover_products
+        return {"target": target, **await discover_products(db, identity, data.query, sku_hint, data.guidance)}
     if filament is None:
-        if data.action != "fill":
-            raise HTTPException(422, "Standardization requires an existing filament")
         return {
             "target": target,
             **await research_products(
                 db, identity, product_url=data.product_url, reference_url=data.reference_url, sku_hint=sku_hint,
                 palette=palette, guidance=data.guidance, model_id=data.model_id, endpoint_id=data.endpoint_id,
                 deadline=deadline,
-                release_read=deadline is not None,
+                release_read=release_read and deadline is not None,
             ),
         }
     snapshot = filament_snapshot(filament)
     result = await batch_proposal(
         db, snapshot, data.action,
         sku_hint=data.sku_hint, product_url=data.product_url, reference_url=data.reference_url, guidance=data.guidance,
-        release_read=deadline is not None, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
+        release_read=release_read and deadline is not None, model_id=data.model_id, endpoint_id=data.endpoint_id, deadline=deadline,
     )
     if data.action == "standardize":
         return {
@@ -505,7 +513,7 @@ async def research_proposal(
     await ensure_any_permission(
         db, principal, "filaments:update" if data.mode == "edit" else "filaments:create"
     )
-    return await research(db, data)
+    return await research(db, data, deadline=asyncio.get_running_loop().time() + INTERACTIVE_RESEARCH_SECONDS, release_read=False)
 
 
 @router.post("/saved-filaments/{draft_id}")

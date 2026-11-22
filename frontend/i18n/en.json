@@ -58,6 +58,16 @@
     "loadFailed": "Could not load swatches."
   },
   "filaBrain": {
+    "discoveryQueryLimit": "Use at most 400 characters for a description or SKU. Product links may be up to 2048 characters.",
+    "sourceProductCode": "Source product code: {code}",
+    "discoveryQuery": "SKU, product link, or description",
+    "discoveryPlaceholder": "Paste an SKU, product link, or what you know — e.g. Paramount 3D PLA purple",
+    "discoveryDetails": "Details",
+    "match_sku_exact": "Exact SKU match",
+    "match_sku_format": "SKU format match — check the variant",
+    "match_similar_sku": "Similar SKU — check the variant",
+    "match_search": "Possible match — check the product",
+    "search_incomplete": "Some sources could not be searched. Try again or add a product link.",
     "chatWebSearch": "Search the web",
     "searchSetupGuide": "Setup guide",
     "autoLiveSourcesSetup": "Set up SearXNG to enable automatic checks.",

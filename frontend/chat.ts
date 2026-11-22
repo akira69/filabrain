@@ -447,11 +447,11 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   function mergeConversation(local: Conversation, stored: Conversation): Conversation {
     const localDraftSaved = local.research && hasReceipt(stored, local.research.saveId ?? local.id)
     const storedDraftSaved = stored.research && hasReceipt(local, stored.research.saveId ?? stored.id)
-    const useStored = localDraftSaved || (!storedDraftSaved && lastUpdated(stored) >= lastUpdated(local))
+    const useStored = localDraftSaved || (!storedDraftSaved && lastUpdated(stored) > lastUpdated(local))
     const [latest, other] = useStored ? [stored, local] : [local, stored]
     const receipts = other.messages.filter(message => message.savedDraftId && !hasReceipt(latest, message.savedDraftId))
     const research = useStored ? (storedDraftSaved ? undefined : stored.research) : local.research
-    return { ...latest, research, messages: [...latest.messages, ...receipts] }
+    return !receipts.length && research === latest.research ? latest : { ...latest, research, messages: [...latest.messages, ...receipts] }
   }
 
   function draftId() {
@@ -505,7 +505,15 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     if (!pending.has(current.id)) {
       try {
         const stored = readHistory().find(item => item.id === current.id)
-        if (stored) current = mergeConversation(current, stored)
+        if (stored) {
+          const previous = current
+          current = mergeConversation(current, stored)
+          if (current !== previous && !researching) {
+            log.replaceChildren()
+            bubbles.clear()
+            current.messages.forEach(message => append(message))
+          }
+        }
       } catch { /* Preserve the in-memory draft if storage is unavailable. */ }
     }
     remember()

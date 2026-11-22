@@ -26,7 +26,8 @@ export type ResearchProposal = {
   suggestions: Array<ResearchOption & { field: string }>
   issues: Array<{
     code: string; filament_id?: number; source?: string; name?: string; field?: string
-    url?: string; product_url?: string; options?: ResearchOption[]; requires_product_choice?: boolean; reason?: string
+    url?: string; product_url?: string; source_product_code?: string; options?: ResearchOption[]; requires_product_choice?: boolean; reason?: string
+    match_kind?: 'sku_exact' | 'sku_format' | 'similar_sku' | 'search'; identity?: Partial<ResearchIdentity>
   }>
   proposals?: Array<{
     id: string
@@ -40,6 +41,7 @@ export type ResearchProposal = {
   spool_profile_id?: string
   spool_lookup_key?: string
   spool_reply?: string
+  discovery_sku?: string
 }
 
 export function researchHeaders() {

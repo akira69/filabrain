@@ -12,15 +12,25 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECU
 const filament = id => ({ id, designation: `PLA ${id}`, manufacturer: { name: 'Maker' } })
 const activeSlot = (ams_id = 0, slot = 1, spool_id = 7, extra = {}) => ({ ams_id, slot, active: true, empty: false, spool_id, ...extra })
 try {
-  let printers, display, displayStatus, held, requests, capabilities
+  let printers, display, displayStatus, held, displayHeld, printerHeld, requests, capabilities
   const context = await browser.newContext()
   await context.route('**/*', async route => {
     const url = new URL(route.request().url())
     if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: html })
     requests.push(url.pathname + url.search)
-    if (url.pathname === '/api/v1/printers') return route.fulfill({ json: { items: printers, total: printers.length } })
-    if (url.pathname === '/api/v1/display') return route.fulfill({ status: displayStatus, json: display })
-    if (url.pathname === '/api/v1/spools/7') return route.fulfill({ json: { id: 7, filament_id: 70, filament: filament(70) } })
+    if (url.pathname === '/api/v1/printers') {
+      if (printerHeld) await printerHeld.promise
+      return route.fulfill({ json: { items: printers, total: printers.length } }).catch(() => {})
+    }
+    if (url.pathname === '/api/v1/display') {
+      const response = display
+      if (displayHeld) await displayHeld.promise
+      return route.fulfill({ status: displayStatus, json: response }).catch(() => {})
+    }
+    if (/^\/api\/v1\/spools\/\d+$/.test(url.pathname)) {
+      const id = Number(url.pathname.split('/').at(-1))
+      return route.fulfill({ json: { id, filament_id: id * 10, filament: filament(id * 10) } })
+    }
     if (url.pathname === '/api/v1/filaments/99') {
       if (held) await held.promise
       return route.fulfill({ json: filament(99) }).catch(() => {})
@@ -43,7 +53,8 @@ try {
     display = options.display ?? { schema_version: 3, printers: [{ id: 1, connected: true, active: { ams_id: 0, slot: 1 }, ams: [{ ams_id: 0, slots: [activeSlot()] }] }] }
     displayStatus = options.displayStatus ?? 200
     capabilities = { can_read_printers: true, can_read_spools: true, can_read_display: true, ...options.capabilities }
-    held = undefined
+    held = displayHeld = undefined
+    printerHeld = options.printerHeld
     requests = []
     await page.goto('https://fila.test/')
     await page.evaluate(({ capabilities, enabled }) => { window.context = ChatContext.mountChatContext(document.querySelector('form'), capabilities, enabled) }, { capabilities, enabled: options.enabled ?? true })
@@ -67,6 +78,54 @@ try {
   assert.deepEqual(await page.evaluate(() => window.context.snapshot()), { printer_id: 1 })
   await page.evaluate(() => window.context.restore({ printer_id: 2, filament_id: 4 }))
   assert.deepEqual(await page.evaluate(() => window.context.snapshot()), { printer_id: 2, filament_id: 4 }, 'inactive saved printers can be restored')
+
+  // Reset, opening context, restoring history, and changing printers use current live slots.
+  await mount()
+  await page.waitForFunction(() => document.querySelector('[data-chat-use-loaded-filament]'))
+  const live = (spool, id = 1) => ({ printers: [{ id, connected: true, active: { ams_id: 0, slot: 1 }, ams: [{ ams_id: 0, slots: [activeSlot(0, 1, spool)] }] }] })
+  display = live(8)
+  await page.evaluate(() => window.context.reset())
+  await page.waitForFunction(() => document.querySelector('[data-chat-use-loaded-filament]')?.textContent.includes('PLA 80'))
+  display = live(9)
+  await page.locator('details').evaluate(el => { el.open = true })
+  await page.waitForFunction(() => document.querySelector('[data-chat-use-loaded-filament]')?.textContent.includes('PLA 90'))
+  display = live(8, 2)
+  await printer.selectOption('2')
+  await page.waitForFunction(() => document.querySelector('[data-chat-use-loaded-filament]')?.textContent.includes('PLA 80'))
+  display = live(9, 2)
+  await page.evaluate(() => window.context.restore({ printer_id: 2 }))
+  await page.waitForFunction(() => document.querySelector('[data-chat-use-loaded-filament]')?.textContent.includes('PLA 90'))
+
+  // An older display response cannot overwrite a later reset's suggestion.
+  display = live(7)
+  displayHeld = { promise: null, release: null }
+  displayHeld.promise = new Promise(resolve => { displayHeld.release = resolve })
+  const oldDisplay = displayHeld
+  const requestedDisplay = page.waitForRequest('**/display?fields=slots')
+  await page.evaluate(() => { void window.context.reset() })
+  await requestedDisplay
+  display = live(8)
+  displayHeld = undefined
+  await page.evaluate(() => window.context.reset())
+  await page.waitForFunction(() => document.querySelector('[data-chat-use-loaded-filament]')?.textContent.includes('PLA 80'))
+  oldDisplay.release()
+  await page.waitForTimeout(80)
+  assert.match(await page.locator('[data-chat-use-loaded-filament]').textContent(), /PLA 80/)
+  assert.equal(await select.inputValue(), '', 'refreshing suggestions never silently selects a filament')
+
+  // Reset and history restoration remain correct while the initial printer request is pending.
+  for (const restoring of [false, true]) {
+    const pendingPrinters = { promise: null, release: null }
+    pendingPrinters.promise = new Promise(resolve => { pendingPrinters.release = resolve })
+    await mount({ printerHeld: pendingPrinters })
+    await page.waitForFunction(() => document.querySelector('[data-chat-filament]').options.length === 26)
+    display = live(8, restoring ? 2 : 1)
+    await page.evaluate(restoring => { window.pendingContext = restoring ? window.context.restore({ printer_id: 2 }) : window.context.reset() }, restoring)
+    pendingPrinters.release()
+    await page.evaluate(() => window.pendingContext)
+    await page.waitForFunction(() => document.querySelector('[data-chat-use-loaded-filament]')?.textContent.includes('PLA 80'))
+    assert.equal(await printer.inputValue(), restoring ? '2' : '1')
+  }
 
   await mount({ display: { printers: [{ id: 1, connected: true, active: { ams_id: 1, slot: 1 }, ams: [
     { ams_id: 0, slots: [{ ...activeSlot(), active: false }] }, { ams_id: 1, slots: [activeSlot(1)] },
@@ -98,6 +157,8 @@ try {
   assert.equal(await printer.inputValue(), '')
   assert.equal(await page.locator('[data-chat-printer-field]').isVisible(), false)
   await mount({ enabled: false })
+  await page.locator('details').evaluate(el => { el.open = true })
+  await page.evaluate(async () => { await window.context.reset(); await window.context.restore({ printer_id: 1, filament_id: 99 }) })
   await page.waitForTimeout(80)
   assert.deepEqual(requests, [], 'research-only mode does not fetch context')
 
@@ -121,5 +182,5 @@ try {
   await page.evaluate(() => window.restoring)
   assert.equal(await select.inputValue(), '3', 'late restore cannot replace a manual choice')
   await context.close()
-  console.log('Context preload, search, permission fallbacks, loaded-spool ambiguity, reset, restore and late-response checks passed.')
+  console.log('Context preload, search, permission fallbacks, loaded-spool freshness and ambiguity, reset, restore and late-response checks passed.')
 } finally { await browser.close() }
