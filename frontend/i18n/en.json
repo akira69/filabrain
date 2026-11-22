@@ -62,10 +62,17 @@
     "create": "Create swatch",
     "saveReference": "Save reference",
     "applySwatch": "Apply swatch",
+    "savedReference": "Saved reference",
     "savedTag": "Saved",
     "saved": "Color choice saved.",
     "saveFailed": "Could not save the color choice.",
-    "loadFailed": "Could not load swatches."
+    "loadFailed": "Could not load swatches.",
+    "rename": "Rename shared swatch",
+    "renameConfirm": "Rename everywhere",
+    "renameUsage": "Filaments using this swatch: {count}, including any outside this selection.",
+    "renameConflicts": "Shared swatch also has conflicting references: {codes}. Reuse or create a swatch to change this filament only.",
+    "renameScope": "This name changes everywhere this shared swatch is used. Only the name changes; HEX, assignments and manufacturer color names stay the same.",
+    "renamed": "Shared swatch renamed."
   },
   "filaBrain": {
     "createManufacturer": "Create manufacturer",
@@ -364,7 +371,8 @@
     "chooseMode": "Choose a research mode",
     "mode": {
       "fill": "Fill missing specs",
-      "standardize": "Standardize entries"
+      "standardize": "Standardize entries",
+      "colors": "Color audit"
     },
     "fillFields": "SKU, manufacturer color, density, net weight, nozzle and bed temperatures, drying settings, and datasheet.",
     "standardizeFields": "Designation, material and subgroup, and manufacturer color formatting.",
@@ -387,6 +395,7 @@
     "retry": "Retry research",
     "back": "Back",
     "reopen": "Reopen review",
+    "done": "Done & next",
     "skip": "Skip & next",
     "approve": "Approve & next",
     "progress": "{mode} · {ready} ready · {working} researching · {total} total",
@@ -425,6 +434,7 @@
       "canceled": "Canceled",
       "queued": "Queued",
       "running": "Researching",
+      "reviewed": "Reviewed",
       "ready": "Ready to review",
       "no_change": "No changes found",
       "needs_match": "Match needs review",

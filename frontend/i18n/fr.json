@@ -62,10 +62,17 @@
     "create": "Créer une couleur",
     "saveReference": "Enregistrer la référence",
     "applySwatch": "Appliquer la couleur",
+    "savedReference": "Référence enregistrée",
     "savedTag": "Enregistrée",
     "saved": "Choix de couleur enregistré.",
     "saveFailed": "Impossible d’enregistrer le choix de couleur.",
-    "loadFailed": "Impossible de charger les couleurs."
+    "loadFailed": "Impossible de charger les couleurs.",
+    "rename": "Renommer la couleur partagée",
+    "renameConfirm": "Renommer partout",
+    "renameUsage": "Filaments utilisant cette couleur : {count}, y compris hors de cette sélection.",
+    "renameConflicts": "La couleur partagée a aussi des références contradictoires : {codes}. Réutilisez ou créez une couleur pour modifier uniquement ce filament.",
+    "renameScope": "Ce nom change partout où cette couleur partagée est utilisée. Seul le nom change ; le code HEX, les affectations et les noms de couleur du fabricant restent identiques.",
+    "renamed": "Couleur partagée renommée."
   },
   "filaBrain": {
     "createManufacturer": "Cr\u00e9er le fabricant",
@@ -364,7 +371,8 @@
     "chooseMode": "Choisir un mode de recherche",
     "mode": {
       "fill": "Compléter les spécifications manquantes",
-      "standardize": "Harmoniser les fiches"
+      "standardize": "Harmoniser les fiches",
+      "colors": "Audit des couleurs"
     },
     "fillFields": "Référence, couleur du fabricant, densité, poids net, températures de buse et de plateau, paramètres de séchage et fiche technique.",
     "standardizeFields": "Désignation, matériau et sous-groupe, et format du nom de la couleur du fabricant.",
@@ -387,6 +395,7 @@
     "retry": "Relancer la recherche",
     "back": "Retour",
     "reopen": "Rouvrir la révision",
+    "done": "Terminé et suivant",
     "skip": "Ignorer et passer à la suite",
     "approve": "Approuver et passer à la suite",
     "progress": "{mode} · {ready} à réviser · {working} en recherche · {total} au total",
@@ -425,6 +434,7 @@
       "canceled": "Annulé",
       "queued": "En attente",
       "running": "Recherche en cours",
+      "reviewed": "Vérifié",
       "ready": "À réviser",
       "no_change": "Aucune modification trouvée",
       "needs_match": "Correspondance à vérifier",

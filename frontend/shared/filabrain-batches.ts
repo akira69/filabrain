@@ -10,7 +10,7 @@ const route = '/filabrain/batches'
 const page = location.pathname
 const tr = (key: string, vars?: Record<string, string | number>) => t('researchBatches.' + key, vars)
 
-export type BatchMode = 'fill' | 'standardize'
+export type BatchMode = 'fill' | 'standardize' | 'colors'
 type Decision = 'pending' | 'approved' | 'skipped'
 type ItemStatus = 'queued' | 'running' | 'ready' | 'no_change' | 'needs_match' | 'failed' | 'unavailable' | 'stale' | 'canceled' | 'applied'
 type Value = string | number | { min: number | null; max: number | null } | null
@@ -68,7 +68,8 @@ type Preview =
 const fieldName = (field: string) => researchFieldLabel(field === 'manufacturer_name' ? 'manufacturer_id' : field)
 const label = (item: Item) => item.identity.designation || tr('record', { id: item.filament_id })
 const colorOnly = (item: Item) => item.status === 'no_change' && !!item.color_references?.length
-const status = (item: Item) => colorOnly(item) && item.decision === 'pending' ? t('swatchReview.title') : tr('status.' + (
+const status = (item: Item, mode: BatchMode) => mode === 'colors' && colorOnly(item) && item.decision === 'skipped' ? tr('status.reviewed')
+  : colorOnly(item) && item.decision === 'pending' ? t('swatchReview.title') : tr('status.' + (
   item.decision === 'skipped' && !['unavailable', 'canceled'].includes(item.status) ? 'skipped' :
   item.decision === 'approved' && item.status === 'ready' ? 'approved' : item.status))
 const researching = (item: Item) => ['queued', 'running'].includes(item.status)
@@ -312,6 +313,8 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       identity.diameter_mm == null ? '' : identity.diameter_mm + ' mm']
       .filter(value => value && !designation.includes(value.toLocaleLowerCase())))]
     const proposals = item.proposals.filter(proposal => item.status !== 'applied' || item.approved_ids.includes(proposal.id))
+    const colorAudit = batch.mode === 'colors' && colorOnly(item)
+    const showSwatches = !!item.live_filament_id && !!item.color_references?.length
     const evidence = proposalSources(proposals)
     const notes: Item['issues'] = []
     const diagnostics: Item['issues'] = []
@@ -327,12 +330,11 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
         const productUrl = issue.code === 'manufacturer_page' ? issue.url : issue.product_url
         if (productUrl && (evidence.has(productUrl) || issue.code === 'possible_match' && checkedUrls.has(productUrl))) continue
         diagnostics.push(issue)
-      } else if (proposals.length && ['unavailable_source', 'supplier_download_limit', 'supplier_rate_limited'].includes(issue.code)) {
+      } else if ((proposals.length || colorAudit && showSwatches) && ['unavailable_source', 'supplier_download_limit', 'supplier_rate_limited'].includes(issue.code)) {
         diagnostics.push(issue)
       } else notes.push(issue)
     }
     const changedFields = item.status === 'stale' ? item.changed_fields : []
-    const showSwatches = !!item.live_filament_id && !!item.color_references?.length
     const visibleNotes = showSwatches ? notes.filter(issue => issue.code !== 'manufacturer_color_reference') : notes
     const editor = item.live_filament_id
       ? link(`/filaments/${item.live_filament_id}?edit=1`, tr('openEditor'), 'batch-editor') : ''
@@ -365,6 +367,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
         </form>` : ''}
       <div class="batch-actions">${previous}
         ${canReopen ? button('reopen', 'reopen') : ''}
+        ${editable && colorAudit && item.decision === 'pending' ? button('done', 'skip') : ''}
         ${editable && item.decision !== 'skipped' && (choosing || canRetry(item)) ? button('skip', 'skip') : ''}
         ${choosing ? button('approve', 'approve', true) : ''}
       </div>
@@ -397,7 +400,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
       ['stale', batch.items.filter(item => item.status === 'stale' ||
         (item.status === 'unavailable' && item.changed_fields.length > 0) ||
         lastApply.some(result => result.item_id === item.id && result.status === 'stale'))],
-      ['skipped', batch.items.filter(item => item.decision === 'skipped')],
+      ['skipped', batch.items.filter(item => item.decision === 'skipped' && !(batch.mode === 'colors' && colorOnly(item)))],
       ['pending', batch.items.filter(item => item.decision !== 'skipped' && (researching(item) || ['ready', 'needs_match', 'failed'].includes(item.status)))],
       ['approval_changed', batch.items.filter(item => lastApply.some(result => result.item_id === item.id && result.status === 'approval_changed'))],
       ['error', batch.items.filter(item => lastApply.some(result => result.item_id === item.id && result.status === 'error'))],
@@ -422,7 +425,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
   function render() {
     const available = !accessLost && batch.status !== 'canceled'
     const working = batch.items.filter(researching).length
-    const ready = batch.items.filter(item => item.status === 'ready' && item.decision === 'pending').length
+    const ready = batch.items.filter(item => item.decision === 'pending' && (item.status === 'ready' || batch.mode === 'colors' && colorOnly(item))).length
     const approved = batch.items.filter(item => item.status === 'ready' && item.decision === 'approved')
     progress.textContent = tr(working ? 'progress' : 'progressIdle', { mode: tr('mode.' + batch.mode), ready, working, total: batch.total })
       + (batch.status === 'active' ? '' : ' · ' + tr('status.' + batch.status))
@@ -431,7 +434,7 @@ export function mountResearchBatches(host: HTMLElement, id: string | null) {
     const focusedItem = queue.querySelector<HTMLButtonElement>('button[data-item]:focus')?.dataset.item
     queue.innerHTML = batch.items.map(item => `<li><button type="button" data-item="${item.id}"
       ${item.id === selectedId ? 'aria-current="true"' : ''}>
-      <span>${escapeHtml(label(item))}</span><small>${escapeHtml(status(item))}</small>
+      <span>${escapeHtml(label(item))}</span><small>${escapeHtml(status(item, batch.mode))}</small>
     </button></li>`).join('')
     if (focusedItem) queue.querySelector<HTMLButtonElement>(`button[data-item="${focusedItem}"]`)?.focus({ preventScroll: true })
     renderCard(selectedItem())

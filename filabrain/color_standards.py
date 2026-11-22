@@ -46,6 +46,16 @@ def normalize_reference(value: str) -> str | None:
     return None
 
 
+def canonical_name(code: str, preview: dict) -> str:
+    display = (preview.get("name") or code).strip()
+    suffix = f" ({code})"
+    if display.casefold() == code.casefold():
+        return code
+    if display.casefold().endswith(suffix.casefold()):
+        display = display[:-len(suffix)].rstrip()
+    return display[:100 - len(suffix)].rstrip() + suffix
+
+
 def references_in_product_url(url: str) -> list[str]:
     slug = unquote(urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1]).lower()
     references = [f"RAL {match[1]}" for match in URL_RAL.finditer(slug)]
@@ -62,6 +72,7 @@ def references_from(issues: list[dict], manufacturer_color_name: str | None) -> 
             references.setdefault(code, {
                 "manufacturer_source": issue.get("url"),
                 "from_product_url": bool(issue.get("from_product_url")),
+                **({"saved_reference": True} if issue.get("saved_reference") else {}),
             })
     if code := normalize_reference(manufacturer_color_name or ""):
         references.setdefault(code, {"manufacturer_source": None, "from_product_url": False})

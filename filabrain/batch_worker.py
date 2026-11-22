@@ -14,6 +14,7 @@ from sqlalchemy import delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import contains_eager
 
+from .color_audit import saved_references
 from .db import FilamentResearchBatch as Batch
 from .db import FilamentResearchBatchItem as Item
 from .db import ensure_schema
@@ -173,6 +174,8 @@ async def _claim_next(db: AsyncSession) -> Claim | None:
         item.issues = [{"code": "attempts_exhausted"}]
     else:
         snapshot = filament_snapshot(filament)
+        if batch.mode == "colors":
+            snapshot["color_references"] = await saved_references(db, filament)
         item.status = "running"
         item.claim_token = uuid4().hex
         item.claim_until = at + LEASE
@@ -208,6 +211,8 @@ async def _store_result(db: AsyncSession, claim: Claim, result: dict) -> None:
             codes = {issue["code"] for issue in item.issues}
             if item.proposals:
                 item.status = "ready"
+            elif batch.mode == "colors" and "manufacturer_color_reference" in codes:
+                item.status = "no_change"
             elif codes & {"unavailable_source", "supplier_download_limit"}:
                 item.status = "failed"
             elif "needs_match" in codes:

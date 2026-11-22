@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from sqlalchemy import func, or_, select, tuple_
 
+from .color_audit import code_only, explicit_references, reference_issues
 from .catalog import linked_spool_profile, lookup_filaments, manufacturer_website
 from .color_standards import RAL_NUMBER, normalize_reference, references_in_product_url
 from .knowledge import lookup_catalog, lookup_catalog_code, lookup_published_specs
@@ -77,6 +78,7 @@ MODE_FIELDS = {
         "chamber_temp_c", "max_volumetric_speed_mm3_s", "flow_ratio", "pressure_advance_k",
         "image_url", "ams_compatibility", "build_plate_compatibility",
     ),
+    "colors": ("manufacturer_color_name",),
     "standardize": ("designation", "material_type", "material_subgroup", "manufacturer_color_name"),
 }
 
@@ -1490,6 +1492,7 @@ async def research_products(
     db: DBSession, identity: Identity, *, product_url=None, reference_url=None, sku_hint="", snapshot=None,
     guidance="", release_read=False, model_id: str | None = None, endpoint_id: str | None = None,
     deadline: float | None = None, palette: list[tuple[int, int]] | None = None,
+    skip_model_extraction: bool = False,
 ) -> dict:
     proposal = {"suggestions": [], "issues": []}
     issues = proposal["issues"]
@@ -2617,7 +2620,7 @@ async def research_products(
         first_by_site.setdefault(_site_host(source.url), source)
     extraction_evidence = [*first_by_site.values(), *(source for source in evidence if source not in first_by_site.values())]
 
-    if evidence and endpoint["model_url"] and model:
+    if not skip_model_extraction and evidence and endpoint["model_url"] and model:
         try:
             async with network_time(50):
                 await check_model_catalog(endpoint, model)
@@ -2755,20 +2758,49 @@ async def batch_proposal(
     if mode == "standardize":
         return await _local_conventions(db, snapshot)
     result = {"proposals": [], "issues": []}
-    if not any(is_missing(field, snapshot.get(field)) for field in MODE_FIELDS["fill"]) and (
+    if mode != "colors" and not any(is_missing(field, snapshot.get(field)) for field in MODE_FIELDS["fill"]) and (
         skip_complete or not is_missing("manufacturer_url", snapshot.get("manufacturer_url"))
     ):
         return result
     identity = snapshot_identity(snapshot)
     if _norm(identity.sku) and _norm(sku_hint) and _norm(identity.sku) != _norm(sku_hint):
         return {**result, "issues": [{"code": "needs_match", "field": "manufacturer_sku"}]}
+    research_snapshot = snapshot
+    if mode == "colors":
+        codes = explicit_references([snapshot.get("color_references"), snapshot.get("custom_fields"), identity.color])
+        result["issues"].extend(reference_issues(codes))
+        if codes and identity.color and not code_only(identity.color):
+            return result
+        research_snapshot = {**snapshot, "manufacturer_color_name": None}
+        if code_only(identity.color):
+            identity = identity.model_copy(update={"color": ""})
     raw = await research_products(
-        db, identity, product_url=product_url, reference_url=reference_url, sku_hint=sku_hint, snapshot=snapshot,
+        db, identity, product_url=product_url, reference_url=reference_url, sku_hint=sku_hint, snapshot=research_snapshot,
         guidance=guidance, release_read=release_read, model_id=model_id, endpoint_id=endpoint_id, deadline=deadline,
+        skip_model_extraction=mode == "colors" and bool(_norm(identity.color)) and not code_only(identity.color),
     )
     for suggestion in raw["suggestions"]:
         field = suggestion["field"]
         value = suggestion["value"]
+        if mode == "colors":
+            if (field not in MODE_FIELDS["colors"] or
+                    (snapshot.get(field) and not code_only(snapshot.get(field))) or
+                    normalize_reference(value) or value == snapshot.get(field)):
+                continue
+            # Omitting a standard from marketing-name matching must retain it
+            # as a product constraint, rather than accepting any catalog color.
+            required_codes = ([normalize_reference(snapshot[field])]
+                              if code_only(snapshot.get(field)) else codes)
+            source_urls = {source.get("url") for source in suggestion["sources"]}
+            if not any(
+                issue.get("code") == "manufacturer_color_reference"
+                and not issue.get("saved_reference")
+                and (reference := normalize_reference(issue.get("name") or ""))
+                and (not required_codes or reference in required_codes)
+                and issue.get("url") and issue["url"] in source_urls
+                for issue in raw["issues"]
+            ):
+                continue
         try:
             FilamentUpdate.model_validate({field: value})
         except ValidationError:
@@ -2784,7 +2816,8 @@ async def batch_proposal(
                 }
                 for source in suggestion["sources"]
             ],
-            "reason": "Fills a blank using evidence for the matching product and variant.",
+            "reason": ("Corrects the manufacturer name using verified product evidence." if mode == "colors"
+                       else "Fills a blank using evidence for the matching product and variant."),
             "group_key": None,
         })
     for issue in raw["issues"]:
