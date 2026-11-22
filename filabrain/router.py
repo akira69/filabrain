@@ -36,6 +36,7 @@ for routes in (research.router, settings.router, batch_api.router, audio.router)
 
 
 class ResearchArguments(BaseModel):
+    query: Annotated[str, Field(max_length=400)] = ""
     model_config = ConfigDict(extra="forbid")
     filament_id: Annotated[int, Field(gt=0, le=2_147_483_647)] | None = None
     identity: research.Identity | None = None
@@ -61,7 +62,7 @@ async def _research_tool(args, db, _principal):
 mcp_read_tools = {
     "research_filament": {
         "description": (
-            "Research filament specifications by existing filament ID, product identity, SKU, or public product URL. "
+            "Research filament specifications by existing filament ID, product clues, product identity, SKU, or public product URL. "
             "Returns source-backed suggestions for review."
         ),
         "permission": "filaments:read",

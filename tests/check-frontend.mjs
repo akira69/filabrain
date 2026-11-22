@@ -5,6 +5,10 @@ const html = await readFile(new URL('../filabrain/page.html', import.meta.url), 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright-core')
 const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE_PATH })
 const url = 'https://fila.test/plugin-page/filabrain'
+async function openResearchDetails(page) {
+  const details = page.locator('#research-options')
+  if (!await details.evaluate(element => element.open)) await details.locator(':scope > summary').click()
+}
 const manufacturer = { id: 7, name: 'Fixture Brand' }
 const pickerRecordToken = 'a'.repeat(32)
 const filament = {
@@ -12,6 +16,7 @@ const filament = {
   material_type: 'PLA', diameter_mm: 1.75, color_mode: 'single',
 }
 const evidence = [{ title: 'Fixture catalog', url: 'https://manufacturer.test/pla', evidence: '1.24 g/cm³' }]
+const longProductUrl = evidence[0].url + '?reference=' + 'x'.repeat(500)
 const refillUrl = 'https://manufacturer.test/pla-refill'
 const rotatingVariantUrl = 'https://manufacturer.test/pla-select-package'
 const batchSource = { title: 'Fixture catalog | Fixture Brand', url: 'https://manufacturer.test/pla', quote: 'Fixture catalog' }
@@ -267,6 +272,26 @@ try {
           url: 'https://www.onlyspoolz.com/portfolio/spool-fixture-3kg/', empty_weight_g: 322, net_weight_g: 3000,
         }] : [])],
       } })
+      if (target.query) {
+        assert.equal(target.model_id, undefined, 'discovery does not use an LLM')
+        assert.equal(target.endpoint_id, undefined)
+        assert.equal(target.mode, 'create')
+        assert.equal(target.identity.sku, target.query === 'explicit SKU fixture' ? 'FIX-12X' : '')
+        assert.equal(target.sku_hint, '')
+        const candidate = {
+          code: 'possible_match', name: '<Fixture purple PLA>', source: 'Fixture catalog', source_product_code: 'SHOP-789',
+          url: evidence[0].url, product_url: evidence[0].url, match_kind: 'similar_sku',
+          identity: { manufacturer: 'Fixture Brand', designation: 'Fixture purple PLA', sku: 'FIX-123',
+            diameter_mm: 1.75, weight_g: 1000, color: 'Purple' },
+        }
+        const discoverySku = ['FIX-12X', 'FIX 123'].includes(target.query) ? target.query : undefined
+        return route.fulfill({ json: { target, discovery_sku: discoverySku, suggestions: [], issues: [candidate, candidate,
+          ...(discoverySku ? [{ ...candidate, product_url: rotatingVariantUrl, url: rotatingVariantUrl,
+            identity: { ...candidate.identity, sku: 'FIX-285', diameter_mm: 2.85, weight_g: 500, color: 'Blue' },
+          }] : []),
+          { code: 'search_incomplete', source: 'Unavailable catalog' },
+        ] } })
+      }
       if (target.guidance === 'Recheck this density') return route.fulfill({ json: { target, issues: [], suggestions: [
         { field: 'density_g_cm3', value: 1.27, sources: evidence },
       ] } })
@@ -286,6 +311,9 @@ try {
           { field: 'density_g_cm3', value: refill ? 1.22 : 1.24, sources: evidence },
         ] } })
       }
+      if (target.product_url === longProductUrl) return route.fulfill({ json: { target, issues: [], suggestions: [
+        { field: 'density_g_cm3', value: 1.24, sources: evidence },
+      ] } })
       if (target.product_url) assert.equal(target.product_url, evidence[0].url)
       if (target.guidance === 'Continue in stale tab') return route.fulfill({
         status: 502, json: { detail: 'Source unavailable' },
@@ -643,6 +671,7 @@ try {
   assert.match(await chatModel.innerText(), /fixture:default/)
 
   await page.getByRole('tab', { name: 'New filament', exact: true }).click()
+  await openResearchDetails(page)
   await page.getByLabel('Manufacturer', { exact: true }).fill('Fixture Brand')
   await page.getByLabel('Product name', { exact: true }).fill('Fixture PLA')
   await page.locator('[data-view="new"]:not([hidden]) #product-research').waitFor()
@@ -1339,6 +1368,7 @@ try {
   const urlDraft = await context.newPage()
   urlDraft.setDefaultTimeout(5_000)
   await urlDraft.goto(`${url}?tab=new`)
+  await openResearchDetails(urlDraft)
   await urlDraft.getByRole('textbox', { name: 'Product URL (optional)' }).fill(rotatingVariantUrl)
   await urlDraft.getByRole('button', { name: 'Find specifications' }).click()
   const urlResults = urlDraft.locator('#research-results')
@@ -1391,6 +1421,7 @@ try {
   const spoolDraft = await context.newPage()
   spoolDraft.setDefaultTimeout(5_000)
   await spoolDraft.goto(`${url}?tab=new`)
+  await openResearchDetails(spoolDraft)
   await spoolDraft.getByLabel('Manufacturer', { exact: true }).fill('Fixture Brand')
   await spoolDraft.getByLabel('Product name', { exact: true }).fill('Fixture PLA')
   await spoolDraft.locator('#research-advanced-fields summary').click()
@@ -1508,6 +1539,7 @@ try {
   const skuDraft = await context.newPage()
   skuDraft.setDefaultTimeout(5_000)
   await skuDraft.goto(`${url}?tab=new`)
+  await openResearchDetails(skuDraft)
   await skuDraft.getByLabel('Manufacturer', { exact: true }).fill('Fixture Brand')
   await skuDraft.getByLabel('Product name', { exact: true }).fill('Fixture SKU PLA')
   await skuDraft.locator('#research-advanced-fields summary').click()
@@ -1558,6 +1590,133 @@ try {
   assert.equal(await skuDraft.getByRole('button', { name: /Fixture Brand PLA 1 kg/ }).count(), 0)
   assert.equal(await skuDraft.getByRole('checkbox', { name: /Spool Weight.*233/i }).count(), 0)
   await skuDraft.close()
+
+  const discoveryDefaultModel = chatModelId
+  chatModelId = 'fixture:default'
+  const discovery = await context.newPage()
+  discovery.setDefaultTimeout(5_000)
+  await discovery.goto(`${url}?tab=new`)
+  const discoveryInput = discovery.getByRole('searchbox', { name: 'SKU, product link, or description' })
+  await discoveryInput.waitFor()
+  assert.equal(await discoveryInput.getAttribute('placeholder'), 'Paste an SKU, product link, or what you know — e.g. Paramount 3D PLA purple')
+  assert.equal(await discovery.getByLabel('Manufacturer', { exact: true }).isVisible(), false)
+  assert.equal(await discovery.locator('#research-options').evaluate(element => element.open), false)
+  await discoveryInput.fill('Paramount 3D PLA purple')
+  await discovery.getByRole('tab', { name: 'Chat', exact: true }).click()
+  await discovery.getByRole('tab', { name: 'New filament', exact: true }).click()
+  assert.equal(await discoveryInput.inputValue(), 'Paramount 3D PLA purple')
+  const discoveryRequest = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
+  await discovery.getByRole('button', { name: 'Find specifications' }).click()
+  assert.equal((await discoveryRequest).postDataJSON().query, 'Paramount 3D PLA purple')
+  assert.equal(await discovery.locator('#research-follow-up-scope').isVisible(), false, 'discovery has no proposed fields to focus yet')
+  const candidateCards = discovery.locator('.research-candidate')
+  await candidateCards.first().waitFor()
+  assert.equal(await candidateCards.count(), 1, 'duplicate candidate URLs produce one card')
+  assert.equal(await candidateCards.locator('h3').textContent(), '<Fixture purple PLA>')
+  assert.equal(await candidateCards.locator('h3 > *').count(), 0, 'candidate titles remain plain text')
+  assert.equal(await candidateCards.locator('.research-candidate-identity').textContent(),
+    'Manufacturer: Fixture Brand · SKU: FIX-123 · Diameter (mm): 1.75 · Net filament weight (g): 1000 · Color name: Purple')
+  assert.equal(await candidateCards.getByRole('link', { name: 'Fixture catalog' }).getAttribute('href'), evidence[0].url)
+  await candidateCards.getByText('Source product code: SHOP-789', { exact: true }).waitFor()
+  await candidateCards.getByText('Similar SKU — check the variant', { exact: true }).waitFor()
+  await discovery.getByText('Some sources could not be searched. Try again or add a product link.', { exact: true }).waitFor()
+  assert.equal(await discovery.locator('#save-filament').isDisabled(), true, 'candidate discovery cannot save a fuzzy match')
+  const writesBeforeChoice = writes.length
+  await discovery.evaluate(() => {
+    const key = 'filabrain:chat:7'
+    const history = JSON.parse(localStorage.getItem(key) || '[]')
+    for (const conversation of history) {
+      if (conversation.research?.fields.query === 'Paramount 3D PLA purple') delete conversation.model
+    }
+    localStorage.setItem(key, JSON.stringify(history))
+  })
+  await discovery.reload()
+  await discovery.locator('[data-chat-history]:visible summary').click()
+  await discovery.getByRole('button', { name: 'Find specifications · Paramount 3D PLA purple', exact: true }).click()
+  assert.equal(await discoveryInput.inputValue(), 'Paramount 3D PLA purple', 'query survives saved research history')
+  await candidateCards.first().waitFor()
+  const discoveryModel = discovery.locator('[data-chat-form]:visible [data-model-trigger]')
+  await discoveryModel.getByText('Choose a model', { exact: true }).waitFor()
+  const retryDiscovery = discovery.waitForResponse(response => response.url().endsWith('/proposals'))
+  await discovery.getByRole('button', { name: 'Find specifications' }).click()
+  await (await retryDiscovery).finished()
+  await discovery.locator('#research-start-actions button[value="fill"]:not(:disabled)').waitFor()
+  assert.equal(await discoveryModel.getByText('Choose a model', { exact: true }).count(), 1, 'discovery does not select or preserve a model')
+  const proposalsBeforeChoice = proposalRequests
+  await candidateCards.getByRole('button', { name: 'Research this page' }).click()
+  await discovery.locator('#research-status').getByText('Choose a model', { exact: true }).waitFor()
+  assert.equal(proposalRequests, proposalsBeforeChoice, 'full product-page research still requires model selection')
+  await discoveryModel.click()
+  await discovery.getByRole('menu', { name: 'Model for this conversation' })
+    .getByRole('menuitemradio', { name: /^fixture:default(?: Default)?$/ }).first().click()
+  const chosenCandidate = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
+  await candidateCards.getByRole('button', { name: 'Research this page' }).click()
+  const chosenPayload = (await chosenCandidate).postDataJSON()
+  assert.equal(chosenPayload.query, '', 'choosing a candidate clears the discovery constraint')
+  assert.equal(chosenPayload.product_url, evidence[0].url)
+  assert.equal(chosenPayload.identity.sku, '', 'a candidate SKU is not silently promoted into a strict constraint')
+  await discovery.getByRole('checkbox', { name: /Density/ }).waitFor()
+  assert.equal(writes.length, writesBeforeChoice, 'choosing a candidate only produces a reviewable draft')
+  await openResearchDetails(discovery)
+  assert.equal(await discovery.locator('[name="product_url"]').inputValue(), evidence[0].url)
+  await discoveryInput.fill('A different filament')
+  assert.equal(await discovery.locator('[name="product_url"]').inputValue(), '', 'editing the discovery query clears the previously selected URL')
+  await discoveryInput.fill(evidence[0].url)
+  const pastedUrl = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
+  await discovery.getByRole('button', { name: 'Find specifications' }).click()
+  const urlPayload = (await pastedUrl).postDataJSON()
+  assert.equal(urlPayload.product_url, evidence[0].url)
+  assert.equal(urlPayload.query, '', 'pasted URLs use the existing product-page research path')
+  await discovery.locator('#research-start-actions button[value="fill"]:not(:disabled)').waitFor()
+  const beforeLongQuery = proposalRequests
+  await discoveryInput.fill('x'.repeat(401))
+  assert.equal(await discoveryInput.evaluate(input => input.validity.customError), true)
+  await discovery.getByRole('button', { name: 'Find specifications' }).click()
+  assert.equal(proposalRequests, beforeLongQuery, 'overlong prose is rejected before a request')
+  await discoveryInput.fill(longProductUrl)
+  assert.equal(await discoveryInput.inputValue(), longProductUrl, 'product URLs are not truncated at 400 characters')
+  assert.equal(await discoveryInput.evaluate(input => input.checkValidity()), true)
+  const longUrlRequest = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
+  await discovery.getByRole('button', { name: 'Find specifications' }).click()
+  assert.equal((await longUrlRequest).postDataJSON().product_url, longProductUrl)
+  await discovery.locator('#research-start-actions button[value="fill"]:not(:disabled)').waitFor()
+  for (const skuQuery of ['FIX-12X', 'FIX 123']) {
+    await discoveryInput.fill(skuQuery)
+    const skuDiscovery = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
+    await discovery.getByRole('button', { name: 'Find specifications' }).click()
+    assert.equal((await skuDiscovery).postDataJSON().query, skuQuery)
+    await candidateCards.nth(1).waitFor()
+    assert.equal(await candidateCards.nth(0).locator('h3').textContent(), await candidateCards.nth(1).locator('h3').textContent())
+    assert.match(await candidateCards.nth(0).locator('.research-candidate-identity').textContent(), /SKU: FIX-123.*1.75.*1000.*Purple/)
+    assert.match(await candidateCards.nth(1).locator('.research-candidate-identity').textContent(), /SKU: FIX-285.*2.85.*500.*Blue/)
+    const selectedSku = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
+    await candidateCards.nth(0).getByRole('button', { name: 'Research this page' }).click()
+    const selectedSkuPayload = (await selectedSku).postDataJSON()
+    assert.equal(selectedSkuPayload.query, '')
+    assert.equal(selectedSkuPayload.product_url, evidence[0].url)
+    assert.equal(selectedSkuPayload.sku_hint, 'FIX-123', 'explicit product choice replaces an inferred search clue with the selected manufacturer SKU')
+    await discovery.locator('#research-start-actions button[value="fill"]:not(:disabled)').waitFor()
+    const refreshSku = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
+    await discovery.getByRole('button', { name: 'Find specifications' }).click()
+    assert.equal((await refreshSku).postDataJSON().sku_hint, 'FIX-123', 'refresh retains the explicitly selected manufacturer SKU')
+    await discovery.locator('#research-start-actions button[value="fill"]:not(:disabled)').waitFor()
+  }
+  await openResearchDetails(discovery)
+  const advancedDetails = discovery.locator('#research-advanced-fields')
+  if (!await advancedDetails.evaluate(element => element.open)) await advancedDetails.locator(':scope > summary').click()
+  await discovery.locator('[name="manufacturer_sku"]').fill('FIX-12X')
+  await discoveryInput.fill('explicit SKU fixture')
+  const explicitDiscovery = discovery.waitForResponse(response => response.url().endsWith('/proposals'))
+  await discovery.getByRole('button', { name: 'Find specifications' }).click()
+  await (await explicitDiscovery).finished()
+  await discovery.locator('#research-start-actions button[value="fill"]:not(:disabled)').waitFor()
+  const explicitChoice = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
+  await candidateCards.first().getByRole('button', { name: 'Research this page' }).click()
+  const explicitChoicePayload = (await explicitChoice).postDataJSON()
+  assert.equal(explicitChoicePayload.identity.sku, 'FIX-12X', 'a product card preserves an explicitly entered manufacturer SKU')
+  assert.equal(explicitChoicePayload.sku_hint, '', 'a card cannot add a conflicting inferred hint to an explicit SKU')
+  await discovery.close()
+  chatModelId = discoveryDefaultModel
 
   canUseFilaments = false
   await page.goto(url)

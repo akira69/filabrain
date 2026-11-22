@@ -129,6 +129,30 @@ def lookup_catalog(maker: str, product: str, *, limit: int = 5) -> list[dict]:
     return [_catalog_row(row) for _, row in sorted(ranked, key=lambda entry: entry[0])[:limit]]
 
 
+
+def lookup_catalog_code(code: str, maker: str = "", *, context: str = "", limit: int = 12) -> list[dict]:
+    """Find manufacturer codes without needing a manufacturer name first."""
+    key = _words(code).replace(" ", "")
+    if len(key) < 4 or limit <= 0:
+        return []
+    makers = [_maker_key(maker)] if maker else [
+        key for key, aliases in _data("makers.json").items()
+        if any(_includes(_words(context), _words(alias)) for alias in aliases + [
+            alias for alias, target in MAKER_ALIASES.items() if target == key
+        ])
+    ]
+    if not makers:
+        makers = _data("makers.json")
+    ranked = []
+    for maker_key in makers:
+        for row in _catalog_rows(maker_key):
+            codes = [_words(row.get(field)).replace(" ", "") for field in ("manufacturer_sku", "barcode")]
+            exact = key in codes
+            if exact or len(key) >= 6 and any(value.startswith(key) for value in codes):
+                ranked.append(((not exact, codes[0], row["source_id"]), row))
+    return [_catalog_row(row) for _, row in sorted(ranked, key=lambda item: item[0])[:limit]]
+
+
 def lookup_named_catalog(query: str, *, limit: int = 2) -> list[dict]:
     """Resolve public catalog terms from the question without returning question text."""
     normalized = _words(query)

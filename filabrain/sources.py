@@ -321,6 +321,7 @@ class _ProductPage(HTMLParser):
                     ) or group_id,
                     "designation": row.get("name"),
                     "sku": row.get("sku"),
+                    "mpn": row.get("mpn"),
                     "color": row.get("color"),
                     "material": row.get("material"),
                     "finish_type": row.get("finish"),
@@ -672,7 +673,7 @@ async def supplier_sitemap_urls(url: str) -> tuple[str, ...]:
     return urls
 
 
-async def paramount_product_urls() -> tuple[str, ...]:
+async def paramount_product_urls(*, strict=False) -> tuple[str, ...]:
     origin = "https://www.paramount-3d.com"
     sitemap = f"{origin}/store-products-sitemap.xml"
     cached = _product_sitemaps.get(sitemap)
@@ -692,6 +693,8 @@ async def paramount_product_urls() -> tuple[str, ...]:
                     return ()
         root = ElementTree.fromstring(body)
     except (httpx.HTTPError, TimeoutError, ElementTree.ParseError):
+        if strict:
+            raise ValueError("Manufacturer product index unavailable") from None
         return ()
     urls = tuple(dict.fromkeys(
         loc.text for loc in root.findall("./{*}url/{*}loc")

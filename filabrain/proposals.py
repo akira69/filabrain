@@ -4,6 +4,7 @@ import json
 import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from difflib import SequenceMatcher
 from typing import Annotated
 from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 
@@ -21,7 +22,7 @@ from sqlalchemy import func, or_, select, tuple_
 
 from .catalog import linked_spool_profile, lookup_filaments, manufacturer_website
 from .color_standards import RAL_NUMBER, normalize_reference, references_in_product_url
-from .knowledge import lookup_catalog, lookup_published_specs
+from .knowledge import lookup_catalog, lookup_catalog_code, lookup_published_specs
 from .model import (
     LIMITS,
     SPEC_LABELS,
@@ -340,6 +341,29 @@ def _on_manufacturer_site(url, domain: str) -> bool:
     )
 
 
+async def verified_product_identity(db: DBSession, page: Evidence) -> Identity:
+    if paramount := _paramount_url_identity(page):
+        return paramount
+    product = page.product or {}
+    candidate = Identity(**product)
+    sku = product.get("mpn") or ""
+    if page.selected_variant_unresolved:
+        sku = ""
+    elif not sku and candidate.manufacturer and candidate.sku:
+        site = await db.scalar(select(Manufacturer.url).where(
+            func.lower(Manufacturer.name) == _norm(candidate.manufacturer)
+        ).limit(1))
+        if not site:
+            try:
+                async with asyncio.timeout(5):
+                    site = manufacturer_site_url(await manufacturer_website(candidate.manufacturer))
+            except (httpx.HTTPError, HTTPException, TimeoutError, ValueError):
+                site = None
+        if _on_manufacturer_site(page.url, _site_host(site)):
+            sku = candidate.sku
+    return candidate.model_copy(update={"sku": sku})
+
+
 def filament_identity(filament: Filament) -> Identity:
     return snapshot_identity(filament_snapshot(filament))
 
@@ -407,7 +431,7 @@ def _catalog_color_mode(item):
 
 
 def bundled_catalog_candidates(identity: Identity, *, sku_hint="", package=None) -> dict[str, list[dict]]:
-    if not identity.manufacturer:
+    if not identity.manufacturer and not (identity.sku or sku_hint):
         return {}
     queries = dict.fromkeys(filter(None, (
         identity.sku or sku_hint,
@@ -417,7 +441,8 @@ def bundled_catalog_candidates(identity: Identity, *, sku_hint="", package=None)
     grouped: dict[str, list[dict]] = {}
     seen = set()
     for query in queries:
-        for row in lookup_catalog(identity.manufacturer, query, limit=200):
+        rows = lookup_catalog(identity.manufacturer, query, limit=200) if identity.manufacturer else lookup_catalog_code(query, limit=200)
+        for row in rows:
             row_id = row["source_id"]
             if row_id in seen or package and row.get("packaging") != package:
                 continue
@@ -569,6 +594,21 @@ def _product_key(value):
     return tuple(re.findall(r"[^\W_]+(?:[.+][\w]+|\+)?", _norm(value)))
 
 
+def _sku_key(value: str) -> str:
+    value = value.strip()
+    if re.fullmatch(r"[a-zA-Z0-9]+(?:[ _.-]+[a-zA-Z0-9]+)*", value):
+        return re.sub(r"[^a-z0-9]", "", value.casefold())
+    return ""
+
+
+def _sku_in_url(sku: str, url: str) -> bool:
+    key = _sku_key(sku)
+    if len(key) < 4:
+        return False
+    pattern = r"(?<![a-z0-9])" + r"[ _.-]*".join(map(re.escape, key)) + r"(?![a-z0-9])"
+    return bool(re.search(pattern, unquote(urlsplit(url).path).casefold()))
+
+
 def _swatch_code(value):
     return bool(re.fullmatch(r"#?[a-f0-9]{6}", _norm(value)))
 
@@ -681,20 +721,23 @@ def _paramount_variant_matches(identity: Identity, page: Evidence, name: str) ->
     return words <= allowed and _norm(identity.material_subgroup) in ("", "basic", hardness)
 
 
-async def _paramount_candidates(identity: Identity, sku: str) -> list[str]:
+async def _paramount_candidates(identity: Identity, sku: str, *, strict=False) -> list[str]:
     material = _material_family(identity.material)
-    if not material:
+    if not material and not sku:
         return []
     keywords = set(_product_key(identity.designation) + _product_key(identity.color)) - {material, "basic", "ral"}
     candidates = []
-    for url in await paramount_product_urls():
+    for url in await (paramount_product_urls(strict=True) if strict else paramount_product_urls()):
         slug = urlsplit(url).path.rsplit("/", 1)[-1].casefold().removeprefix("paramount-3d-")
         terms = set(_product_key(slug.removeprefix(material)))
         overlap = len(terms & keywords)
-        sku_match = bool(sku and _norm(sku) in terms)
+        sku_match = bool(sku and _norm(sku) in terms) or _sku_in_url(sku, url)
+        key = _sku_key(sku)
+        similar = max((SequenceMatcher(None, key, word).ratio() for word in terms
+                       if len(key) >= 6 and abs(len(key) - len(word)) <= 1), default=0)
         exact_name = len(terms) >= 2 and terms <= keywords
-        if sku_match or exact_name or (slug.startswith(material) and overlap):
-            candidates.append(((sku_match, exact_name, overlap, -len(terms - keywords)), url))
+        if sku_match or similar >= .85 or exact_name or (material and slug.startswith(material) and overlap):
+            candidates.append(((sku_match, similar, exact_name, overlap, -len(terms - keywords)), url))
     return [url for _, url in sorted(candidates, reverse=True)[:3]]
 
 
@@ -733,7 +776,7 @@ async def _manufacturer_sitemap_candidates(
             continue
         slug = unquote(urlsplit(link).path.rstrip("/").rsplit("/", 1)[-1])
         words = _product_key(slug)
-        sku_match = bool(article_slug and f"-{article_slug}-" in f"-{'-'.join(words)}-")
+        sku_match = bool(article_slug and f"-{article_slug}-" in f"-{'-'.join(words)}-") or _sku_in_url(article, link)
         name_match = len(name) >= 2 and name.issubset(words)
         if sku_match or name_match:
             ranked[supplier_page_url(link)] = (sku_match, name_match, -len(words))
@@ -788,7 +831,7 @@ def _packaged_product(identity: Identity, page: Evidence, snapshot):
         or (product.get("finish_type") and finish and _norm(product["finish_type"]) != finish)
         or (suffix and _norm(suffix) != _norm(identity.material))
         or not _literal_in(_material_family(identity.material), name)
-        or (identity.sku and _norm(identity.sku) not in {part, _norm(product.get("sku"))})
+        or (identity.sku and _norm(identity.sku) not in {part, _norm(product.get("mpn") or product.get("sku"))})
         or (identity.diameter_mm is not None and float(diameter) != identity.diameter_mm)
         or (identity.weight_g is not None and nominal_weight != identity.weight_g
             and not (linked_weight and abs(nominal_weight - identity.weight_g) <= nominal_weight * 0.02))
@@ -853,7 +896,8 @@ def _paramount_url_identity(page: Evidence) -> Identity | None:
 
 def _conflicting_supplier_sku(identity: Identity, page: Evidence) -> bool:
     expected = _norm(identity.sku)
-    stated = _norm((page.product or {}).get("sku"))
+    product = page.product or {}
+    stated = _norm(product.get("mpn") or (product.get("sku") if page.manufacturer_page else None))
     return bool(expected and stated and expected != stated)
 
 
@@ -923,16 +967,19 @@ def _supplier_scopes(identity: Identity, page: Evidence, snapshot=None) -> list[
 
     matches = []
     shared = []
+    accepted_skus = {_norm(identity.sku)} - {""}
+    if identity.sku and _norm(product.get("mpn")) == _norm(identity.sku) and product.get("sku"):
+        accepted_skus.add(_norm(product["sku"]))
     for text in dict.fromkeys(page.scopes if page.scopes is not None else (page.text,)):
         universal = bool(SHARED_SPEC.search(text))
         if page.selected_variant_unresolved and not universal:
             continue
         labelled_skus = {_norm(found) for found in _LABELLED_SKU.findall(text)}
-        row_sku = _norm(identity.sku) in labelled_skus or _literal_in(identity.sku, text)
+        row_sku = bool(labelled_skus & accepted_skus) or _literal_in(identity.sku, text)
         if universal and labelled_skus:
             continue
         if _norm(identity.sku) and (
-            labelled_skus - {_norm(identity.sku)}
+            labelled_skus - accepted_skus
             or not (row_sku or universal)
         ):
             continue
@@ -1013,8 +1060,11 @@ def _supplier_variants_disagree(evidence: list[Evidence], identity: Identity, sn
             continue
         product = source.product or {}
         if "sku" in unknown:
+            skus = [product.get("mpn")]
+            if source.manufacturer_page:
+                skus = _LABELLED_SKU.findall(source.text) or [product.get("mpn") or product.get("sku")]
             unknown["sku"].update(
-                _product_key(value) for value in _LABELLED_SKU.findall(source.text) or [product.get("sku")] if value
+                _product_key(value) for value in skus if value
             )
         for key in ("color", "finish_type", "material_subgroup"):
             if key in unknown and product.get(key):
@@ -1447,7 +1497,8 @@ async def research_products(
     sku_hint = sku_hint.strip()
     if snapshot is None and not (identity.sku.strip() or identity.designation.strip()) and sku_hint:
         identity = identity.model_copy(update={"sku": sku_hint})
-    if snapshot is None and (duplicates := await duplicate_ids(db, identity, palette=palette, sku_hint=sku_hint)):
+    if (snapshot is None and not (product_url and not identity.designation)
+            and (duplicates := await duplicate_ids(db, identity, palette=palette, sku_hint=sku_hint))):
         issues.extend({"code": "duplicate", "filament_id": ident} for ident in duplicates)
         return proposal
     _, config = await config_record(db)
@@ -1464,6 +1515,8 @@ async def research_products(
     primary_fields: set[str] = set()
     sheet_fields: set[str] = set()
     field_options: dict[str, list[dict]] = {}
+    manufacturer_domain = ""
+    verified_sku_sources: dict[str, set[str]] = {}
 
     @asynccontextmanager
     async def network_time(seconds=None):
@@ -1482,6 +1535,19 @@ async def research_products(
             and (field not in MODE_FIELDS["fill"] or not is_missing(field, snapshot.get(field)))
         ):
             return False
+        if field == "manufacturer_sku":
+            # A supplier's product code need not be the manufacturer's part number.
+            for citation in citations:
+                url = citation.get("url")
+                page = checked_pages.get(url)
+                if (
+                    url in verified_sku_sources.get(_norm(value), set())
+                    or _on_manufacturer_site(url, manufacturer_domain)
+                    or page and _norm((page.product or {}).get("mpn")) == _norm(value)
+                ):
+                    break
+            else:
+                return False
         options = field_options.setdefault(field, [])
         same = next((option for option in options if option["value"] == value), None)
         if same is None:
@@ -1528,6 +1594,10 @@ async def research_products(
                 {"code": "duplicate", "filament_id": ident} for ident in duplicates
             )
             return False
+        if candidate.sku:
+            verified_sku_sources.setdefault(_norm(candidate.sku), set()).update(
+                source["url"] for source in cite(candidate.sku)
+            )
         if candidate.manufacturer:
             ids = list(
                 await db.scalars(
@@ -1626,18 +1696,35 @@ async def research_products(
         snapshot is None
         and product_url
         and not identity.designation
-        and not identity.sku
     )
     if resolve_pasted_url and product_url:
         pasted_page = await supplier(product_url)
         paramount = _paramount_url_identity(pasted_page) if pasted_page else None
         if pasted_page and (paramount or pasted_page.product):
-            product = paramount or Identity(**pasted_page.product)
+            try:
+                async with network_time():
+                    product = await verified_product_identity(db, pasted_page)
+            except TimeoutError:
+                product = paramount or Identity(**pasted_page.product).model_copy(update={"sku": ""})
+                issues.append({"code": "unavailable_source", "source": "Manufacturer website", "reason": "Request timed out"})
             fields = ("material", "color", "diameter_mm", "weight_g")
             constraints = {
                 key: getattr(identity, key) for key in fields if getattr(identity, key)
             }
-            if (
+            sku_agrees = not identity.sku or _norm(identity.sku) == _norm(product.sku)
+            if not sku_agrees and _sku_key(identity.sku) and _sku_key(identity.sku) == _sku_key(product.sku):
+                site = await db.scalar(select(Manufacturer.url).where(
+                    func.lower(Manufacturer.name) == _norm(product.manufacturer)
+                ).limit(1))
+                sku_agrees = bool(paramount or _on_manufacturer_site(pasted_page.url, _site_host(site)))
+                if not sku_agrees and product.manufacturer:
+                    try:
+                        async with network_time(5):
+                            site = manufacturer_site_url(await manufacturer_website(product.manufacturer))
+                        sku_agrees = _on_manufacturer_site(pasted_page.url, _site_host(site))
+                    except TimeoutError:
+                        pass
+            if sku_agrees and (
                 not identity.manufacturer
                 or _norm(identity.manufacturer) == _norm(product.manufacturer)
             ) and (
@@ -1659,6 +1746,7 @@ async def research_products(
 
                 if not await add_draft_identity(product, cite_product, include_color=not paramount):
                     return proposal
+                add("shop_url", pasted_page.url, cite_product(pasted_page.title))
                 identity = product.model_copy(update=constraints)
                 matched_pasted_identity = True
                 verified_paramount_url = bool(paramount)
@@ -2014,6 +2102,10 @@ async def research_products(
                     issues.append({"code": "color_required", "name": candidate.color})
         if snapshot is not None:
             for row, variant in matches:
+                if variant.sku:
+                    verified_sku_sources.setdefault(_norm(variant.sku), set()).update(
+                        source["url"] for source in cite(variant.sku, row, variant)
+                    )
                 for field, value in row_values(row, variant).items():
                     if field in shared_fields:
                         add(field, value, cite(value, row, variant))
@@ -2639,8 +2731,9 @@ async def research_products(
         if field not in conflict
     ]
     if not proposal["suggestions"]:
-        issues.append({"code": "no_verified_values" if all_matches or evidence or authoritative_docs else "no_match"})
-    if not all_matches or unresolved_variants or ambiguous_identity:
+        issues.append({"code": "no_verified_values" if all_matches or evidence or authoritative_docs
+                       else "search_incomplete" if search_issue else "no_match"})
+    if (not all_matches and not matched_pasted_identity) or unresolved_variants or ambiguous_identity:
         for matches in possible_matches.values():
             issues.extend(matches)
         titles = {url: page.title for url, page in pages.items() if page}

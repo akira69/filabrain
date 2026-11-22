@@ -4,6 +4,7 @@ const html=await readFile(new URL('../filabrain/page.html',import.meta.url),'utf
 const {chromium}=await import(process.env.PLAYWRIGHT_MODULE||'playwright-core')
 const browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE_PATH})
 let release
+const chatRequests=[]
 const held=new Promise(resolve=>release=resolve)
 let restoreRelease, restoreRequested, replyRelease, replyRequested
 const restoreHeld=new Promise(resolve=>restoreRelease=resolve)
@@ -25,7 +26,10 @@ try{
   if(path.endsWith('/me'))return route.fulfill({json:{id:1}})
   if(path.endsWith('/batches'))return route.fulfill({json:[]})
   if(path.endsWith('/chat')){
-   const content=route.request().postDataJSON().messages.at(-1).content
+   const body=route.request().postDataJSON()
+   chatRequests.push(body)
+   const content=body.messages.at(-1).content
+   if(content==='Find my reel')return route.fulfill({json:{reply:'Choose a reel',spool_profiles:[{id:'spool-a',title:'Reel A',source:'OnlySpoolz',url:'https://www.onlyspoolz.com/portfolio/a/',empty_weight_g:200}],action:null}})
    if(content==='First question'){requested();await held}
    if(content==='Slow question'){replyRequested();await replyHeld}
    if(content==='Stop question'){stopRequested();await stopHeld}
@@ -50,14 +54,14 @@ try{
  await chat.getByRole('button',{name:'Send message',exact:true}).click()
  await started
  await tabs.getByRole('tab',{name:'New',exact:true}).click()
- await research.getByLabel('Product name',{exact:true}).fill('Paramount sample')
+ await research.locator('#research-query').fill('Paramount sample')
  release()
  await tabs.getByRole('tab',{name:'Chat',exact:true}).click()
  await chat.getByText('Reply to First question',{exact:true}).waitFor()
  assert.match(await page.locator('[data-chat-history]:visible summary').innerText(),/First question/)
  await question.fill('Unsent draft')
  await tabs.getByRole('tab',{name:'New',exact:true}).click()
- assert.equal(await research.getByLabel('Product name',{exact:true}).inputValue(),'Paramount sample')
+ assert.equal(await research.locator('#research-query').inputValue(),'Paramount sample')
  await tabs.getByRole('tab',{name:'Chat',exact:true}).click()
  assert.equal(await question.inputValue(),'Unsent draft')
  await page.getByRole('button',{name:'New chat',exact:true}).click()
@@ -114,6 +118,37 @@ try{
  const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('filabrain:chat:1')))
  assert.ok(stored.find(item=>item.title==='First question').messages.some(item=>item.content==='Reply to Newest question'))
  await stale.close()
+ // Navigation keeps spool card callbacks attached to the current transcript.
+ await page.getByRole('button',{name:'New chat',exact:true}).click()
+ await question.fill('Find my reel')
+ await chat.getByRole('button',{name:'Send message',exact:true}).click()
+ await chat.getByRole('button',{name:'This matches: Reel A'}).waitFor()
+ await question.fill('Follow up about my reel')
+ await page.getByRole('button',{name:'FilaBrain settings',exact:true}).click()
+ await tabs.getByRole('tab',{name:'Chat',exact:true}).click()
+ await chat.getByRole('button',{name:'This matches: Reel A'}).click()
+ await chat.getByRole('button',{name:'Send message',exact:true}).click()
+ await chat.getByText('Reply to Follow up about my reel',{exact:true}).waitFor()
+ assert.equal(chatRequests.at(-1).selected_spool_profile_id,'spool-a','a choice after saving an unsent draft reaches the request')
+ // Adopting a newer stored transcript also rebinds existing spool cards.
+ const older=await context.newPage()
+ await older.goto('https://fila.test/plugin-page/filabrain')
+ await older.locator('[data-chat-history]:visible summary').click()
+ await older.locator('[data-chat-history-list]:visible').getByRole('button',{name:'Find my reel',exact:true}).click()
+ await older.getByText('Reply to Follow up about my reel',{exact:true}).waitFor()
+ await question.fill('Updated elsewhere')
+ await chat.getByRole('button',{name:'Send message',exact:true}).click()
+ await chat.getByText('Reply to Updated elsewhere',{exact:true}).waitFor()
+ await older.getByRole('textbox',{name:'Your question'}).fill('Follow up after newer transcript')
+ await older.getByRole('button',{name:'FilaBrain settings',exact:true}).click()
+ await older.getByRole('tab',{name:'Chat',exact:true}).click()
+ await older.getByText('Reply to Updated elsewhere',{exact:true}).waitFor()
+ await older.getByRole('button',{name:'Selected: Reel A'}).click()
+ await older.getByRole('button',{name:'This matches: Reel A'}).click()
+ await older.getByRole('button',{name:'Send message',exact:true}).click()
+ await older.getByText('Reply to Follow up after newer transcript',{exact:true}).waitFor()
+ assert.equal(chatRequests.at(-1).selected_spool_profile_id,'spool-a','a choice after adopting newer stored messages reaches the request')
+ await older.close()
  await tabs.getByRole('tab',{name:'Chat',exact:true}).focus()
  await page.keyboard.press('ArrowRight')
  assert.equal(await tabs.getByRole('tab',{name:'New',exact:true}).getAttribute('aria-selected'),'true')
