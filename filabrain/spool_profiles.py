@@ -402,7 +402,8 @@ async def find_spool_profiles(
         reply = "I found possible spool designs. " + STYLE_QUESTION
     else:
         return spool_profile_result(profiles[0], intent, candidate=True)
-    return {"reply": reply, "action": None, "spool_profiles": profiles}
+    return {"reply": reply, "action": None, "spool_profiles": profiles,
+            "source_status": "complete" if any(catalogs) else "unavailable"}
 
 
 def spool_profile_result(profile: dict, intent: str, *, candidate: bool = False) -> dict:

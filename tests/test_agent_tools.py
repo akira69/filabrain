@@ -89,6 +89,7 @@ async def test_agent_color_audit_reports_shared_scope_without_renaming(installed
         assert item['references'][0]['proposed_name'] == 'Traffic red (RAL 3020)'
     await db_session.refresh(color)
     assert color.name == 'RAL3020'
+    await db_session.refresh(products[0])
     assert products[0].manufacturer_color_name == 'Enzo Red'
 
 
@@ -167,9 +168,74 @@ async def test_agent_audit_deadline_returns_unprocessed_ids(installed, db_sessio
     filament = Filament(manufacturer_id=maker.id, designation='Unknown PLA', material_type='PLA', diameter_mm=1.75)
     db_session.add(filament)
     await db_session.commit()
+    identifier = filament.id
     monkeypatch.setattr(agent_tools, 'batch_proposal', AsyncMock(side_effect=TimeoutError))
     response = await installed.post(f'{BASE}/agent/color-audit', json={'filament_ids': [filament.id]})
     assert response.status_code == 200, response.text
     assert response.json()['complete'] is False
-    assert response.json()['remaining_filament_ids'] == [filament.id]
+    assert response.json()['remaining_filament_ids'] == [identifier]
     assert response.json()['items'] == []
+
+
+async def test_spool_tool_retains_the_existing_linked_design(installed, db_session, monkeypatch, catalog_requests):
+    from app.api.v1 import filamentdb_proxy
+    from fastapi import HTTPException
+    maker = Manufacturer(name='Paramount 3D')
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(manufacturer_id=maker.id, designation='PLA', material_type='PLA', diameter_mm=1.75,
+                        raw_material_weight_g=1000, filamentdb_spool_profile_id=735)
+    db_session.add(filament)
+    await db_session.commit()
+    async def lookup(path, _params=None):
+        if path == '/spool-profiles/735':
+            return {'id': 735, 'name': 'Paramount 3D PLA Spool', 'image_file': '735.png', 'empty_weight_g': 170, 'net_weight_g': 1000}
+        raise HTTPException(503)
+    monkeypatch.setattr(filamentdb_proxy, '_proxy_get', lookup)
+    response = await installed.post(f'{BASE}/agent/spools', json={'filament_id': filament.id})
+    assert response.status_code == 200, response.text
+    assert any(p['id'] == 'filamandb-735' for p in response.json()['spool_profiles'])
+
+
+async def test_color_audit_missing_and_omitted_references_are_not_complete(installed, db_session, publisher, monkeypatch):
+    from filabrain import agent_tools
+    maker = Manufacturer(name='Five references')
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(manufacturer_id=maker.id, designation='PLA', material_type='PLA', diameter_mm=1.75)
+    db_session.add(filament)
+    await db_session.commit()
+    async def codes(*_):
+        return ['RAL 3020', 'RAL 4007', 'RAL 5002', 'RAL 9004', 'RAL 9010']
+    monkeypatch.setattr(agent_tools, 'saved_references', codes)
+    response = await installed.post(f'{BASE}/agent/color-audit', json={'filament_ids': [filament.id, 999999]})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result['complete'] is False
+    assert result['unavailable_filament_ids'] == [999999]
+    assert result['items'][0]['omitted_reference_codes'] == ['RAL 9010']
+
+
+async def test_color_audit_rechecks_access_after_publisher_timeout(installed, db_session, monkeypatch):
+    from fastapi import HTTPException
+
+    from filabrain import agent_tools
+    maker = Manufacturer(name='Timed out')
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(manufacturer_id=maker.id, designation='PLA', material_type='PLA', diameter_mm=1.75, manufacturer_color_name='RAL 3020')
+    db_session.add(filament)
+    await db_session.commit()
+    expired = False
+    original = agent_tools.read_access
+    async def access(*args):
+        if expired:
+            raise HTTPException(403, 'Access revoked')
+        return await original(*args)
+    async def timeout(_):
+        nonlocal expired
+        expired = True
+        raise TimeoutError
+    monkeypatch.setattr(agent_tools, 'read_access', access)
+    monkeypatch.setattr(agent_tools, 'resolve_preview', timeout)
+    assert (await installed.post(f'{BASE}/agent/color-audit', json={'filament_ids': [filament.id]})).status_code == 403

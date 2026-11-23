@@ -42,9 +42,9 @@ Interfaces: `choose_job_spools`, `audit_library`, `plan_stock` validated read ha
 
 Files: `filabrain/agent_tools.py`, new `tests/test_agent_intake.py`.
 Interfaces: `plan_filament_intake` combines research with exact color previews, spool candidates, required fields, duplicate notices and read-only filament/spool drafts. All composed calls share the MCP deadline and do not share a DB session concurrently.
-- [ ] Write tests for SKU discovery, selected Paramount RAL/Pantone product, unavailable publisher, conflicting/fuzzy/duplicate identity, unknown tare, permissions and no database writes.
-- [ ] Run RED; implement and register intake plus Task 2 MCP tools using shared handlers. Add HTTP read routes for Chat.
-- [ ] Verify GREEN and commit `feat: assemble reviewed filament intake proposals`.
+- [x] Write tests for SKU discovery, selected Paramount RAL/Pantone product, unavailable publisher, conflicting/fuzzy/duplicate identity, unknown tare, permissions and no database writes.
+- [x] Run RED; implement and register intake plus Task 2 MCP tools using shared handlers. Add HTTP read routes for Chat.
+- [x] Verify GREEN and commit `feat: assemble reviewed filament intake proposals`.
 
 ### Task 4: Chat workflow entry and review handoff
 

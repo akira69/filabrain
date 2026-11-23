@@ -134,7 +134,7 @@ async def choose_job_spools(args: JobArguments, db: DBSession, principal: Princi
         'enough_material_spool_ids': enough, 'compatibility_requires_review': True, 'requires_review': True})
 
 
-async def duplicate_group(db, filament):
+async def duplicate_group(db, filament, *, minimum=2):
     key = _sku_key(filament.manufacturer_sku or '')
     if not key:
         return None
@@ -145,7 +145,7 @@ async def duplicate_group(db, filament):
                func.lower(Filament.material_type) == filament.material_type.casefold(),
                Filament.diameter_mm == filament.diameter_mm)
     count = await db.scalar(select(func.count(Filament.id)).where(*filters))
-    if count < 2:
+    if count < minimum:
         return None
     ids = list(await db.scalars(select(Filament.id).where(*filters).order_by(Filament.id).limit(50)))
     return {'filament_ids': ids, 'total': count, 'truncated': count > len(ids),
