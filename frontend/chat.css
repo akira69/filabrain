@@ -277,3 +277,11 @@ main:has([data-tab="new"][aria-current]) .message-composer:has(textarea:disabled
 .chat-tasks select { max-width: 12rem; }
 .chat-tasks input[type="number"] { width: 6rem; }
 .chat-task-sources { color: var(--text-muted); }
+
+.color-assistant-review { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-block: .5rem; padding: .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.color-assistant-review .swatch-current { grid-column: 1 / -1; }
+.color-assistant-review .research-match-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-block-start: .5rem; }
+.color-context-note { margin: .25rem .75rem; }
+@media (max-width: 620px) { .color-assistant-review { grid-template-columns: minmax(0, 1fr); } }
+
+.color-assistant-review .fm-btn { max-width: 100%; white-space: normal; text-align: start; }

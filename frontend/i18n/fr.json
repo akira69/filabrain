@@ -391,7 +391,8 @@
     "taskRankedCandidates": "Candidats classés, pas un comptage exhaustif du stock.",
     "taskDraftDetails": "Champs du filament recherchés",
     "taskProductIncomplete": "Certaines sources produit n’ont pas pu être vérifiées. Consultez les preuves disponibles.",
-    "taskPackageUnknown": "Le poids net reste à vérifier avant de choisir le modèle de bobine."
+    "taskPackageUnknown": "Le poids net reste à vérifier avant de choisir le modèle de bobine.",
+    "taskQueryTooLong": "Limitez les indices à 400 caractères ou collez une URL produit."
   },
   "researchBatches": {
     "title": "Suivi des recherches",
@@ -993,5 +994,20 @@
     "scannerDeviceAny": "Le dernier à avoir scanné",
     "scannerDeviceHint": "À choisir si plusieurs balances sont utilisées et que cet écran ne doit en suivre qu'une seule.",
     "scannerDeviceOffline": "Lecteur « {id} » (n'a encore signalé aucun scan)"
+  },
+  "colorAssistant": {
+    "task": "Trouver une couleur",
+    "hint": "Référence RAL / Pantone, SKU, URL produit ou indices de couleur…",
+    "newColor": "Nouvelle couleur",
+    "usage": "Utilisée par {count} filaments",
+    "scope": "Vérifiez les modifications dans le formulaire avant de sauvegarder. L’opacité est conservée.",
+    "use": "Utiliser dans le formulaire",
+    "staged": "Reporté dans le formulaire. Vérifiez puis cliquez sur Enregistrer dans FilaMan.",
+    "open": "Ouvrir la couleur existante : {name}",
+    "unknown": "Aperçu écran de l’éditeur indisponible.",
+    "changed": "Le formulaire a changé ou n’a pas accepté la proposition. Rouvrez FilaBrain pour actualiser son contexte.",
+    "unavailable": "Cet éditeur de couleurs FilaMan ne prend pas en charge le report des propositions.",
+    "currentDraft": "Brouillon couleur actuel",
+    "productEvidence": "Sources produit / catalogue"
   }
 }

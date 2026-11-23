@@ -1,6 +1,7 @@
 import { api, ApiError } from './shared/api'
 import { getLang, t } from './shared/i18n'
 import { mountAgentTasks, type AgentTask } from './agent-tasks'
+import { colorContextNote, colorReview, type ColorHost } from './color-assistance'
 import type { SpoolResearchInput } from './spool-intake'
 import { productCandidate, researchIssueText, researchFieldLabel, type ResearchProposal } from './shared/filabrain'
 import { spoolProfileCards, type SpoolProfile } from './shared/spool-profiles'
@@ -17,7 +18,7 @@ const pageLabels = {
   research_batches: 'researchBatches.title',
   model_settings: 'filaBrain.settings',
 }
-type Action = { page: keyof typeof pageLabels; url: string } | { page: 'intake'; proposal?: ResearchProposal }
+type Action = { page: keyof typeof pageLabels; url: string } | { page: 'intake' | 'color'; proposal?: ResearchProposal }
 type Evidence = {
   id: string; kind: string; title: string; url: string; text?: string; details?: Record<string, unknown>
   scope?: 'grade' | 'variant'
@@ -128,7 +129,7 @@ function evidenceLink(title: string, url: string) {
   return element
 }
 
-export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean; microphone_enabled?: boolean } & DictationSettings, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: (input?: SpoolResearchInput) => void; context?: ChatContextSnapshot } = {}) {
+export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean; microphone_enabled?: boolean } & DictationSettings, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: (input?: SpoolResearchInput) => void; context?: ChatContextSnapshot; colorHost?: ColorHost } = {}) {
   const root = options.root ?? document.querySelector<HTMLElement>('[data-view="chat"]')!
   let model = statusModel.chat_model
   const form = root.querySelector<HTMLFormElement>('[data-chat-form]')!
@@ -182,7 +183,11 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   let evidenceCount = 0
   let intakeChoice: { product_url: string; sku_hint?: string; identity: ResearchProposal['target']['identity'] } | undefined
   const modelPicker = mountModelPicker(form, model, openSettings, statusModel.chat_endpoint_id, updateControls)
-  const agent = mountAgentTasks(form, !!statusModel.can_read_spools, updateControls)
+  const agent = mountAgentTasks(form, !!statusModel.can_read_spools, updateControls, !!options.colorHost)
+  if (options.colorHost) {
+    form.before(colorContextNote(options.colorHost))
+    input.value = options.colorHost.context.fields.name
+  }
   const picker = form.querySelector<HTMLElement>('.chat-model-picker')!
   status.removeAttribute('data-i18n')
   status.textContent = ''
@@ -198,8 +203,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     input.hidden = !researching && !taskActive && !modelPicker.hasOptions
     form.querySelector<HTMLElement>('.chat-toolbar')!.hidden = input.hidden
     input.disabled = !researching && !taskActive && !modelPicker.hasOptions || researching && !current.messages.length && !busyResearch
-    input.maxLength = researching ? 400 : 2000
-    input.placeholder = t(researching ? 'filaBrain.followUpHint' : taskActive ? agent.value === 'intake' ? 'filaBrain.taskIntakeHint' : agent.value === 'job-fit' ? 'filaBrain.taskJobHint' : 'filaBrain.taskFilterHint' : 'filaBrain.chatPlaceholder')
+    input.maxLength = researching ? 400 : taskActive ? 2048 : 2000
+    input.placeholder = t(researching ? 'filaBrain.followUpHint' : taskActive ? agent.value === 'color' ? 'colorAssistant.hint' : agent.value === 'intake' ? 'filaBrain.taskIntakeHint' : agent.value === 'job-fit' ? 'filaBrain.taskJobHint' : 'filaBrain.taskFilterHint' : 'filaBrain.chatPlaceholder')
     input.setAttribute('aria-label', t(researching ? 'filaBrain.followUp' : 'filaBrain.chatQuestion'))
     submit.disabled = !contextReady || busyResearch || staging || !request && (input.disabled || !input.value.trim() && !agent.allowsEmpty)
     contextPanel.hidden = researchOnly || researching || input.hidden || taskActive && agent.value !== 'job-fit'
@@ -285,6 +290,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       list.append(item)
     }
     if (list.childElementCount) facts.append(list)
+    if (facts.childElementCount === 1) return
     paragraph.replaceChildren()
     let offset = 0
     for (const match of content.matchAll(/\[([^\[\]\r\n]{1,128})\]/g)) {
@@ -347,12 +353,12 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         log.append(next)
       }
     }
-    if (message.action?.page === 'intake' && message.action.proposal) {
+    if ((message.action?.page === 'intake' || message.action?.page === 'color') && message.action.proposal) {
       const proposal = message.action.proposal
       const candidates = proposal.issues.filter(issue => issue.code === 'possible_match')
       for (const issue of candidates) log.append(productCandidate(issue, (url, sku) => {
         if (request) return
-        agent.restore({ task: 'intake', grams: '', checkSources: false })
+        agent.restore({ task: message.action!.page === 'color' ? 'color' : 'intake', grams: '', checkSources: false })
         input.value = url
         intakeChoice = { product_url: url, sku_hint: sku || proposal.discovery_sku, identity: proposal.target.identity }
         updateControls()
@@ -370,23 +376,37 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         }
         log.append(notes)
       }
-      if (!candidates.length && proposal.suggestions.length) {
+      if (message.action.page === 'color' && !candidates.length && options.colorHost && proposal.color_previews?.length) {
+        log.append(colorReview(proposal.color_previews, options.colorHost, () => !!request || staging, value => { staging = value; updateControls() }))
+      }
+      const colorResult = message.action.page === 'color'
+      const suggestions = colorResult
+        ? proposal.suggestions.filter(item => item.field === 'manufacturer_color_name' && item.sources?.length)
+        : proposal.suggestions
+      if (!candidates.length && suggestions.length) {
         const details = document.createElement('details')
         details.className = 'chat-evidence'
         const summary = document.createElement('summary')
-        summary.textContent = t('filaBrain.taskDraftDetails')
+        summary.textContent = t(colorResult ? 'colorAssistant.productEvidence' : 'filaBrain.taskDraftDetails')
         const fields = document.createElement('dl')
-        for (const suggestion of proposal.suggestions) {
+        for (const suggestion of suggestions) {
           const title = document.createElement('dt'), value = document.createElement('dd')
           title.textContent = researchFieldLabel(suggestion.field)
           value.textContent = evidenceValue(suggestion.value)
-          for (const source of suggestion.sources || []) if (source.url) value.append(' ', evidenceLink(source.title, source.url))
+          for (const source of suggestion.sources || []) {
+            if (source.url) value.append(' ', evidenceLink(source.title, source.url))
+            if (colorResult && source.evidence) {
+              const quote = document.createElement('p')
+              quote.textContent = source.evidence
+              value.append(quote)
+            }
+          }
           fields.append(title, value)
         }
         details.append(summary, fields)
         log.append(details)
       }
-      if (!candidates.length && (proposal.suggestions.length || proposal.target.identity.designation) && options.openResearch) {
+      if (message.action.page !== 'color' && !candidates.length && (proposal.suggestions.length || proposal.target.identity.designation) && options.openResearch) {
         const button = document.createElement('button')
         button.type = 'button'
         button.className = 'fm-btn fm-btn-outline chat-action'
@@ -400,7 +420,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         log.append(button)
       }
     }
-    if (message.action && message.action.page !== 'intake' && Object.hasOwn(pageLabels, message.action.page)) {
+    if (message.action && 'url' in message.action && Object.hasOwn(pageLabels, message.action.page)) {
       const { page, url } = message.action
       if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') && !url.includes('\\')) {
         const link = document.createElement('a')
@@ -709,6 +729,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       return
     }
     const entered = input.value.trim()
+    if (agent.active && entered.length > 400 && !/^https?:\/\/\S+$/i.test(entered)) {
+      status.textContent = t('filaBrain.taskQueryTooLong')
+      return
+    }
     const content = entered || (agent.allowsEmpty ? t(agent.value === 'stock' ? 'filaBrain.taskStock' : 'filaBrain.taskHealth') : '')
     if (!content || busyResearch || staging) return
     const pendingContext = contextInitialization
@@ -727,8 +751,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     if (!conversation.id) conversation.id = newId()
     if (!conversation.title) conversation.title = content.slice(0, 100)
     const choiceModel = modelPicker.selected
-    const taskRequest = agent.active ? agent.value === 'intake' && intakeChoice
-      ? { path: '/agent/intake', body: intakeChoice } : agent.request(entered, chatContext.snapshot()) : undefined
+    const taskRequest = agent.active ? ['intake', 'color'].includes(agent.value) && intakeChoice
+      ? { path: agent.value === 'color' ? '/agent/color-intake' : '/agent/intake', body: intakeChoice } : agent.request(entered, chatContext.snapshot()) : undefined
     const taskOptions = agent.snapshot()
     intakeChoice = undefined
     const question: Message = { role: 'user', content }
@@ -773,7 +797,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       const spoolProfiles = Array.isArray(spool_profiles) ? spool_profiles.slice(0, 4) : undefined
       if (selected_spool_profile_id && lookup && !lookup.spoolLookupId) lookup.spoolLookupId = newId()
       const answer: Message = {
-        role: 'assistant', content: reply, action: action?.page === 'intake' ? { ...action, proposal } : action ?? undefined,
+        role: 'assistant', content: reply, action: (action?.page === 'intake' || action?.page === 'color') ? { ...action, proposal } : action ?? undefined,
         usage,
         usageModel: taskRequest ? undefined : choiceModel,
         report: taskRequest ? { task: taskOptions, query: entered, coverage, complete } : undefined,

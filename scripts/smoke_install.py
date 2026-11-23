@@ -150,6 +150,19 @@ async def smoke(host: Path, archive: Path, directory: Path, previous: Path | Non
                 assert not result.get("isError"), result
                 assert json.loads(result["content"][0]["text"])["requires_review"] is True
 
+            from filabrain import color_standards
+
+            async def publisher_fixture(url):
+                assert url == color_standards.RAL_PAGE
+                return b'<a href="/en/colour/ral-classic/ral-3020/9143" style="background-color:#AB1519"><span>RAL</span><span class="number">3020</span><div class="subtext">Traffic red</div></a>'
+
+            with patch.object(color_standards, 'read_asset', publisher_fixture):
+                color_result = await browser.post(f"{root}/agent/color-intake", headers=headers, json={'query': 'RAL 3020'})
+                assert color_result.status_code == 200, color_result.text
+                assert color_result.json()['proposal']['color_previews'][0]['hex_code'] == '#AB1519'
+                assert color_result.json()['requires_review'] is True
+            assert (await browser.post(f"{root}/agent/color-intake", headers=headers, json={'query': 'RAL 3020', 'apply': True})).status_code == 422
+
             from filabrain import knowledge, proposals, research
 
             catalog = knowledge.lookup_catalog("Bambu Lab", "PLA Basic Bambu Green", limit=6)

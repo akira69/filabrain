@@ -13,6 +13,7 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 - Add filament, Choose spool, Check library and Plan stock tasks in Chat, with saved options and reviewed draft handoff.
 - Shared read tools on FilaMan's built-in MCP for intake, exact RAL/Pantone swatches, spool designs, color audits and inventory planning.
 - Explicit unknown weights, product/design choices, partial coverage and source failures; inventory changes still require review.
+- On hosts with color-editor launchers, find official RAL/Pantone previews and stage reviewed Name/RGB changes into the native color form, preserving opacity and native Save.
 
 ### What's new in 0.1.27 (development preview)
 
@@ -143,6 +144,8 @@ Select a task above the message box. These read services work without a chat mod
 - **Choose spool:** describe the job and enter the required grams. Check each spool's measured remaining weight, material evidence and optional printer context. Separate rolls are not combined, unknown weights cannot qualify, and enough material does not establish printer compatibility.
 - **Check library:** optionally filter by manufacturer, material, SKU or name. Review missing specs/swatches, naming conventions and duplicate SKU candidates. Reports cover up to 25 matching filaments per chat request; use **Next page** to continue with the same filter and options. Optional product-link checks cover at most five links and distinguish blocked access from a missing page.
 - **Plan stock:** optionally filter and supply a target in grams per filament, or use saved thresholds on hosts that support them. Unknown remaining weights or package sizes prevent a confident order quantity. Consumption totals exclude measurements and corrections. Nothing is ordered.
+
+When opened from a supported Add/Edit Color launcher, Chat offers **Find color** and general Chat. **Product / catalog evidence** shows the original color name, source links and quoted text separately from the publisher's swatch preview. It preloads the draft name, shows shared usage and official publisher previews, and can stage reviewed Name/RGB values with the original opacity. Native Save persists the changes. Opening an existing swatch uses the host's dirty-form confirmation; it does not merge colors or reassign links. Older hosts retain the existing filament workflows without this launcher.
 
 Task choices, options, drafts and results stay with each chat. All findings require review; use the existing native editor for library corrections. Color audits of selected filaments remain available in Research library.
 

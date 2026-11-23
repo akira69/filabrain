@@ -11,6 +11,7 @@ from . import (
     agent_tools,
     audio,
     batch_api,
+    color_assistance,
     color_review,
     research,
     settings,
@@ -37,7 +38,7 @@ router = APIRouter(
     dependencies=[Depends(ensure_schema)],
     lifespan=lifespan,
 )
-for routes in (research.router, settings.router, batch_api.router, audio.router, color_review.router, agent_tools.router, agent_inventory.router):
+for routes in (research.router, settings.router, batch_api.router, audio.router, color_review.router, agent_tools.router, agent_inventory.router, color_assistance.router):
     router.include_router(routes)
 
 

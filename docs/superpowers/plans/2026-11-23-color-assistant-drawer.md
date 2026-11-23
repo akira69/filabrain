@@ -10,6 +10,7 @@
 ## Global constraints
 
 - No upstream PR or release. Preserve unrelated work and pending LAN audits.
+- User reassigned all host work to the Design plugin UI launchers thread; this branch now owns only FilaBrain lookup, review UI, a narrow host adapter, icon opt-in, tests and package. Host prototype is preserved separately and will not be pushed.
 - Host minimum form width 600px, drawer minimum 384px, gap16px and preferred drawer560px; smaller windows use native modality.
 - Same iframe across transitions; explicit proposal staging and ordinary native Save. Preserve opacity and reject stale edits.
 - Generic host hooks, no plugin DOM injection, duplicate MCP server or added dependencies. Older hosts retain existing plugin behavior.
@@ -22,13 +23,13 @@
 - Unknown publishers and fuzzy products cannot become automatic saved colors or palette merges.
 - Discovery/launcher behavior remains permission-scoped, legacy-compatible and independent of sidebar visibility.
 
-### Task 1: Host drawer and launchers
+### Task 1: Host drawer and launchers — transferred to host agent
 Files: `frontend/src/lib/plugin-drawer.ts`, `frontend/src/components/FilamentPluginHooks.astro`, `frontend/src/lib/filament-plugin-hooks.ts`, `backend/app/api/v1/system.py`; browser and backend hook tests.
-- [ ] Write regression tests RED for docked interactive Save, responsive/native fallback with retained iframe, lifecycle, Create/Edit icon metadata and legacy/selection behavior.
-- [ ] Implement one reusable drawer helper and opt-in Create launcher support, preserving source/frame checks and focus.
-- [ ] Verify GREEN and commit a coherent host feature.
+- [x] Write regression tests RED for docked interactive Save, responsive/native fallback with retained iframe, lifecycle, Create/Edit icon metadata and legacy/selection behavior.
+- [x] Implement one reusable drawer helper and opt-in Create launcher support, preserving source/frame checks and focus.
+- [x] Verify GREEN and commit a coherent host feature.
 
-### Task 2: Native color-form bridge
+### Task 2: Native color-form bridge — transferred to host agent
 Files: new `ColorPluginHooks.astro`, `color-plugin-hooks.ts`, discovery endpoint/tests; modify `filaments/colors.astro` and color staging browser tests.
 - [ ] Write tests RED for create/update discovery, draft Name/HEX staging with preserved alpha, dirty Save, manual edit/race rejection, form switch/close/save and explicit existing-match opening.
 - [ ] Implement narrowly validated host context/stage/existing-match messages and reuse the shared drawer.
@@ -36,12 +37,14 @@ Files: new `ColorPluginHooks.astro`, `color-plugin-hooks.ts`, discovery endpoint
 
 ### Task 3: Shared FilaBrain color assistance and icon opt-in
 Files: plugin manifest, focused color research handler/UI, existing Chat/task/types/main, translations/Guide, generated page and regression tests.
-- [ ] Write tests RED for exact official references and saved matches, discovery/selected products, unknown/blocked sources, color host context, alpha-aware staging/usage warning and no automatic writes.
-- [ ] Reuse existing research/color services and shared UI, expose the color task when hosted by the color editor and opt in to icon launchers. Preserve ordinary Chat/new/edit workflows.
-- [ ] Verify full plugin backend/browser suites, build and package. Commit logical plugin changes.
+- [x] Write tests RED for exact official references and saved matches, discovery/selected products, unknown/blocked sources, color host context, alpha-aware staging/usage warning and no automatic writes.
+- [x] Reuse existing research/color services and shared UI, expose the color task when hosted by the color editor and opt in to icon launchers. Preserve ordinary Chat/new/edit workflows.
+- [x] Verify full plugin backend/browser suites, build and package. Commit logical plugin changes.
 
-### Task 4: Review and LAN
-- [ ] Run relevant host backend/UI suites, builds/type checks and full plugin checks; inspect phone/desktop screenshots.
-- [ ] Fresh independent review across both branches; fix Important findings with regressions.
-- [ ] Verify exact ZIP on supported hosts, build the host feature on the LAN copy, update plugin ZIP and confirm dock/color/filament workflows without applying inventory changes.
-- [ ] Fold fixes into logical commits, preserve backup refs and push branches only. Leave LAN running and upstream submission held.
+### Task 4: Plugin review and LAN — host integration transferred
+- [x] Run full plugin backend/browser checks and inspect phone/desktop screenshots.
+- [x] Fresh independent whole-change plugin review; fix findings with regression tests.
+- [x] Verify exact ZIP on supported hosts and update only the plugin on the LAN copy, preserving inventory/pending audits.
+- [x] Commit and push coherent plugin changes; leave LAN running and upstream submission held.
+
+Final shared drawer/launcher implementation, native form integration tests, and host LAN deployment belong to **Design plugin UI launchers**. Plugin fixtures verify the agreed message contract; they do not prove the unshipped host integration.
