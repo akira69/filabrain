@@ -26,9 +26,9 @@
 
 Files: new `filabrain/agent_tools.py`, `tests/test_agent_tools.py`; modify `filabrain/router.py`, `filabrain/color_review.py` only if extracting shared preview logic is needed.
 Interfaces: bounded Pydantic arguments and async `(args, db, principal)` handlers; registry `mcp_read_tools` retains `research_filament` and adds color, spool and selected-color-audit tools.
-- [ ] Write route/MCP tests for exact RAL/Pantone preview/reuse, unknown references, spool candidates/photos, color audit with shared conflicts, disabled plugin, scoped access and rejected input.
-- [ ] Run tests RED; implement by reusing publisher previews/matching_swatches, spool helpers and color audit helpers. Preserve research arguments, add guidance/reference URL.
-- [ ] Verify GREEN and commit `feat: expose shared color and spool research through MCP`.
+- [x] Write route/MCP tests for exact RAL/Pantone preview/reuse, unknown references, spool candidates/photos, color audit with shared conflicts, disabled plugin, scoped access and rejected input.
+- [x] Run tests RED; implement by reusing publisher previews/matching_swatches, spool helpers and color audit helpers. Preserve research arguments, add guidance/reference URL.
+- [x] Verify GREEN and commit `feat: expose shared color and spool research through MCP`.
 
 ### Task 2: Inventory decision services
 
