@@ -6,11 +6,19 @@ from app.api.deps import PrincipalDep
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 
-from . import agent_tools, audio, batch_api, color_review, research, settings
+from . import (
+    agent_inventory,
+    agent_tools,
+    audio,
+    batch_api,
+    color_review,
+    research,
+    settings,
+)
 from .batch_worker import start_worker
 from .db import ensure_schema
 
-mcp_read_tools = agent_tools.mcp_read_tools
+mcp_read_tools = {**agent_tools.mcp_read_tools, **agent_inventory.mcp_read_tools}
 
 
 @asynccontextmanager
@@ -29,7 +37,7 @@ router = APIRouter(
     dependencies=[Depends(ensure_schema)],
     lifespan=lifespan,
 )
-for routes in (research.router, settings.router, batch_api.router, audio.router, color_review.router, agent_tools.router):
+for routes in (research.router, settings.router, batch_api.router, audio.router, color_review.router, agent_tools.router, agent_inventory.router):
     router.include_router(routes)
 
 

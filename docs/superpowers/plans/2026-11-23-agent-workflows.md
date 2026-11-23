@@ -34,9 +34,9 @@ Interfaces: bounded Pydantic arguments and async `(args, db, principal)` handler
 
 Files: new `filabrain/agent_inventory.py`, `tests/test_agent_inventory.py`; adjust `filabrain/chat_context.py` for explicit required-weight input without duplicating inventory selection.
 Interfaces: `choose_job_spools`, `audit_library`, `plan_stock` validated read handlers produce reply/evidence plus structured results, coverage and review links.
-- [ ] Write tests for sufficient/insufficient/unknown weight, optional printer permissions, archived/empty exclusion, missing fields/swatches, duplicate SKU candidates, denied versus missing source pages, paged/selected coverage, target-required and package/unknown-weight reorder limits, real consumption versus correction events, and no writes.
-- [ ] Run RED; implement reuse/query helpers with bounded scans and optional host-field detection.
-- [ ] Verify GREEN and commit `feat: add grounded inventory planning and library checks`.
+- [x] Write tests for sufficient/insufficient/unknown weight, optional printer permissions, archived/empty exclusion, missing fields/swatches, duplicate SKU candidates, denied versus missing source pages, paged/selected coverage, target-required and package/unknown-weight reorder limits, real consumption versus correction events, and no writes.
+- [x] Run RED; implement reuse/query helpers with bounded scans and optional host-field detection.
+- [x] Verify GREEN and commit `feat: add grounded inventory planning and library checks`.
 
 ### Task 3: Complete intake proposal
 

@@ -1,17 +1,16 @@
 """Shared, read-only agent services for HTTP and the host MCP endpoint."""
 import asyncio
-import json
 from types import SimpleNamespace
 from typing import Annotated, Literal
 
-from app.api.deps import DBSession, PrincipalDep, ensure_any_permission
+from app.api.deps import DBSession, PrincipalDep
 from app.models import Filament
 from fastapi import APIRouter, HTTPException
-from fastapi.encoders import jsonable_encoder
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator
+from pydantic import Field, FiniteFloat, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from .agent_access import ToolArguments, bounded_result, read_access
 from .batch_api import ID, attached_swatches, matching_swatches, swatch_data
 from .color_audit import (
     rename_allowed,
@@ -27,8 +26,6 @@ from .spool_profiles import find_spool_profiles
 router = APIRouter(prefix='/agent', tags=['FilaBrain'])
 
 
-class ToolArguments(BaseModel):
-    model_config = ConfigDict(extra='forbid')
 
 
 class ResearchArguments(ToolArguments):
@@ -58,18 +55,6 @@ class AuditArguments(ToolArguments):
         return list(dict.fromkeys(value))
 
 
-async def read_access(db, principal, permission):
-    from .research import is_enabled
-    if not await is_enabled(db):
-        raise HTTPException(404, 'FilaBrain is disabled')
-    await ensure_any_permission(db, principal, permission)
-
-
-def bounded_result(result):
-    result = jsonable_encoder(result)
-    if len(json.dumps(result, ensure_ascii=False)) > 60_000:
-        raise HTTPException(422, 'This result is too large for MCP. Narrow the selection or review it in FilaBrain.')
-    return result
 
 
 async def research_tool(args, db, principal):
