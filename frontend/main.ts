@@ -395,7 +395,7 @@ async function main() {
       view.hidden = false
       if (!chat) {
         chat = mountChat(status, status.can_configure ? openSettings : undefined, undefined, false,
-          { root: view, openResearch: status.can_create ? () => show('new') : undefined,
+          { root: view, openResearch: status.can_create ? input => show('new', input) : undefined,
             context: editorContext?.filament_id ? { filament_id: editorContext.filament_id } : undefined })
         workspace.attachChat('chat', view)
       }

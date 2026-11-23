@@ -50,9 +50,9 @@ Interfaces: `plan_filament_intake` combines research with exact color previews, 
 
 Files: new `frontend/agent-tasks.ts` if a focused UI helper is needed; modify `frontend/chat.html`, `chat.ts`, `chat.css`, `main.ts`, `research.ts`, `spool-intake.ts`, English/German/French strings and generated page. Tests: new `tests/check-agent-tasks.mjs`, existing workspace suites.
 Interfaces: explicit selected task dispatches the same HTTP services; conversation persists task/options/results; intake action transfers the computed proposal to the existing New filament review rather than calling research again.
-- [ ] Write browser tests RED for task selection, explicit grams, no-model tasks, read-only result cards, no duplicate intake research, final confirmation, permission/failed/late response, history and 320/390/desktop layouts.
-- [ ] Implement compact house-style controls with clear coverage/uncertainty. Keep research-only panes unchanged. Update Guide/README/MCP allowlist examples to actual tool schemas.
-- [ ] Verify all browser suites GREEN; commit `feat: bring agent workflows into chat and filament review`.
+- [x] Write browser tests RED for task selection, explicit grams, no-model tasks, read-only result cards, no duplicate intake research, final confirmation, permission/failed/late response, history and 320/390/desktop layouts.
+- [x] Implement compact house-style controls with clear coverage/uncertainty. Keep research-only panes unchanged. Update Guide/README/MCP allowlist examples to actual tool schemas.
+- [x] Verify all browser suites GREEN; commit `feat: bring agent workflows into chat and filament review`.
 
 ### Task 5: Review and package
 

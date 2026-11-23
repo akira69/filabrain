@@ -31,6 +31,19 @@
     <div class="chat-composer">
       <p data-chat-status class="fm-field-hint" role="status" data-i18n="common.loading">Loading…</p>
       <form class="message-composer" data-chat-form hidden>
+        <div class="chat-tasks" data-agent-tasks hidden>
+          <label><span class="research-sr-only" data-i18n="filaBrain.task">Task</span>
+            <select class="fm-input" data-chat-task>
+              <option value="chat" data-i18n="filaBrain.chat">Chat</option>
+              <option value="intake" data-i18n="filaBrain.taskIntake">Add filament</option>
+              <option value="job-fit" data-i18n="filaBrain.taskJob">Choose spool</option>
+              <option value="library-health" data-i18n="filaBrain.taskHealth">Check library</option>
+              <option value="stock" data-i18n="filaBrain.taskStock">Plan stock</option>
+            </select>
+          </label>
+          <label data-task-weight hidden><span></span><input class="fm-input" type="number" min="0.01" max="100000000" step="any" inputmode="decimal"></label>
+          <label class="chat-task-sources" data-task-sources hidden><input type="checkbox"><span data-i18n="filaBrain.taskCheckSources">Check product links</span></label>
+        </div>
         <textarea class="fm-input" name="message" rows="2" maxlength="2000" placeholder="Ask FilaBrain…" data-i18n-aria-label="filaBrain.chatQuestion" data-i18n-placeholder="filaBrain.chatPlaceholder"></textarea>
         <details class="chat-context" data-chat-context hidden>
           <summary data-i18n="filaBrain.chatContext" data-i18n-title="filaBrain.chatContextHint" title="Optionally choose a printer, filament, and nozzle so answers use your setup.">Printer and filament</summary>

@@ -51,6 +51,13 @@
     <section data-guide-topic="chat">
       <h3 data-i18n="filaBrain.chat">Chat</h3>
       <p>Ask which spools in your library suit a job or select a printer and filament for settings. Open <strong>Sources and inventory</strong> below the answer to check weight, compatibility, and published settings.</p>
+      <dl>
+        <div><dt>Add filament</dt><dd>Enter an SKU, product URL or clues. Choose the matching product, then select <strong>Review filament draft</strong> to open its existing proposal without repeating research. Review color references and confirm the spool design before saving.</dd></div>
+        <div><dt>Choose spool</dt><dd>Describe the job and enter the required grams. Compare individual measured spools and optional printer context. Unknown weights cannot qualify; separate rolls are not combined. Compatibility still requires review.</dd></div>
+        <div><dt>Check library</dt><dd>Optionally filter by manufacturer, SKU, name or material. Review missing data, swatches, naming and duplicate candidates for up to 25 matching filaments. Select <strong>Next page</strong> to continue with the same filter and options. Optional link checks cover at most five product pages; blocked access is separate from a missing page.</dd></div>
+        <div><dt>Plan stock</dt><dd>Filter and enter target grams per filament, or use saved thresholds on supported hosts. Unknown remaining weights or package sizes prevent confident quantities. Recorded consumption excludes measurements and corrections. Nothing is ordered.</dd></div>
+      </dl>
+      <p>These tasks work without a chat model and keep their options and results with the conversation. Product research may also use the configured extraction model. All proposals require review.</p>
       <p>Enable or disable microphone dictation in <strong>Settings → Microphone</strong>. The microphone dictates an editable draft; press Send when you are ready. It needs HTTPS and a supported browser. Your browser’s speech service may send audio online for transcription; FilaBrain sends only the resulting text to the chat model when you press Send. OS keyboard dictation works independently, including when the FilaBrain microphone is disabled.</p>
       <p><strong>Printer and filament</strong> preloads your saved choices. If there is one active printer, it is selected automatically. Compatible printer plugins can provide a loaded-filament suggestion through FilaMan; confirm the suggestion before using it. Select the nozzle yourself.</p>
       <p>For endpoint transcription, edit a connection in <strong>Model settings</strong> and enable <strong>Audio transcription</strong>. Enter a model that supports the standard <code>/audio/transcriptions</code> API. Enable <strong>Chat</strong> too if this connection also serves chat models; the two model IDs are separate. Existing endpoints start with Chat only.</p>
@@ -89,7 +96,9 @@
       <summary>FilaMan MCP</summary>
       <p>If you used FilaBrain’s separate MCP endpoint, switch your client to FilaMan’s built-in <code>/mcp</code> from <code>/api/v1/filabrain/mcp</code>. Replace the old Bearer header with <code>Authorization: ApiKey &lt;FilaMan API key&gt;</code>. Use HTTPS for remote connections.</p>
       <p>Enable <strong>AI Assistants (MCP)</strong> in <a href="/admin/app-settings#mcp-title" target="_blank" rel="noopener">FilaMan’s app settings</a> and copy the connection template for your client. Use <code>list_filaments</code> to check the connection. Inventory changes require <strong>Allow write access</strong> and the matching permissions.</p>
-      <p>For external research on FilaMan 2.2.2 or newer, add <code>filabrain-research_filament</code> to <code>MCP_PLUGIN_READ_TOOLS</code> and restart FilaMan. The tool requires <code>filaments:read</code> and returns suggestions and sources to your MCP client for review.</p>
+      <p>On FilaMan 2.2.2 or newer, enable the desired read tools through <code>MCP_PLUGIN_READ_TOOLS</code> and restart FilaMan:</p>
+      <p><code>filabrain-research_filament,filabrain-plan_filament_intake,filabrain-resolve_color_reference,filabrain-find_spool_profiles,filabrain-audit_filament_colors,filabrain-choose_job_spools,filabrain-audit_library,filabrain-plan_stock</code></p>
+      <p>All tools need <code>filaments:read</code>; job-fit and stock planning also need <code>spools:read</code>. A selected printer needs <code>printers:read</code>. All plugin tools are read-only. After your approval, an external client can use FilaMan's native write tools. External results stay in that client rather than appearing in FilaBrain chat.</p>
     </details>
   </div>
 </dialog>

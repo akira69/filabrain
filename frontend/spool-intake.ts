@@ -1,7 +1,9 @@
 import { api } from './shared/api'
+import type { ResearchProposal } from './shared/filabrain'
 import { t } from './shared/i18n'
 
 export type SpoolResearchInput = {
+  proposal?: ResearchProposal
   manufacturer?: string
   designation?: string
   material?: string

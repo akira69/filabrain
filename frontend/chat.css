@@ -270,3 +270,10 @@ main:has([data-tab="new"][aria-current]) .message-composer:has(textarea:disabled
 .research-candidate h3 { margin: 0 0 .3rem; font-size: 1rem; }
 .research-candidate p { margin-block: .25rem; }
 .research-candidate .research-match-actions { margin-block-start: .5rem; }
+
+.chat-tasks { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .65rem; padding: 0 .4rem; font-size: .8125rem; }
+.chat-tasks > label { display: flex; align-items: center; gap: .35rem; min-width: 0; }
+.chat-tasks .fm-input { min-height: 36px; padding: .25rem .45rem; font-size: .8125rem; }
+.chat-tasks select { max-width: 12rem; }
+.chat-tasks input[type="number"] { width: 6rem; }
+.chat-task-sources { color: var(--text-muted); }
