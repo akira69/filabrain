@@ -10,6 +10,7 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 ### What's new in 0.1.27 (development preview)
 
+- One Filament workspace replaces the separate Research and New tabs. In the editor, switch between the current filament and a separate new draft without losing either conversation.
 - New filament saves wait for color previews and require an explicit swatch choice when one is offered. Reuse or create a swatch, or explicitly continue without a library color.
 
 ### What's new in 0.1.26 (development preview)

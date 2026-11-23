@@ -19,7 +19,7 @@ export function mountWorkspaceTabs(header: HTMLElement, show: (tab: string) => v
     panel.id = 'filabrain-view-' + panel.dataset.view
     if (panel.dataset.view !== 'settings') {
       panel.setAttribute('role', 'tabpanel')
-      panel.setAttribute('aria-labelledby', 'filabrain-tab-' + panel.dataset.view)
+      panel.setAttribute('aria-labelledby', 'filabrain-tab-' + (panel.dataset.view === 'editor' ? 'new' : panel.dataset.view))
     }
   }
   for (const id of ['library-heading', 'spool-intake-heading', 'research-heading', 'batch-title']) {
@@ -51,14 +51,18 @@ export function mountWorkspaceTabs(header: HTMLElement, show: (tab: string) => v
     },
     select(tab: string) {
       active = tab
-      if (buttons.some(button => button.dataset.tab === tab)) focusTab = tab
+      const navTab = tab === 'editor' ? 'new' : tab
+      if (buttons.some(button => button.dataset.tab === navTab)) focusTab = navTab
       for (const button of buttons) {
-        button.setAttribute('aria-selected', String(button.dataset.tab === tab))
+        button.setAttribute('aria-selected', String(button.dataset.tab === navTab))
         button.tabIndex = button.dataset.tab === focusTab ? 0 : -1
+        if (button.dataset.tab === 'new' && (tab === 'new' || tab === 'editor')) {
+          button.setAttribute('aria-controls', 'filabrain-view-' + tab)
+        }
       }
       for (const [key, controls] of chatHeaders) controls.hidden = key !== tab
       nav.hidden = !buttons.some(button => !button.hidden)
-      requestAnimationFrame(() => buttons.find(button => button.dataset.tab === tab)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }))
+      requestAnimationFrame(() => buttons.find(button => button.dataset.tab === navTab)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }))
     },
   }
 }

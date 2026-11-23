@@ -57,6 +57,7 @@ try {
   let defaultEndpoint = null
   let canConfigure = true
   let canUseFilaments = true
+  let canCreateFilaments = true
   let canAddSpool = false
   let scaleRequested = false
   let stockRequested = false
@@ -218,7 +219,7 @@ try {
       ], total: 2 } })
     }
     if (path.endsWith('/status')) return route.fulfill({ json: { enabled: true, can_chat: canUseFilaments, chat_model: chatModelId, chat_endpoint_id: chatModelId ? defaultEndpoint : null,
-      can_create: canUseFilaments, can_create_color: canCreatePalette, can_create_manufacturer: true, can_add_spool: canAddSpool, can_read_spools: canAddSpool, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure } })
+      can_create: canUseFilaments && canCreateFilaments, can_create_color: canCreatePalette, can_create_manufacturer: true, can_add_spool: canAddSpool, can_read_spools: canAddSpool, can_update: canUseFilaments, can_update_manufacturer: true, can_configure: canConfigure } })
     if (path.endsWith('/filaments/10/research-record')) return recordUnavailable
       ? route.fulfill({ status: 503, json: {} })
       : route.fulfill({ json: { record_token: editorRecordToken } })
@@ -655,7 +656,7 @@ try {
       const { top, right, height } = button.getBoundingClientRect()
       return { top, right, height, name: button.innerText.trim(), icon: !!button.querySelector('svg') }
     }))
-    assert.deepEqual(tabs.map(tab => tab.name), ['Chat', 'New', 'Library'])
+    assert.deepEqual(tabs.map(tab => tab.name), ['Chat', 'Filament', 'Library'])
     assert.ok(tabs.every(tab => Math.abs(tab.top - tabs[0].top) <= 8 && tab.right < width && tab.height >= 44 && tab.icon), JSON.stringify({width,tabs}))
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), width)
   }
@@ -705,7 +706,7 @@ try {
   await page.getByRole('button', { name: 'New chat' }).click()
   assert.match(await chatModel.innerText(), /fixture:default/)
 
-  await page.getByRole('tab', { name: 'New filament', exact: true }).click()
+  await page.getByRole('tab', { name: 'Filament', exact: true }).click()
   await openResearchDetails(page)
   await page.getByLabel('Manufacturer', { exact: true }).fill('Fixture Brand')
   await page.getByLabel('Product name', { exact: true }).fill('Fixture PLA')
@@ -735,7 +736,7 @@ try {
   const second = await context.newPage()
   second.setDefaultTimeout(5_000)
   await second.goto(url)
-  await second.getByRole('tab', { name: 'New filament', exact: true }).click()
+  await second.getByRole('tab', { name: 'Filament', exact: true }).click()
   await second.locator('[data-chat-history]:visible summary').click()
   await second.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
   await second.getByRole('button', { name: 'Save new filament' }).click()
@@ -769,7 +770,7 @@ try {
   await page.getByRole('textbox', { name: 'Your question' }).fill('Which settings should I try?')
   await page.getByRole('button', { name: 'Send message' }).click()
   await page.getByText('PLA is easier to print.').nth(1).waitFor()
-  await page.getByRole('tab', { name: 'New filament', exact: true }).click()
+  await page.getByRole('tab', { name: 'Filament', exact: true }).click()
   await history.click()
   await page.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
   await page.getByRole('log').getByText('Look for a datasheet', { exact: true }).waitFor()
@@ -886,8 +887,8 @@ try {
     }
     const labels = await headerNav.getByRole('tab').evaluateAll(buttons => buttons.map(button => button.innerText.trim()))
     assert.deepEqual(labels, width <= 800
-      ? ['Chat', 'New', 'Library', 'Runs']
-      : ['Chat', 'New filament', 'Research library', 'Research runs'])
+      ? ['Chat', 'Filament', 'Library', 'Runs']
+      : ['Chat', 'Filament', 'Research library', 'Research runs'])
   }
   await page.setViewportSize({ width: 1440, height: 780 })
   const guideClose = guide.getByRole('button', { name: 'Close' })
@@ -1062,7 +1063,7 @@ try {
   await settingsGuide.locator('xpath=self::*[@aria-expanded="false"]').waitFor()
   assert.equal(await settingsGuide.evaluate(el => el === el.ownerDocument.activeElement), true)
   await page.locator('iframe').evaluate(el => { el.style.width = '640px' })
-  await frame.locator('[data-tab=editor]').click()
+  await frame.locator('[data-tab=new]').click()
   const researchModel = frame.getByRole('button', { name: /^Model for this conversation/ })
   const researchMenu = frame.getByRole('menu', { name: 'Model for this conversation' })
   await researchModel.click()
@@ -1073,10 +1074,10 @@ try {
   await researchMenu.waitFor({ state: 'hidden' })
   assert.equal(await frame.getByText('Advanced options', { exact: true }).count(), 0)
   assert.equal(await frame.getByRole('button', { name: 'Pair a client' }).count(), 0)
-  assert.equal(await followUp.isDisabled(), true)
+  assert.equal(await frame.locator('[data-view=editor] [data-chat-form] textarea').isDisabled(), true)
   assert.match(await researchModel.innerText(), /fixture:alternate/)
   await frame.getByRole('button', { name: 'Find specifications' }).click()
-  await frame.locator('[data-tab=editor][aria-selected=true]').waitFor()
+  await frame.locator('[data-tab=new][aria-selected=true]').waitFor()
   const densityChoice = frame.getByRole('checkbox', { name: /Density/ })
   await densityChoice.waitFor()
   const checks = frame.getByText('Sources checked (1)', { exact: true })
@@ -1129,7 +1130,7 @@ try {
   await frame.getByRole('button', { name: 'Stop dictation', exact: true }).waitFor()
   await frame.getByRole('button', { name: 'FilaBrain settings', exact: true }).click()
   assert.equal(await frame.locator('body').evaluate(() => window.editorRecognition.aborted), true, 'embedded settings stops capture before hiding the chat')
-  await frame.locator('[data-tab=editor]').click()
+  await frame.locator('[data-tab=new]').click()
   assert.equal(await researchPage.locator('svg[aria-hidden=true]').count(), 1)
   recordUnavailable = true
   const requestsBeforeFailedClick = proposalRequests
@@ -1257,7 +1258,7 @@ try {
   await frame.getByText('The filament library changed. Select your filaments again.').waitFor()
   assert.equal(await startHostBatch.isDisabled(), true)
   await page.goto(url)
-  await page.getByRole('tab', { name: 'New filament', exact: true }).click()
+  await page.getByRole('tab', { name: 'Filament', exact: true }).click()
   await page.locator('[data-chat-history]:visible summary').click()
   await page.getByRole('button', { name: /Find specifications · Fixture Brand Fixture PLA/ }).click()
   await page.getByRole('link', { name: 'Open saved filament' }).waitFor()
@@ -1274,7 +1275,7 @@ try {
   const otherDraft = await context.newPage()
   otherDraft.setDefaultTimeout(5_000)
   await otherDraft.goto(url)
-  await otherDraft.getByRole('tab', { name: 'New filament', exact: true }).click()
+  await otherDraft.getByRole('tab', { name: 'Filament', exact: true }).click()
   await otherDraft.locator('[data-chat-history]:visible summary').click()
   const researchTitle = /Find specifications · Fixture Brand Fixture PLA/
   await otherDraft.getByRole('button', { name: researchTitle }).click()
@@ -1304,7 +1305,7 @@ try {
   assert.equal(new Set(savePaths).size, 3)
   await otherDraft.reload()
   for (const tab of [otherDraft, page]) {
-    await tab.getByRole('tab', { name: 'New filament', exact: true }).click()
+    await tab.getByRole('tab', { name: 'Filament', exact: true }).click()
     await tab.locator('[data-chat-history]:visible summary').click()
     await tab.getByRole('button', { name: researchTitle }).click()
     const savedLinks = tab.getByRole('link', { name: 'Open saved filament' })
@@ -1318,8 +1319,8 @@ try {
   }
   await page.setViewportSize({ width: 320, height: 650 })
   for (const [language, labels] of [
-    ['de', ['Chat', 'Neu', 'Bibliothek', 'Läufe']],
-    ['fr', ['Chat', 'Nouveau', 'Bibliothèque', 'Suivi']],
+    ['de', ['Chat', 'Filament', 'Bibliothek', 'Läufe']],
+    ['fr', ['Chat', 'Filament', 'Bibliothèque', 'Suivi']],
   ]) {
     await page.evaluate(value => localStorage.setItem('lang', value), language)
     await page.goto(url)
@@ -1640,7 +1641,7 @@ try {
   assert.equal(await discovery.locator('#research-options').evaluate(element => element.open), false)
   await discoveryInput.fill('Paramount 3D PLA purple')
   await discovery.getByRole('tab', { name: 'Chat', exact: true }).click()
-  await discovery.getByRole('tab', { name: 'New filament', exact: true }).click()
+  await discovery.getByRole('tab', { name: 'Filament', exact: true }).click()
   assert.equal(await discoveryInput.inputValue(), 'Paramount 3D PLA purple')
   const discoveryRequest = discovery.waitForRequest(req => req.url().endsWith('/proposals'))
   await discovery.getByRole('button', { name: 'Find specifications' }).click()
@@ -1758,7 +1759,7 @@ try {
   draftColorMode = true
   const colorDraft = await context.newPage()
   await colorDraft.goto(url)
-  await colorDraft.getByRole('tab', { name: 'New filament', exact: true }).click()
+  await colorDraft.getByRole('tab', { name: 'Filament', exact: true }).click()
   const colorForm = colorDraft.locator('#product-research')
   await colorForm.locator('#research-options').evaluate(el => { el.open = true })
   await colorDraft.getByLabel('Manufacturer', { exact: true }).fill(manufacturer.name)
@@ -1872,7 +1873,16 @@ try {
   sharedEditor.setDefaultTimeout(5000)
   await sharedEditor.goto('https://fila.test/editor-fixture')
   const shared = sharedEditor.frameLocator('iframe')
-  await shared.locator('[data-tab=editor][aria-selected=true]').waitFor()
+  await shared.getByRole('tab', { name: 'Filament', exact: true }).waitFor()
+  assert.equal(await shared.getByRole('tab', { name: 'Research', exact: true }).count(), 0, 'current and new research share one navigation tab')
+  const targetPicker = shared.getByRole('combobox', { name: 'Filament target', exact: true })
+  assert.equal(await targetPicker.inputValue(), 'editor')
+  for (const width of [320, 390, 1120]) {
+    await sharedEditor.locator('iframe').evaluate((frame, width) => { frame.style.width = width + 'px' }, width)
+    assert.ok(await shared.locator('html').evaluate(el => el.scrollWidth <= el.clientWidth), 'target selector fits at ' + width)
+    const historyBounds = await shared.locator('[data-chat-page=editor] [data-chat-history] summary').boundingBox()
+    assert.ok(historyBounds.width >= 80, 'the conversation selector remains usable beside the target at ' + width)
+  }
   await shared.locator('[data-view=editor] [name=query]').fill('Fixture purple')
   const editedDiscovery = sharedEditor.waitForRequest(request => request.url().endsWith('/proposals') && request.postDataJSON().query)
   await shared.getByRole('button', { name: 'Find specifications', exact: true }).click()
@@ -1890,9 +1900,13 @@ try {
   heldContextLoad = undefined
   assert.equal((await conversationRequest).postDataJSON().filament_id, 10, 'general chat preloads the host filament')
   await shared.getByText('PLA is easier to print.', { exact: true }).waitFor()
-  await shared.locator('[data-tab=editor]').click()
-  assert.equal(await shared.locator('[data-view=editor] [name=query]').inputValue(), 'Fixture purple')
   await shared.locator('[data-tab=new]').click()
+  assert.equal(await shared.locator('[data-view=editor] [name=query]').inputValue(), 'Fixture purple')
+  await shared.getByRole('button', { name: 'Dictate a message', exact: true }).click()
+  await shared.getByRole('button', { name: 'Stop dictation', exact: true }).waitFor()
+  await targetPicker.selectOption('new')
+  assert.equal(await shared.locator('html').evaluate(() => window.editorRecognition?.aborted), true,
+    'changing the filament target cancels microphone capture')
   const freshQuery = shared.locator('[data-view=new] [name=query]')
   await freshQuery.fill('Another product')
   const freshDiscovery = sharedEditor.waitForRequest(request => request.url().endsWith('/proposals') && request.postDataJSON().query === 'Another product')
@@ -1900,7 +1914,22 @@ try {
   const freshTarget = (await freshDiscovery).postDataJSON()
   assert.equal(freshTarget.mode, 'create')
   assert.equal(freshTarget.filament_id, null, 'fresh creation cannot reuse the bound editor target')
+  await targetPicker.selectOption('editor')
+  assert.equal(await shared.locator('[data-view=editor] [name=query]').inputValue(), 'Fixture purple')
+  await targetPicker.selectOption('new')
+  assert.equal(await freshQuery.inputValue(), 'Another product', 'switching targets preserves each draft')
+  assert.equal(await shared.getByRole('tab', { name: 'Filament', exact: true }).getAttribute('aria-controls'), 'filabrain-view-new')
   await sharedEditor.close()
+
+  canCreateFilaments = false
+  const updateOnlyPage = await context.newPage()
+  await updateOnlyPage.goto('https://fila.test/editor-fixture')
+  const updateOnly = updateOnlyPage.frameLocator('iframe')
+  await updateOnly.getByRole('tab', { name: 'Filament', exact: true }).waitFor()
+  assert.equal(await updateOnly.getByRole('combobox', { name: 'Filament target', exact: true }).isDisabled(), true)
+  assert.equal(await updateOnly.locator('[data-tab=new]').getAttribute('aria-controls'), 'filabrain-view-editor')
+  await updateOnlyPage.close()
+  canCreateFilaments = true
 
   canUseFilaments = false
   await page.goto(url)

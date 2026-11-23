@@ -22,6 +22,10 @@
 .workspace-tablist button[aria-selected=true]::after { content: ""; position: absolute; inset: auto 0 -3px; height: 4px; background: var(--bg-elevated); }
 .workspace-tabs .chat-header { min-width: 0; flex: none; padding: 0 0 3px; border: 0; background: transparent; gap: .45rem; }
 .workspace-tabs .chat-new { width: 44px; height: 44px; }
+.filament-target { flex: 1 1 12rem; min-width: 0; max-width: 20rem; }
+.filament-target select { width: 100%; min-width: 0; max-width: 100%; min-height: 44px; padding: .4rem .6rem; font-size: .8125rem; }
+.workspace-tabs .chat-header:has(.filament-target) { flex: 1; }
+.workspace-tabs .chat-header:has(.filament-target) .chat-history { flex: 1; min-width: 0; }
 .workspace-tabs .chat-history { max-width: min(18rem, 24vw); }
 .workspace-tabs .chat-history summary { min-height: 44px; }
 :root[data-workspace-tabs] [data-view]:not([hidden]) > .fm-card { border-top-left-radius: 0; }
@@ -39,6 +43,7 @@
     background: var(--bg-elevated); border: 1px solid var(--border); border-bottom: 0;
   }
   .workspace-tabs .chat-history { max-width: min(22rem, calc(100% - 3.5rem)); }
+  .workspace-tabs .chat-header:has(.filament-target) :is(.filament-target, .chat-history) { flex: 1 1 0; max-width: none; }
   :root[data-workspace-tabs] [data-view=chat] .research-chat,
   :root[data-workspace-tabs] :is([data-view=new], [data-view=editor]) .research-chat { border-top: 0; border-radius: 0 0 .65rem .65rem; }
 }

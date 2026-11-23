@@ -80,6 +80,10 @@
     "renamed": "Shared swatch renamed."
   },
   "filaBrain": {
+    "navFilament": "Filament",
+    "filamentTarget": "Filament target",
+    "currentFilament": "Current filament",
+    "currentDraft": "Current draft",
     "createManufacturer": "Create manufacturer",
     "navResearch": "Research",
     "discoveryQueryLimit": "Use at most 400 characters for a description or SKU. Product links may be up to 2048 characters.",

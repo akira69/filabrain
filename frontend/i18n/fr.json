@@ -80,6 +80,10 @@
     "renamed": "Couleur partagée renommée."
   },
   "filaBrain": {
+    "navFilament": "Filament",
+    "filamentTarget": "Filament cible",
+    "currentFilament": "Filament actuel",
+    "currentDraft": "Brouillon actuel",
     "createManufacturer": "Cr\u00e9er le fabricant",
     "navResearch": "Recherche",
     "discoveryQueryLimit": "Limitez les descriptions et SKU à 400 caractères. Les liens produit peuvent contenir jusqu’à 2048 caractères.",
