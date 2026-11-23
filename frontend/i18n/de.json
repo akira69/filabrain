@@ -370,7 +370,29 @@
     "audioTrimmed": "Der Text wurde auf die Entwurfsgrenze gekürzt. Prüfen Sie ihn vor dem Senden.",
     "audioChecking": "Mikrofoneinstellungen werden geprüft…",
     "audioDisabled": "Das Mikrofondiktat ist in den Einstellungen deaktiviert.",
-    "audioVerifyFailed": "Die Mikrofonquelle konnte nicht geprüft werden. Prüfen Sie die Verbindung und versuchen Sie es erneut."
+    "audioVerifyFailed": "Die Mikrofonquelle konnte nicht geprüft werden. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
+    "task": "Aufgabe",
+    "taskIntake": "Filament hinzufügen",
+    "taskJob": "Spule auswählen",
+    "taskHealth": "Bibliothek prüfen",
+    "taskStock": "Bestand planen",
+    "taskRequiredGrams": "Benötigtes Filament (g)",
+    "taskTargetGrams": "Ziel pro Filament (g)",
+    "taskCheckSources": "Produktlinks prüfen",
+    "taskIntakeHint": "Artikelnummer, Produkt-URL oder bekannte Filamentdetails…",
+    "taskJobHint": "Was druckst du? Material oder Einsatz angeben…",
+    "taskFilterHint": "Optionaler Filter, z. B. Paramount PETG. Leer lassen für die Bibliothek.",
+    "taskReviewDraft": "Filamententwurf prüfen",
+    "taskColorIncomplete": "Farbrecherche unvollständig. Verfügbare Referenzen prüfen oder erneut versuchen.",
+    "taskSpoolIncomplete": "Spulenquellen fehlen oder sind unvollständig. Bauform bestätigen und Leergewicht messen.",
+    "taskNextPage": "Nächste Seite",
+    "taskCoverage": "Seite {page} · {count} von {total} passenden Filamenten geprüft.",
+    "taskPartial": "Einige angefragte Informationen sind ungeprüft oder noch offen.",
+    "taskRankedCandidates": "Sortierte Kandidaten, keine vollständige Bestandszählung.",
+    "taskDraftDetails": "Recherchierte Filamentfelder",
+    "taskProductIncomplete": "Einige Produktquellen konnten nicht geprüft werden. Verfügbare Belege prüfen.",
+    "taskPackageUnknown": "Das Packungsgewicht ist ungeprüft. Vor der Spulenauswahl bestätigen.",
+    "taskQueryTooLong": "Bis zu 400 Zeichen für Produkthinweise verwenden oder eine Produkt-URL einfügen."
   },
   "researchBatches": {
     "title": "Rechercheläufe",
@@ -972,5 +994,20 @@
     "scannerDeviceAny": "Was zuletzt gescannt hat",
     "scannerDeviceHint": "Auswählen, wenn mehrere Waagen im Einsatz sind und dieser Bildschirm nur einer davon folgen soll.",
     "scannerDeviceOffline": "Leser „{id}“ (hat noch nicht gemeldet)"
+  },
+  "colorAssistant": {
+    "task": "Farbe finden",
+    "hint": "RAL-/Pantone-Referenz, Artikelnummer, Produkt-URL oder Farbhinweise…",
+    "newColor": "Neue Farbe",
+    "usage": "Von {count} Filamenten verwendet",
+    "scope": "Änderungen vor dem Speichern im Farbformular prüfen. Die Deckkraft bleibt erhalten.",
+    "use": "Im Farbformular verwenden",
+    "staged": "Im Farbformular übernommen. Prüfen und in FilaMan auf Speichern klicken.",
+    "open": "Vorhandene Farbe öffnen: {name}",
+    "unknown": "Bildschirmvorschau des Herausgebers nicht verfügbar.",
+    "changed": "Das Farbformular wurde geändert oder konnte den Vorschlag nicht übernehmen. FilaBrain erneut öffnen, um den Kontext zu aktualisieren.",
+    "unavailable": "Dieser FilaMan-Farbeditor unterstützt keine geprüfte Farbübernahme.",
+    "currentDraft": "Aktueller Farbentwurf",
+    "productEvidence": "Produkt- / Katalogbelege"
   }
 }

@@ -1,4 +1,5 @@
 import { t } from './i18n'
+import type { Reference } from './swatch-review'
 import type { SpoolProfile } from './spool-profiles'
 
 export type ResearchIdentity = {
@@ -42,6 +43,8 @@ export type ResearchProposal = {
   spool_lookup_key?: string
   spool_reply?: string
   discovery_sku?: string
+  intake_fields?: Record<string, ResearchOption['value'] | boolean | null>
+  color_previews?: Array<Omit<Reference, 'saved' | 'token'>>
   omit_library_color?: true
 }
 
@@ -87,4 +90,72 @@ export function researchRecommendation(issue: ResearchIssue, value: ResearchOpti
   if (issue.requires_product_choice || JSON.stringify(value) !== JSON.stringify(preferred)) return ''
   return t(`filaBrain.${issue.code === 'source_disagreement' ? 'manufacturerPreferred'
     : issue.code === 'corroborated' ? 'corroboratedPreferred' : 'recommendedValue'}`)
+}
+
+function candidateLink(url: string, label: string) {
+  const link = document.createElement('a')
+  link.href = url
+  link.target = '_blank'
+  link.rel = 'noopener noreferrer'
+  link.textContent = label
+  return link
+}
+
+export function productCandidate(issue: ResearchIssue, chooseProduct: (url: string, sku?: string) => void, mark?: SVGElement) {
+  const productUrl = issue.product_url && /^https?:\/\//i.test(issue.product_url) ? issue.product_url : undefined
+  const sourceUrl = issue.url && /^https?:\/\//i.test(issue.url) ? issue.url : productUrl
+        const card = document.createElement('article')
+        card.className = 'research-candidate'
+        const title = document.createElement('h3')
+        title.textContent = issue.name || t('filaBrain.possible_match', { name: '', source: issue.source || '' })
+        card.append(title)
+        if (issue.identity) {
+          const product = issue.identity
+          const metadata: [string, string | number | null | undefined][] = [
+            ['manufacturer_id', product.manufacturer], ['manufacturer_sku', product.sku],
+            ['diameter_mm', product.diameter_mm], ['raw_material_weight_g', product.weight_g],
+            ['manufacturer_color_name', product.color],
+          ]
+          const details = document.createElement('p')
+          details.className = 'research-candidate-identity research-note'
+          details.textContent = metadata.filter(([, value]) => value != null && value !== '')
+            .map(([field, value]) => `${researchFieldLabel(field)}: ${value}`).join(' · ')
+          if (details.textContent) card.append(details)
+        }
+        if (issue.source_product_code) {
+          const sourceCode = document.createElement('p')
+          sourceCode.className = 'research-note'
+          sourceCode.textContent = t('filaBrain.sourceProductCode', { code: issue.source_product_code })
+          card.append(sourceCode)
+        }
+        if (issue.match_kind) {
+          const kind = document.createElement('p')
+          kind.className = 'research-note'
+          kind.textContent = t(`filaBrain.match_${issue.match_kind}`)
+          card.append(kind)
+        }
+        const actions = document.createElement('div')
+        actions.className = 'research-match-actions'
+        if (sourceUrl) actions.append(candidateLink(sourceUrl, issue.source || t('filaBrain.openSource')))
+        if (productUrl) {
+          const choose = document.createElement('button')
+          choose.type = 'button'
+          choose.className = 'fm-btn fm-btn-outline research-page-action'
+          const label = t('filaBrain.useProductPage')
+          choose.append(...(mark ? [mark.cloneNode(true)] : []), label)
+          choose.addEventListener('click', () => chooseProduct(productUrl, issue.identity?.sku))
+          actions.append(choose)
+        }
+        card.append(actions)
+  return card
+}
+
+export function researchIssueText(issue: ResearchIssue) {
+  const key = `filaBrain.${issue.code}`
+  const message = t(key, {
+    name: issue.name || (issue.field ? researchFieldLabel(issue.field) : issue.source || ''),
+    source: issue.source || '',
+  })
+  const explanation = message === key ? issue.code.replaceAll('_', ' ') : message
+  return explanation + (issue.reason ? ` (${issue.reason})` : '')
 }

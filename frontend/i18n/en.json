@@ -370,7 +370,29 @@
     "audioTrimmed": "The transcript was shortened to fit the draft limit. Review it before sending.",
     "audioChecking": "Checking microphone settings…",
     "audioDisabled": "Microphone dictation is disabled in settings.",
-    "audioVerifyFailed": "Could not verify the microphone source. Check the connection and try again."
+    "audioVerifyFailed": "Could not verify the microphone source. Check the connection and try again.",
+    "task": "Task",
+    "taskIntake": "Add filament",
+    "taskJob": "Choose spool",
+    "taskHealth": "Check library",
+    "taskStock": "Plan stock",
+    "taskRequiredGrams": "Required filament (g)",
+    "taskTargetGrams": "Target per filament (g)",
+    "taskCheckSources": "Check product links",
+    "taskIntakeHint": "SKU, product URL, or what you know about the filament…",
+    "taskJobHint": "What are you printing? Include material or use case…",
+    "taskFilterHint": "Optional filter, e.g. Paramount PETG. Leave blank for the library.",
+    "taskReviewDraft": "Review filament draft",
+    "taskColorIncomplete": "Color lookup is incomplete. Review available references or try again.",
+    "taskSpoolIncomplete": "Spool sources are unavailable or incomplete. Confirm the design and use a measured tare.",
+    "taskNextPage": "Next page",
+    "taskCoverage": "Page {page} · {count} of {total} matching filaments checked.",
+    "taskPartial": "Some requested information is unverified or remains to be checked.",
+    "taskRankedCandidates": "Showing ranked candidates, not an exhaustive inventory count.",
+    "taskDraftDetails": "Researched filament fields",
+    "taskProductIncomplete": "Some product sources could not be verified. Review the available evidence.",
+    "taskPackageUnknown": "Package weight is unverified. Confirm it before choosing a spool design.",
+    "taskQueryTooLong": "Use up to 400 characters for product clues, or paste a product URL."
   },
   "researchBatches": {
     "title": "Research runs",
@@ -972,5 +994,20 @@
     "scannerDeviceAny": "Whichever scanned last",
     "scannerDeviceHint": "Pick one if several scales are in use and this screen should follow only one of them.",
     "scannerDeviceOffline": "Reader “{id}” (has not reported yet)"
+  },
+  "colorAssistant": {
+    "task": "Find color",
+    "hint": "RAL / Pantone reference, SKU, product URL or color clues…",
+    "newColor": "New color",
+    "usage": "Used by {count} filaments",
+    "scope": "Review changes in the color form before saving. Existing opacity is preserved.",
+    "use": "Use in color form",
+    "staged": "Staged in the color form. Review and click Save in FilaMan.",
+    "open": "Open existing swatch: {name}",
+    "unknown": "Publisher screen preview unavailable.",
+    "changed": "The color form changed or could not accept the proposal. Reopen FilaBrain to refresh its context.",
+    "unavailable": "This FilaMan color editor does not support reviewed color staging.",
+    "currentDraft": "Current color draft",
+    "productEvidence": "Product / catalog evidence"
   }
 }

@@ -1,4 +1,5 @@
 import { mountChat } from './chat'
+import { connectColorHost } from './color-assistance'
 import { mountDocs } from './docs'
 import { mountWorkspaceTabs } from './tabs'
 import { mountSettings } from './settings'
@@ -34,13 +35,13 @@ export function element<T extends HTMLElement = HTMLElement>(id: string) {
   return document.getElementById(id) as T
 }
 
-export function hostRequest<T>(type: string, payload: Record<string, unknown> = {}) {
+export function hostRequest<T>(type: string, payload: Record<string, unknown> = {}, timeoutMs = 3500) {
   return new Promise<T>((resolve, reject) => {
     const request_id = Array.from(crypto.getRandomValues(new Uint32Array(4))).join('-')
-    const timer = window.setTimeout(() => {
+    const timer = timeoutMs > 0 ? window.setTimeout(() => {
       window.removeEventListener('message', receive)
       reject(new Error('The FilaMan editor did not respond. Reopen FilaBrain and try again.'))
-    }, 3500)
+    }, timeoutMs) : undefined
     function receive(event: MessageEvent) {
       if (event.origin !== location.origin || event.source !== window.parent ||
           event.data?.type !== type || event.data?.request_id !== request_id) return
@@ -347,6 +348,7 @@ async function main() {
       return
     }
     const setGuide = mountDocs()
+    const colorHost = window.parent !== window && params.get('color_host') === 'editor' ? await connectColorHost(hostRequest) : undefined
     let editorContext: EditorContext | undefined
     if (hostMode === 'editor' || hostMode === 'selection') {
       const context = await hostRequest<EditorContext | SelectionContext>('filaman:filament-context')
@@ -394,8 +396,8 @@ async function main() {
       const view = document.querySelector<HTMLElement>('[data-view="chat"]')!
       view.hidden = false
       if (!chat) {
-        chat = mountChat(status, status.can_configure ? openSettings : undefined, undefined, false,
-          { root: view, openResearch: status.can_create ? () => show('new') : undefined,
+        chat = mountChat(status, status.can_configure ? openSettings : undefined, colorHost ? 'color:' + (colorHost.context.color_id ?? 'new') : undefined, false,
+          { root: view, colorHost, openResearch: status.can_create && !colorHost ? input => show('new', input) : undefined,
             context: editorContext?.filament_id ? { filament_id: editorContext.filament_id } : undefined })
         workspace.attachChat('chat', view)
       }
@@ -423,9 +425,9 @@ async function main() {
     }
     const mount: Record<string, (() => void) | false> = {
       chat: status.can_chat && (() => { openConversation(); chat?.showChat() }),
-      new: status.can_create && (() => { openResearch().start() }),
+      new: !colorHost && status.can_create && (() => { openResearch().start() }),
       editor: !!editorContext && (() => { openResearch('editor').start() }),
-      spool: !!status.can_add_spool && (() => {
+      spool: !colorHost && !!status.can_add_spool && (() => {
         const researchFromSpool = status.can_create ? (input: SpoolResearchInput) => {
           show('new', input)
         } : undefined
@@ -433,8 +435,8 @@ async function main() {
           document.querySelector<HTMLElement>('[data-view="spool"]')!, !!status.can_read_spools, researchFromSpool,
         )
       }),
-      library: status.can_update && (() => mountLibrary()),
-      batches: status.can_update && (() => {
+      library: !colorHost && status.can_update && (() => mountLibrary()),
+      batches: !colorHost && status.can_update && (() => {
         const batch = element('filament-batches')
         batch.querySelector<HTMLElement>('[data-batch-history-link]')!.hidden = !id
         batch.querySelector<HTMLElement>('[data-batch-message]')!.removeAttribute('data-i18n')

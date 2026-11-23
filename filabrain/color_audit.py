@@ -9,7 +9,7 @@ from sqlalchemy import select
 from .color_standards import PANTONE_CODE, RAL_CODE, normalize_reference
 
 COLOR_REFERENCES = 'filabrain_color_references'
-_REFERENCE_START = re.compile(r'\b(?:RAL|Pantone)\s*', re.I)
+_REFERENCE_START = re.compile(r'\b(?:RAL|Pantone)\s*', re.IGNORECASE)
 
 
 def explicit_references(value) -> list[str]:
@@ -62,15 +62,30 @@ def rename_allowed(filament, assignments, code, references, preview) -> bool:
     return same_system == {code}
 
 
-async def rename_state(db, item, filament, assignments, code, source, preview, *, locked=False):
-    """Bind every linked assignment and product identity, not merely its count."""
-    color = assignments[0][1]
+async def shared_color_links(db, color_id, *, locked=False):
     query = (select(FilamentColor, Filament).join(Filament, Filament.id == FilamentColor.filament_id)
-             .where(FilamentColor.color_id == color.id).order_by(FilamentColor.id)
+             .where(FilamentColor.color_id == color_id).order_by(FilamentColor.id)
              .execution_options(populate_existing=True))
     if locked and db.get_bind().dialect.name != 'sqlite':
         query = query.with_for_update()
-    linked = (await db.execute(query)).all()
+    return (await db.execute(query)).all()
+
+
+def shared_reference_conflicts(linked, code):
+    return sorted({
+        reference
+        for link, product in linked
+        for reference in explicit_references([
+            link.display_name_override, product.manufacturer_color_name, product.custom_fields,
+        ])
+        if reference.split()[0] == code.split()[0] and reference != code
+    })
+
+
+async def rename_state(db, item, filament, assignments, code, source, preview, *, locked=False):
+    """Bind every linked assignment and product identity, not merely its count."""
+    color = assignments[0][1]
+    linked = await shared_color_links(db, color.id, locked=locked)
     usage = [[link.id, link.filament_id, link.color_id, link.position, link.display_name_override,
               product.record_token, product.manufacturer_id, product.designation, product.material_type,
               product.manufacturer_color_name, product.color_mode, product.custom_fields,
@@ -80,12 +95,5 @@ async def rename_state(db, item, filament, assignments, code, source, preview, *
     state = ['rename', item.batch_id, item.id, item.revision, item.identity, filament.id,
              color.id, color.name, color.hex_code, color.custom_fields, usage, code, source, preview]
     token = hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
-    conflicts = sorted({
-        reference
-        for link, product in linked
-        for reference in explicit_references([
-            link.display_name_override, product.manufacturer_color_name, product.custom_fields,
-        ])
-        if reference.split()[0] == code.split()[0] and reference != code
-    })
+    conflicts = shared_reference_conflicts(linked, code)
     return token, len({link.filament_id for link, _ in linked}), conflicts

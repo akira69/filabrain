@@ -1,6 +1,9 @@
-import { api } from './shared/api'
+import { api, ApiError } from './shared/api'
 import { getLang, t } from './shared/i18n'
-import { researchFieldLabel } from './shared/filabrain'
+import { mountAgentTasks, type AgentTask } from './agent-tasks'
+import { colorContextNote, colorReview, type ColorHost } from './color-assistance'
+import type { SpoolResearchInput } from './spool-intake'
+import { productCandidate, researchIssueText, researchFieldLabel, type ResearchProposal } from './shared/filabrain'
 import { spoolProfileCards, type SpoolProfile } from './shared/spool-profiles'
 import { mountModelPicker, type ModelSelection } from './shared/model-picker'
 import { identity, type ResearchDraft } from './research'
@@ -15,7 +18,7 @@ const pageLabels = {
   research_batches: 'researchBatches.title',
   model_settings: 'filaBrain.settings',
 }
-type Action = { page: keyof typeof pageLabels; url: string }
+type Action = { page: keyof typeof pageLabels; url: string } | { page: 'intake' | 'color'; proposal?: ResearchProposal }
 type Evidence = {
   id: string; kind: string; title: string; url: string; text?: string; details?: Record<string, unknown>
   scope?: 'grade' | 'variant'
@@ -25,17 +28,19 @@ type Evidence = {
 type Grounding = {
   evidence: Evidence[]; notices: string[]; search: string | null; required_g: number | null
 }
+type Coverage = { records_checked?: number; matching_records?: number; page?: number; has_more?: boolean; exhaustive?: boolean; candidates_shown?: number; unverified_source_filament_ids?: number[]; unchecked_source_filament_ids?: number[] }
 type Message = {
   role: 'user' | 'assistant'; content: string; action?: Action; proposal?: ResearchDraft['proposal']; savedDraftId?: string
   grounding?: Grounding; spoolProfiles?: SpoolProfile[]; selectedSpoolProfile?: string; confirmedSpoolProfile?: string
   activeSpoolChoice?: true; spoolLookupFilamentId?: number | null; spoolLookupId?: string
+  report?: { task: AgentTask; query: string; coverage?: Coverage; complete?: boolean }
   usage?: ChatUsage
   usageModel?: ModelSelection
 }
 type Conversation = {
   id: string; title: string; messages: Message[]; research?: ResearchDraft
   researching?: true; model?: string | ModelSelection; updatedAt?: number
-  draft?: string; context?: ChatContextSnapshot
+  draft?: string; context?: ChatContextSnapshot; task?: AgentTask
 }
 type Research = {
   start(): void
@@ -71,10 +76,10 @@ function chatHistoryWindow(messages: Message[], limit: number, spoolChoice?: Mes
 const evidenceLabels: Record<string, string> = {
   spool: 'chatInventory', filament: 'chatSavedFilament', printer: 'chatSavedPrinter',
   saved_profile: 'chatSavedProfile', saved_calibration: 'chatSavedCalibration',
-  preset: 'chatPreset', catalog: 'chatCatalog', live: 'chatLive',
+  health: 'taskHealth', stock: 'taskStock', color: 'color', preset: 'chatPreset', catalog: 'chatCatalog', live: 'chatLive',
 }
 const noticeLabels: Record<string, string> = {
-  no_spools: 'chatNoSpools', spools_forbidden: 'chatSpoolsForbidden', printer_required: 'chatPrinterRequired',
+  product_lookup_incomplete: 'taskProductIncomplete', package_weight_unverified: 'taskPackageUnknown', color_lookup_incomplete: 'taskColorIncomplete', spool_lookup_incomplete: 'taskSpoolIncomplete', no_spools: 'chatNoSpools', spools_forbidden: 'chatSpoolsForbidden', printer_required: 'chatPrinterRequired',
   filament_required: 'chatFilamentRequired', nozzle_required: 'chatNozzleRequired',
   no_exact_profile: 'chatNoExactProfile', missing_evidence: 'chatMissingEvidence',
 }
@@ -124,7 +129,7 @@ function evidenceLink(title: string, url: string) {
   return element
 }
 
-export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean; microphone_enabled?: boolean } & DictationSettings, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: () => void; context?: ChatContextSnapshot } = {}) {
+export function mountChat(statusModel: { chat_model?: string | null; chat_endpoint_id?: string | null; can_add_spool?: boolean; can_read_printers?: boolean; can_read_spools?: boolean; can_read_display?: boolean; microphone_enabled?: boolean } & DictationSettings, openSettings?: () => void, editorScope?: string, researchOnly = editorScope !== undefined, options: { root?: HTMLElement; openResearch?: (input?: SpoolResearchInput) => void; context?: ChatContextSnapshot; colorHost?: ColorHost } = {}) {
   const root = options.root ?? document.querySelector<HTMLElement>('[data-view="chat"]')!
   let model = statusModel.chat_model
   const form = root.querySelector<HTMLFormElement>('[data-chat-form]')!
@@ -168,7 +173,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   let storageKey: string | undefined
   const historyStorage = () => editorScope === '' ? sessionStorage : localStorage
   let request: AbortController | undefined
-  const pending = new Map<string, { conversation: Conversation; controller: AbortController; question: Message }>()
+  const pending = new Map<string, { conversation: Conversation; controller: AbortController; question: Message; draft: string }>()
   let busyResearch = false
   let staging = false
   let researching = false
@@ -176,7 +181,13 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   let activeAnswer: HTMLElement | undefined
   let forkNextResearchTurn = false
   let evidenceCount = 0
+  let intakeChoice: { product_url: string; sku_hint?: string; identity: ResearchProposal['target']['identity'] } | undefined
   const modelPicker = mountModelPicker(form, model, openSettings, statusModel.chat_endpoint_id, updateControls)
+  const agent = mountAgentTasks(form, !!statusModel.can_read_spools, updateControls, !!options.colorHost)
+  if (options.colorHost) {
+    form.before(colorContextNote(options.colorHost))
+    input.value = options.colorHost.context.fields.name
+  }
   const picker = form.querySelector<HTMLElement>('.chat-model-picker')!
   status.removeAttribute('data-i18n')
   status.textContent = ''
@@ -185,13 +196,18 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   function scrollToEnd() { transcript.scrollTop = transcript.scrollHeight }
 
   function updateControls() {
-    form.hidden = (!researching && !modelPicker.hasOptions) || (editorScope !== undefined && !form.contains(picker))
-    input.disabled = researching && !current.messages.length && !busyResearch
-    input.maxLength = researching ? 400 : 2000
-    input.placeholder = t(researching ? 'filaBrain.followUpHint' : 'filaBrain.chatPlaceholder')
+    form.hidden = (researchOnly && !researching && !modelPicker.hasOptions) || (editorScope !== undefined && !form.contains(picker))
+    const taskActive = !researchOnly && !researching && agent.active
+    agent.update(!!request || busyResearch || staging, researchOnly || researching)
+    picker.hidden = taskActive
+    input.hidden = !researching && !taskActive && !modelPicker.hasOptions
+    form.querySelector<HTMLElement>('.chat-toolbar')!.hidden = input.hidden
+    input.disabled = !researching && !taskActive && !modelPicker.hasOptions || researching && !current.messages.length && !busyResearch
+    input.maxLength = researching ? 400 : taskActive ? 2048 : 2000
+    input.placeholder = t(researching ? 'filaBrain.followUpHint' : taskActive ? agent.value === 'color' ? 'colorAssistant.hint' : agent.value === 'intake' ? 'filaBrain.taskIntakeHint' : agent.value === 'job-fit' ? 'filaBrain.taskJobHint' : 'filaBrain.taskFilterHint' : 'filaBrain.chatPlaceholder')
     input.setAttribute('aria-label', t(researching ? 'filaBrain.followUp' : 'filaBrain.chatQuestion'))
-    submit.disabled = !contextReady || busyResearch || staging || !request && (input.disabled || !input.value.trim())
-    contextPanel.hidden = researchOnly || researching
+    submit.disabled = !contextReady || busyResearch || staging || !request && (input.disabled || !input.value.trim() && !agent.allowsEmpty)
+    contextPanel.hidden = researchOnly || researching || input.hidden || taskActive && agent.value !== 'job-fit'
     for (const field of [printer, filament, filamentSearch, nozzle]) field.disabled = !!request
     const label = t(request ? 'filaBrain.chatStop' : researching ? 'filaBrain.sendFollowUp' : 'filaBrain.chatSend')
     submit.setAttribute('aria-label', label)
@@ -201,7 +217,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     dictation.setBusy(input.readOnly)
     const answer = current.messages.at(-1)
     const usedModel = answer?.usageModel
-    usageMeter.update(answer?.usage, { visible: answer?.role === 'assistant' && !researching
+    usageMeter.update(answer?.usage, { visible: !!usedModel && answer?.role === 'assistant' && !researching
       && usedModel?.model_id === modelPicker.selected?.model_id && usedModel?.endpoint_id === modelPicker.selected?.endpoint_id,
       model: usedModel?.model_id })
     const title = current.title || t('filaBrain.chatNew')
@@ -212,8 +228,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     status.toggleAttribute('data-chat-running', !!request)
     newChat.disabled = busyResearch || staging || !researching && !request && !current.messages.length && !input.value
     for (const button of historyList.querySelectorAll('button')) button.disabled = busyResearch || staging
-    prompts.hidden = researching || form.hidden || !!request || current.messages.length > 0
-    setup.hidden = researching || modelPicker.hasOptions || current.messages.length > 0
+    prompts.hidden = researching || taskActive || !modelPicker.hasOptions || form.hidden || !!request || current.messages.length > 0
+    setup.hidden = researching || taskActive || modelPicker.hasOptions || current.messages.length > 0
     researchInput.hidden = researchResults.hidden = !researching
   }
 
@@ -274,6 +290,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       list.append(item)
     }
     if (list.childElementCount) facts.append(list)
+    if (facts.childElementCount === 1) return
     paragraph.replaceChildren()
     let offset = 0
     for (const match of content.matchAll(/\[([^\[\]\r\n]{1,128})\]/g)) {
@@ -310,7 +327,100 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       })
       if (cards) log.append(cards)
     }
-    if (message.action && Object.hasOwn(pageLabels, message.action.page)) {
+    if (message.report) {
+      const report = message.report
+      const coverage = report.coverage
+      const line = document.createElement('p')
+      line.className = 'fm-field-hint chat-report'
+      if (typeof coverage?.records_checked === 'number') line.textContent = t('filaBrain.taskCoverage', {
+        page: coverage.page || 1, count: coverage.records_checked, total: coverage.matching_records ?? coverage.records_checked,
+      })
+      if (coverage?.exhaustive === false) line.textContent += t('filaBrain.taskRankedCandidates')
+      if (report.complete === false) line.textContent += ' ' + t('filaBrain.taskPartial')
+      log.append(line)
+      if (coverage?.has_more && (report.task.task === 'stock' || report.task.task === 'library-health')) {
+        const next = document.createElement('button')
+        next.type = 'button'
+        next.className = 'fm-btn fm-btn-outline chat-action'
+        next.textContent = t('filaBrain.taskNextPage')
+        next.addEventListener('click', () => {
+          if (request) return
+          agent.restore({ ...report.task, page: (coverage.page || 1) + 1 })
+          input.value = report.query
+          updateControls()
+          form.requestSubmit()
+        })
+        log.append(next)
+      }
+    }
+    if ((message.action?.page === 'intake' || message.action?.page === 'color') && message.action.proposal) {
+      const proposal = message.action.proposal
+      const candidates = proposal.issues.filter(issue => issue.code === 'possible_match')
+      for (const issue of candidates) log.append(productCandidate(issue, (url, sku) => {
+        if (request) return
+        agent.restore({ task: message.action!.page === 'color' ? 'color' : 'intake', grams: '', checkSources: false })
+        input.value = url
+        intakeChoice = { product_url: url, sku_hint: sku || proposal.discovery_sku, identity: proposal.target.identity }
+        updateControls()
+        form.requestSubmit()
+      }))
+      const sourceIssues = proposal.issues.filter(issue => ['unavailable_source', 'search_incomplete', 'no_match', 'ambiguous_match', 'duplicate'].includes(issue.code))
+      if (sourceIssues.length) {
+        const notes = document.createElement('ul')
+        notes.className = 'fm-field-hint chat-research-notes'
+        for (const issue of sourceIssues) {
+          const note = document.createElement('li')
+          note.textContent = researchIssueText(issue)
+          if (issue.code === 'duplicate' && issue.filament_id) note.append(' ', evidenceLink(`#${issue.filament_id}`, `/filaments/${issue.filament_id}`))
+          notes.append(note)
+        }
+        log.append(notes)
+      }
+      if (message.action.page === 'color' && !candidates.length && options.colorHost && proposal.color_previews?.length) {
+        log.append(colorReview(proposal.color_previews, options.colorHost, () => !!request || staging, value => { staging = value; updateControls() }))
+      }
+      const colorResult = message.action.page === 'color'
+      const suggestions = colorResult
+        ? proposal.suggestions.filter(item => item.field === 'manufacturer_color_name' && item.sources?.length)
+        : proposal.suggestions
+      if (!candidates.length && suggestions.length) {
+        const details = document.createElement('details')
+        details.className = 'chat-evidence'
+        const summary = document.createElement('summary')
+        summary.textContent = t(colorResult ? 'colorAssistant.productEvidence' : 'filaBrain.taskDraftDetails')
+        const fields = document.createElement('dl')
+        for (const suggestion of suggestions) {
+          const title = document.createElement('dt'), value = document.createElement('dd')
+          title.textContent = researchFieldLabel(suggestion.field)
+          value.textContent = evidenceValue(suggestion.value)
+          for (const source of suggestion.sources || []) {
+            if (source.url) value.append(' ', evidenceLink(source.title, source.url))
+            if (colorResult && source.evidence) {
+              const quote = document.createElement('p')
+              quote.textContent = source.evidence
+              value.append(quote)
+            }
+          }
+          fields.append(title, value)
+        }
+        details.append(summary, fields)
+        log.append(details)
+      }
+      if (message.action.page !== 'color' && !candidates.length && (proposal.suggestions.length || proposal.target.identity.designation) && options.openResearch) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'fm-btn fm-btn-outline chat-action'
+        button.textContent = t('filaBrain.taskReviewDraft')
+        button.addEventListener('click', () => {
+          if (request) return
+          const draft = structuredClone(proposal)
+          if (message.selectedSpoolProfile) draft.spool_profile_id = message.selectedSpoolProfile
+          options.openResearch!({ proposal: draft })
+        })
+        log.append(button)
+      }
+    }
+    if (message.action && 'url' in message.action && Object.hasOwn(pageLabels, message.action.page)) {
       const { page, url } = message.action
       if (typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') && !url.includes('\\')) {
         const link = document.createElement('a')
@@ -376,6 +486,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         reset(researchChat)
         current = pending.get(selected.id)?.conversation ?? { ...selected, messages: [...selected.messages] }
         request = pending.get(selected.id)?.controller
+        agent.restore(current.task)
         let lastResult = -1
         current.messages.forEach((message, index) => { if (message.proposal) lastResult = index })
         if (selected.research) {
@@ -478,6 +589,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       conversation.draft = input.value
       conversation.context = chatContext.snapshot()
       conversation.model = modelPicker.selected
+      conversation.task = agent.snapshot()
     }
     if (!conversation.id) conversation.id = newId()
     if (!conversation.title) conversation.title = (conversation.messages[0]?.content || conversation.draft || t('filaBrain.chatNew')).slice(0, 100)
@@ -490,7 +602,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     messages.unshift(...earlierReceipts)
     conversation.updatedAt = Math.max(Date.now(), (conversation.updatedAt ?? 0) + 1,
       (saved.find(item => item.id === conversation.id)?.updatedAt ?? 0) + 1)
-    const snapshot = { ...conversation, draft: running?.question.content || conversation.draft, messages }
+    const snapshot = { ...conversation, draft: running ? running.draft : conversation.draft, messages }
     saved = [snapshot, ...saved.filter(item => item.id !== snapshot.id)].slice(0, 20)
     if (storageKey) {
       try {
@@ -511,7 +623,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     if (!root.getClientRects().length || busyResearch || staging || forkNextResearchTurn) return
     const context = chatContext.snapshot()
     if (input.value === (current.draft ?? '') && JSON.stringify(context) === JSON.stringify(current.context ?? {})
-        && JSON.stringify(modelPicker.selected) === JSON.stringify(current.model)) return
+        && JSON.stringify(modelPicker.selected) === JSON.stringify(current.model)
+        && JSON.stringify(agent.snapshot()) === JSON.stringify(current.task)) return
     if (!current.messages.length && !input.value.trim()) return
     if (!pending.has(current.id)) {
       try {
@@ -562,6 +675,8 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     research?.reset()
     root.dispatchEvent(new CustomEvent('filabrain:chat-mode', { bubbles: true, detail: useResearch }))
     modelPicker.reset()
+    agent.restore()
+    intakeChoice = undefined
     log.after(researchResults)
     activeAnswer = undefined
     log.replaceChildren()
@@ -579,7 +694,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     if (event.target instanceof Element && event.target.closest('[role=menuitemradio]')) updateControls()
   })
 
-  input.addEventListener('input', updateControls)
+  input.addEventListener('input', () => { intakeChoice = undefined; agent.resetPage(); updateControls() })
   input.addEventListener('keydown', event => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !request && !busyResearch) {
       event.preventDefault()
@@ -613,17 +728,22 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       request.abort()
       return
     }
-    const content = input.value.trim()
+    const entered = input.value.trim()
+    if (agent.active && entered.length > 400 && !/^https?:\/\/\S+$/i.test(entered)) {
+      status.textContent = t('filaBrain.taskQueryTooLong')
+      return
+    }
+    const content = entered || (agent.allowsEmpty ? t(agent.value === 'stock' ? 'filaBrain.taskStock' : 'filaBrain.taskHealth') : '')
     if (!content || busyResearch || staging) return
     const pendingContext = contextInitialization
     await pendingContext
-    if (!root.isConnected || request || busyResearch || staging || pendingContext !== contextInitialization || input.value.trim() !== content) return
+    if (!root.isConnected || request || busyResearch || staging || pendingContext !== contextInitialization || input.value.trim() !== entered) return
     if (researching) {
       try { await research?.followUp(content) }
       catch { status.textContent = t('filaBrain.failed') }
       return
     }
-    if (!modelPicker.selected) {
+    if (!agent.active && !modelPicker.selected) {
       status.textContent = t('filaBrain.chooseModel')
       return
     }
@@ -631,11 +751,15 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     if (!conversation.id) conversation.id = newId()
     if (!conversation.title) conversation.title = content.slice(0, 100)
     const choiceModel = modelPicker.selected
+    const taskRequest = agent.active ? ['intake', 'color'].includes(agent.value) && intakeChoice
+      ? { path: agent.value === 'color' ? '/agent/color-intake' : '/agent/intake', body: intakeChoice } : agent.request(entered, chatContext.snapshot()) : undefined
+    const taskOptions = agent.snapshot()
+    intakeChoice = undefined
     const question: Message = { role: 'user', content }
     modelPicker.preserve(modelPicker.selected)
     const bubble = append(question)
     const controller = request = new AbortController()
-    pending.set(conversation.id, { conversation, controller, question })
+    pending.set(conversation.id, { conversation, controller, question, draft: entered })
     input.value = ''
     status.textContent = t('filaBrain.chatWorking')
     updateControls()
@@ -650,10 +774,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       const lookupMessageIndex = lookup ? history.indexOf(lookup) : -1
       conversation.messages.push(question)
       remember(conversation)
-      const { reply, action, spool_profiles, selected_spool_profile_id, usage, ...grounding } = await api.post<{
-        reply: string; action: Action | null; spool_profiles?: SpoolProfile[]; selected_spool_profile_id?: string
-        usage?: Message['usage']
-      } & Partial<Grounding>>('/filabrain/chat', {
+      const { reply, action, proposal, spool_profiles, selected_spool_profile_id, usage, coverage, complete, ...grounding } = await api.post<{
+        reply: string; action: Action | null; proposal?: ResearchProposal; spool_profiles?: SpoolProfile[]; selected_spool_profile_id?: string
+        usage?: Message['usage']; coverage?: Coverage; complete?: boolean
+      } & Partial<Grounding>>('/filabrain' + (taskRequest?.path || '/chat'), taskRequest?.body || {
         messages: [...history, question].map(({ role, content, confirmedSpoolProfile }) => ({
           role, content, ...(confirmedSpoolProfile ? { confirmed_spool_profile_id: confirmedSpoolProfile } : {}),
         })),
@@ -673,9 +797,10 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
       const spoolProfiles = Array.isArray(spool_profiles) ? spool_profiles.slice(0, 4) : undefined
       if (selected_spool_profile_id && lookup && !lookup.spoolLookupId) lookup.spoolLookupId = newId()
       const answer: Message = {
-        role: 'assistant', content: reply, action: action ?? undefined,
+        role: 'assistant', content: reply, action: (action?.page === 'intake' || action?.page === 'color') ? { ...action, proposal } : action ?? undefined,
         usage,
-        usageModel: choiceModel,
+        usageModel: taskRequest ? undefined : choiceModel,
+        report: taskRequest ? { task: taskOptions, query: entered, coverage, complete } : undefined,
         grounding: Array.isArray(grounding.evidence) ? grounding as Grounding : undefined,
         spoolProfiles,
         spoolLookupFilamentId: spoolProfiles?.length
@@ -692,16 +817,16 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
         status.textContent = ''
       }
       remember(conversation)
-    } catch {
+    } catch (error) {
       if (pending.get(conversation.id)?.controller !== controller) return
       if (conversation.messages.at(-1) === question) conversation.messages.pop()
-      conversation.draft = content
+      conversation.draft = entered
       pending.delete(conversation.id)
       if (current === conversation) {
         bubbles.get(question)?.remove()
         bubbles.delete(question)
-        input.value = content
-        status.textContent = t(controller.signal.aborted ? 'filaBrain.chatStopped' : 'filaBrain.chatFailed')
+        input.value = entered
+        status.textContent = controller.signal.aborted ? t('filaBrain.chatStopped') : error instanceof ApiError ? error.message : t('filaBrain.chatFailed')
       }
       remember(conversation)
     } finally {

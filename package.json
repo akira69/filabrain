@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node frontend/build.mjs",
-    "test": "node tests/check-frontend.mjs && node tests/check-layout.mjs && node tests/check-dictation.mjs && node tests/check-context.mjs && node tests/check-usage-ring.mjs && node tests/check-workspace.mjs && node tests/check-audio-settings.mjs && node tests/check-audio-capture.mjs && node tests/check-color-audit.mjs && node tests/check-theme.mjs"
+    "test": "node tests/check-frontend.mjs && node tests/check-layout.mjs && node tests/check-dictation.mjs && node tests/check-context.mjs && node tests/check-usage-ring.mjs && node tests/check-workspace.mjs && node tests/check-audio-settings.mjs && node tests/check-audio-capture.mjs && node tests/check-color-audit.mjs && node tests/check-theme.mjs && node tests/check-agent-tasks.mjs && node tests/check-color-assistance.mjs"
   },
   "devDependencies": {
     "esbuild": "0.27.3",

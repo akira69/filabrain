@@ -9,56 +9,72 @@ from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 import httpx
 from app.api.deps import DBSession
-from app.models import Filament, FilamentPrinterParam, FilamentPrinterProfile, Manufacturer, Printer, Spool, SpoolStatus
+from app.models import (
+    Filament,
+    FilamentPrinterParam,
+    FilamentPrinterProfile,
+    Printer,
+    Spool,
+    SpoolStatus,
+)
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from . import knowledge, sources
 from .proposals import (
-    Identity, _known_variant_fields, _literal_in, _on_manufacturer_site, _product_titles,
-    _sheet_matches, _sheet_variant_values, _site_host, _supplier_scopes,
-    filament_identity, manufacturer_site_url, same_variant,
+    Identity,
+    _known_variant_fields,
+    _literal_in,
+    _on_manufacturer_site,
+    _product_titles,
+    _sheet_matches,
+    _sheet_variant_values,
+    _site_host,
+    _supplier_scopes,
+    filament_identity,
+    manufacturer_site_url,
+    same_variant,
 )
 from .weights import AMBIGUOUS_WEIGHT_REPLY, WEIGHT_EXPRESSION, grams_from_match
 
 INVENTORY = re.compile(
     r"\b(?:what do i have|do i have|(?:what|which|my|our|in) (?:spools?|inventory|stock)|"
-    r"en stock|auf lager|welche spulen|quelles? bobines?)\b", re.I
+    r"en stock|auf lager|welche spulen|quelles? bobines?)\b", re.IGNORECASE
 )
 NAVIGATION = re.compile(
     r"\b(?:open|visit|go to|take me to)\s+(?:(?:the|a)\s+)?"
     r"(?:filaman|(?:new\s+)?(?:filament|spool)s?|research batches|(?:model|filabrain) settings)\b"
-    r"|\b(?:add(?:ing)?|creat(?:e|ing))\s+(?:a\s+)?(?:new\s+)?(?:filament|spool)\b", re.I,
+    r"|\b(?:add(?:ing)?|creat(?:e|ing))\s+(?:a\s+)?(?:new\s+)?(?:filament|spool)\b", re.IGNORECASE,
 )
 SETTINGS = re.compile(
     r"\b(?:(?:what|which|print|printing|starting) settings|settings (?:for|should)|"
-    r"(?:nozzle|bed) temp(?:eratures?)?|paramètres d.impression|druckeinstellungen)\b", re.I
+    r"(?:nozzle|bed) temp(?:eratures?)?|paramètres d.impression|druckeinstellungen)\b", re.IGNORECASE
 )
-LOOKUP = re.compile(r"\b(?:specs?|specifications?|data\s*sheet|latest|recent|current|newest|verify|conflict|unverified)\b", re.I)
+LOOKUP = re.compile(r"\b(?:specs?|specifications?|data\s*sheet|latest|recent|current|newest|verify|conflict|unverified)\b", re.IGNORECASE)
 WEIGHT = re.compile(
     r"(?:(?P<required>\b(?:need(?:ed|s)?|require(?:d|s)?|at least|minimum(?: of)?))\s+(?:about |around )?)?"
-    + WEIGHT_EXPRESSION, re.I,
+    + WEIGHT_EXPRESSION, re.IGNORECASE,
 )
-MATERIAL = re.compile(r"\b(?:PLA|PETG|PET|ASA|ABS|TPU|TPE|PCTG|PA|Nylon|PC|PP|PVA|HIPS)\b", re.I)
-OUTDOOR = re.compile(r"\b(?:outdoors?|weatherproof|uv|extérieur|außen)\b", re.I)
+MATERIAL = re.compile(r"\b(?:PLA|PETG|PET|ASA|ABS|TPU|TPE|PCTG|PA|Nylon|PC|PP|PVA|HIPS)\b", re.IGNORECASE)
+OUTDOOR = re.compile(r"\b(?:outdoors?|weatherproof|uv|extérieur|außen)\b", re.IGNORECASE)
 BAMBU_MODELS = r"A1 Mini|A1|P1S|P1P|P2S|X1 Carbon|X1C|X1E|X1|H2D|H2S|H2C"
-BAMBU_MODEL = re.compile(rf"\bBambu(?:\s+Lab)?\s+({BAMBU_MODELS})\b", re.I)
-DEVICE_NAME = re.compile(rf"\b(?:{BAMBU_MODELS}|AMS 2 Pro)\b", re.I)
+BAMBU_MODEL = re.compile(rf"\bBambu(?:\s+Lab)?\s+({BAMBU_MODELS})\b", re.IGNORECASE)
+DEVICE_NAME = re.compile(rf"\b(?:{BAMBU_MODELS}|AMS 2 Pro)\b", re.IGNORECASE)
 CATALOG_BRANDS = {"Bambu Lab": "bambulab.com", "Polymaker": "polymaker.com", "Paramount 3D": "paramount-3d.com"}
 PACKAGE_LABELS = {
-    "refill": re.compile(r"\b(?:refill|spoolless|without (?:a )?spool)\b", re.I),
-    "spool": re.compile(r"\b(?:with (?:a )?spool|spooled|on (?:a )?spool)\b", re.I),
+    "refill": re.compile(r"\b(?:refill|spoolless|without (?:a )?spool)\b", re.IGNORECASE),
+    "spool": re.compile(r"\b(?:with (?:a )?spool|spooled|on (?:a )?spool)\b", re.IGNORECASE),
 }
 VARIANT_DETAILS = re.compile(
     r"\b(?:sku|article number|product code|barcode|colou?r)\s*[:#]|"
     r"\b(?:spool|reel)\s+(?:weight|tare|width|outer diameter|dimensions|material)\b|"
-    r"\b\d+(?:[.,]\d+)?\s*(?:kg|g)\b(?!\s*/)", re.I,
+    r"\b\d+(?:[.,]\d+)?\s*(?:kg|g)\b(?!\s*/)", re.IGNORECASE,
 )
 CITATION = re.compile(r"\[([^\[\]\r\n]{1,128})\]")
 EXACT_SETTING = re.compile(
     r"\d|°|https?://|www\.|\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|"
     r"twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)\s+"
-    r"(?:degrees?|percent|grams?|kilos?|millimeters?|hours?|minutes?|seconds?|per)\b", re.I
+    r"(?:degrees?|percent|grams?|kilos?|millimeters?|hours?|minutes?|seconds?|per)\b", re.IGNORECASE
 )
 SETTINGS_FIELDS = (
     "nozzle_diameter_mm", "nozzle_temp_c", "bed_temp_c", "chamber_temp_c",
@@ -241,7 +257,7 @@ async def _spools(db: DBSession, question: str, required_g: float | None, filame
 
 
 def _canonical_printer(text: str, *, saved: bool = False) -> str:
-    match = BAMBU_MODEL.search(text) or (re.fullmatch(rf"({BAMBU_MODELS})", text.strip(), re.I) if saved else None)
+    match = BAMBU_MODEL.search(text) or (re.fullmatch(rf"({BAMBU_MODELS})", text.strip(), re.IGNORECASE) if saved else None)
     if not match:
         return ""
     model = match[1].upper()
@@ -251,7 +267,7 @@ def _canonical_printer(text: str, *, saved: bool = False) -> str:
 def _weight_only(question: str) -> bool:
     weight = re.sub(
         r"^(?:(?:sorry|actually),?\s+)?(?:i\s+(?:(?:meant|mean)\s+)?)?",
-        "", question.rstrip(" .!?"), flags=re.I,
+        "", question.rstrip(" .!?"), flags=re.IGNORECASE,
     )
     return bool(WEIGHT.fullmatch(weight))
 
@@ -261,10 +277,11 @@ async def collect_context(
     filament_id: int | None = None, printer_id: int | None = None,
     nozzle_mm: float | None = None, web_search: bool = False, previous_questions: list[str] | None = None,
     auto_web_search: bool = False,
+    required_g: float | None = None,
 ) -> ChatContext | None:
-    if not web_search and NAVIGATION.search(question):
+    if required_g is None and not web_search and NAVIGATION.search(question):
         return None
-    inventory_question = question if INVENTORY.search(question) else ""
+    inventory_question = question if required_g is not None or INVENTORY.search(question) else ""
     if not inventory_question and _weight_only(question):
         previous_question = next((text for text in previous_questions or () if not _weight_only(text)), "")
         if INVENTORY.search(previous_question):
@@ -280,10 +297,10 @@ async def collect_context(
             or nozzle_mm or lookup and named_printer):
         return None
 
-    context = ChatContext(search_requested=web_search or lookup)
+    context = ChatContext(search_requested=web_search or lookup, required_g=required_g)
     materials = set()
     if inventory:
-        if weight := _required_weight_match(question):
+        if context.required_g is None and (weight := _required_weight_match(question)):
             context.required_g = grams_from_match(weight)
             if context.required_g is None:
                 context.notices.append("ambiguous_weight")
@@ -402,7 +419,7 @@ def _verified_package(text: str, package: str) -> bool:
     label = PACKAGE_LABELS[package].pattern
     return _packages(text) == {package} and bool(re.search(
         rf"(?:\b(?:package|packaging|spool type)\s*:\s*|\b\d+(?:[.,]\d+)?\s*(?:kg|g)[ ,]+){label}"
-        r"(?=\s*(?:[.;|]|$))", text, re.I,
+        r"(?=\s*(?:[.;|]|$))", text, re.IGNORECASE,
     ))
 
 
@@ -410,10 +427,10 @@ def _grade_excerpt(text: str, identity: Identity, colors: tuple[str, ...]) -> bo
     return bool(re.match(
         rf"^(?:{re.escape(identity.manufacturer)}\s+)?{re.escape(identity.designation)}[\s:·–—-]+"
         r"(?:(?:manufacturer|technical|printing)\s+)?(?:specifications?|specs|property|properties|"
-        r"recommended printing settings|nozzle temperature|bed temperature|density)\b", text, re.I,
+        r"recommended printing settings|nozzle temperature|bed temperature|density)\b", text, re.IGNORECASE,
     )) and not (
         _packages(text) or VARIANT_DETAILS.search(text) or any(_literal_in(color, text) for color in colors)
-        or re.search(r"\b(?:except|excluding|other than|unless)\b", text, re.I)
+        or re.search(r"\b(?:except|excluding|other than|unless)\b", text, re.IGNORECASE)
     )
 
 
@@ -446,7 +463,7 @@ def _search_target(
                 _on_manufacturer_site(url, candidate) for candidate in (domain, public_domain)
             ):
                 direct_urls.append(url)
-    product_lookup = package or re.search(r"\bdata\s*sheet\b", question, re.I)
+    product_lookup = package or re.search(r"\bdata\s*sheet\b", question, re.IGNORECASE)
     if printer_model and (not (direct_urls or designation) or settings and not product_lookup):
         return {"query": f"Bambu Lab {printer_model} Bambu Studio print settings site:bambulab.com",
                 "domain": "bambulab.com", "printer": printer_model, "urls": []}

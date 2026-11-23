@@ -8,6 +8,7 @@ type NameChange = { color_id: number; current_name: string; proposed_name: strin
 export type Reference = {
   code: string
   name: string
+  canonical_name?: string
   hex_code: string | null
   manufacturer_source: string | null
   from_product_url?: boolean
@@ -23,7 +24,7 @@ export type Review = { current: Swatch[]; can_save: boolean; can_assign: boolean
 const tr = (key: string, vars?: Record<string, string | number>) => t('swatchReview.' + key, vars)
 const label = (key: string) => escape(tr(key))
 
-function chip(name: string, hex: string) {
+export function swatchChip(name: string, hex: string) {
   const color = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(hex) ? hex : 'transparent'
   return `<div class="swatch-review-chip">
     <span class="swatch-review-color" style="background-color:${color}" aria-hidden="true"></span>
@@ -77,12 +78,12 @@ export async function mountSwatchReview(panel: HTMLElement, path: string | Draft
       <div class="swatch-compare">
         <div class="swatch-current">
           <p class="swatch-label">${label('current')}</p>
-          ${current.length ? current.map(swatch => chip(swatch.name, swatch.hex_code)).join('') : `<p>${label('noCurrent')}</p>`}
+          ${current.length ? current.map(swatch => swatchChip(swatch.name, swatch.hex_code)).join('') : `<p>${label('noCurrent')}</p>`}
         </div>
         <div class="swatch-matches">
           ${review.references.map((reference, index) => `<div class="swatch-preview">
             <p class="swatch-label">${label('reference')}${reference.saved ? ' · ' + label('savedTag') : ''}</p>
-            ${reference.hex_code ? chip(reference.code === reference.name ? reference.code : reference.name + ' · ' + reference.code, reference.hex_code)
+            ${reference.hex_code ? swatchChip(reference.code === reference.name ? reference.code : reference.name + ' · ' + reference.code, reference.hex_code)
               : `<p><strong>${escape(reference.code)}</strong> · ${label('unavailable')}</p>`}
             <div class="swatch-sources">${source(reference.source, 'paletteSource')}${reference.saved_reference ? `<span>${label('savedReference')}</span>` : source(reference.manufacturer_source, reference.from_product_url ? 'manufacturerProductUrl' : 'manufacturerSource')}</div>
             ${reference.rename_conflicts?.length ? `<p class="swatch-rename-conflict">${escape(tr('renameConflicts', { codes: reference.rename_conflicts.join(', ') }))}</p>` : ''}

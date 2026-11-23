@@ -81,7 +81,7 @@ try {
     const bounds = await guide.boundingBox()
     assert.equal(await page.locator('.docs-header').evaluate(el => getComputedStyle(el).backgroundColor), await page.locator('[data-view=settings] .fm-section-header').first().evaluate(el => getComputedStyle(el).backgroundColor))
     assert.ok((await page.locator('.docs-header').boundingBox()).height <= 64, 'guide uses the compact section header')
-    assert.equal(await guide.locator('.docs-content dl').evaluate(el => getComputedStyle(el).display), 'block', 'guide text spans one column')
+    assert.ok((await guide.locator('.docs-content dl').evaluateAll(elements => elements.map(el => getComputedStyle(el).display))).every(display => display === 'block'), 'guide text spans one column')
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1)
     assert.ok(bounds.y + bounds.height <= 1000)
     if (width <= 800) assert.ok(await guide.evaluate(el => el.matches(':modal')))

@@ -2,10 +2,10 @@
 
 import argparse
 import asyncio
-from hashlib import sha256
 import json
 import os
 import sys
+from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -20,7 +20,9 @@ def release_version(archive: Path) -> str:
 async def smoke(host: Path, archive: Path, directory: Path, previous: Path | None, live_model: bool) -> None:
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{directory / 'filaman.db'}"
     os.environ["PLUGINS_DIR"] = str(directory / "plugins")
-    os.environ["MCP_PLUGIN_READ_TOOLS"] = "filabrain-research_filament"
+    tool_names = ["research_filament", "plan_filament_intake", "resolve_color_reference", "find_spool_profiles",
+                  "audit_filament_colors", "choose_job_spools", "audit_library", "plan_stock"]
+    os.environ["MCP_PLUGIN_READ_TOOLS"] = ",".join("filabrain-" + name for name in tool_names)
     os.environ["FILABRAIN_SEARCH_URL"] = ""
     if not live_model:
         os.environ["FILABRAIN_MODEL_URL"] = "http://model.test/v1"
@@ -142,7 +144,24 @@ async def smoke(host: Path, archive: Path, directory: Path, previous: Path | Non
                 return response.json()["result"]
 
             tools = {item["name"] for item in (await rpc("tools/list"))["tools"]}
-            assert "filabrain-research_filament" in tools and "create_spool" not in tools
+            assert {"filabrain-" + name for name in tool_names} <= tools and "create_spool" not in tools
+            for name, arguments in [("choose_job_spools", {"required_g": 100}), ("audit_library", {}), ("plan_stock", {"target_g": 1000})]:
+                result = await rpc("tools/call", {"name": "filabrain-" + name, "arguments": arguments})
+                assert not result.get("isError"), result
+                assert json.loads(result["content"][0]["text"])["requires_review"] is True
+
+            from filabrain import color_standards
+
+            async def publisher_fixture(url):
+                assert url == color_standards.RAL_PAGE
+                return b'<a href="/en/colour/ral-classic/ral-3020/9143" style="background-color:#AB1519"><span>RAL</span><span class="number">3020</span><div class="subtext">Traffic red</div></a>'
+
+            with patch.object(color_standards, 'read_asset', publisher_fixture):
+                color_result = await browser.post(f"{root}/agent/color-intake", headers=headers, json={'query': 'RAL 3020'})
+                assert color_result.status_code == 200, color_result.text
+                assert color_result.json()['proposal']['color_previews'][0]['hex_code'] == '#AB1519'
+                assert color_result.json()['requires_review'] is True
+            assert (await browser.post(f"{root}/agent/color-intake", headers=headers, json={'query': 'RAL 3020', 'apply': True})).status_code == 422
 
             from filabrain import knowledge, proposals, research
 
@@ -194,8 +213,8 @@ async def smoke(host: Path, archive: Path, directory: Path, previous: Path | Non
                     research.request_completion = original_model
 
             async with async_session_maker() as db:
-                from sqlalchemy import func, select
                 from app.models import Filament, Spool
+                from sqlalchemy import func, select
 
                 assert await db.scalar(select(func.count()).select_from(Filament)) == 1
                 assert await db.scalar(select(func.count()).select_from(Spool)) == 1

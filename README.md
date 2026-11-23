@@ -8,6 +8,13 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 **Development preview.** Verified on stock FilaMan 2.2.2. Review researched values before applying them to your inventory.
 
+### What's new in 0.1.28 (development preview)
+
+- Add filament, Choose spool, Check library and Plan stock tasks in Chat, with saved options and reviewed draft handoff.
+- Shared read tools on FilaMan's built-in MCP for intake, exact RAL/Pantone swatches, spool designs, color audits and inventory planning.
+- Explicit unknown weights, product/design choices, partial coverage and source failures; inventory changes still require review.
+- On hosts with color-editor launchers, find official RAL/Pantone previews and stage reviewed Name/RGB changes into the native color form, preserving opacity and native Save.
+
 ### What's new in 0.1.27 (development preview)
 
 - One Filament workspace replaces the separate Research and New tabs. In the editor, switch between the current filament and a separate new draft without losing either conversation.
@@ -129,20 +136,50 @@ When a manufacturer's website is missing, FilaBrain checks FilaManDB first and c
 
 ![FilaBrain confirms that the Polymaker website found through SearXNG was saved](assets/filabrain-manufacturer-website.png)
 
+## Chat tasks
+
+Select a task above the message box. These read services work without a chat model; product research can also use your configured model for extraction.
+
+- **Add filament:** enter an SKU, URL or clues. Choose a product, then open **Review filament draft**. The existing Filament workspace reviews the already computed proposal. Keep the manufacturer's color name; reuse or create a separate swatch from an exact official RAL/Pantone screen preview. Confirm the spool design before accepting its tare or dimensions. Nothing is saved automatically.
+- **Choose spool:** describe the job and enter the required grams. Check each spool's measured remaining weight, material evidence and optional printer context. Separate rolls are not combined, unknown weights cannot qualify, and enough material does not establish printer compatibility.
+- **Check library:** optionally filter by manufacturer, material, SKU or name. Review missing specs/swatches, naming conventions and duplicate SKU candidates. Reports cover up to 25 matching filaments per chat request; use **Next page** to continue with the same filter and options. Optional product-link checks cover at most five links and distinguish blocked access from a missing page.
+- **Plan stock:** optionally filter and supply a target in grams per filament, or use saved thresholds on hosts that support them. Unknown remaining weights or package sizes prevent a confident order quantity. Consumption totals exclude measurements and corrections. Nothing is ordered.
+
+When opened from a supported Add/Edit Color launcher, Chat offers **Find color** and general Chat. **Product / catalog evidence** shows the original color name, source links and quoted text separately from the publisher's swatch preview. It preloads the draft name, shows shared usage and official publisher previews, and can stage reviewed Name/RGB values with the original opacity. Native Save persists the changes. Opening an existing swatch uses the host's dirty-form confirmation; it does not merge colors or reassign links. Older hosts retain the existing filament workflows without this launcher.
+
+Task choices, options, drafts and results stay with each chat. All findings require review; use the existing native editor for library corrections. Color audits of selected filaments remain available in Research library.
+
 ## External MCP connections
 
 **Switch to FilaMan’s built-in MCP.** If your client used `/api/v1/filabrain/mcp`, change the URL to `/mcp` on the same server. Replace `Authorization: Bearer <key>` with `Authorization: ApiKey <FilaMan API key>`. For remote connections, use HTTPS.
 
 1. In FilaMan, enable **AI Assistants (MCP)** under **Admin → App Settings**. Use `list_filaments` to verify the connection. Inventory changes require **Allow write access** and the appropriate permissions.
-2. For filament research, use FilaMan **2.2.2 or newer**. Add `filabrain-research_filament` to the host’s comma-separated `MCP_PLUGIN_READ_TOOLS` setting and restart FilaMan. With Docker Compose, add the setting to `.env` and run `docker compose up -d`.
-3. Call `filabrain-research_filament` with a key that has `filaments:read` access. Suggestions and sources appear in your MCP client for review. To continue in FilaMan, open the filament and review any changes in its editor.
+2. On FilaMan **2.2.2 or newer**, add the desired tools to the host's comma-separated `MCP_PLUGIN_READ_TOOLS` setting and restart FilaMan. With Docker Compose, add the setting to `.env` and run `docker compose up -d`.
+
+```env
+MCP_PLUGIN_READ_TOOLS=filabrain-research_filament,filabrain-plan_filament_intake,filabrain-resolve_color_reference,filabrain-find_spool_profiles,filabrain-audit_filament_colors,filabrain-choose_job_spools,filabrain-audit_library,filabrain-plan_stock
+```
+
+3. Research, intake, color, spool-profile and library tools require `filaments:read`. Job-fit and stock planning also require `spools:read`; selecting a printer requires `printers:read`. Results appear in your external client, independently of the app's chat history. All plugin tools are read-only. After explicit user approval, use FilaMan's native write tools to create/update colors, filaments or spools.
+
+Examples of tool arguments:
+
+```json
+{"tool":"filabrain-plan_filament_intake","arguments":{"query":"Paramount PLA purple"}}
+{"tool":"filabrain-resolve_color_reference","arguments":{"code":"RAL 4007"}}
+{"tool":"filabrain-choose_job_spools","arguments":{"query":"outdoor PETG bracket","required_g":280}}
+{"tool":"filabrain-audit_library","arguments":{"page":1,"page_size":25,"check_sources":true}}
+{"tool":"filabrain-plan_stock","arguments":{"query":"PETG","target_g":2000,"history_days":30}}
+```
+
+These are tool names and arguments, not complete JSON-RPC requests. Intake candidates require an explicit product selection; call again with the chosen `product_url`. Review color matches and confirm the spool design before using native create tools. Missing publisher previews, unavailable sources and partial scans remain explicit.
 
 ## Verify a package
 
 Run the smoke test with the Python environment from a stock FilaMan 2.2.2 or newer checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.27.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.28.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database. Pass `--previous path/to/old.zip` to test upgrade and rollback. The smoke test covers offline catalog research through FilaMan's built-in MCP and printing chat with a local test model. Use `--live-model` with `FILABRAIN_MODEL_URL` and `FILABRAIN_MODEL_ID` to exercise a configured server.
