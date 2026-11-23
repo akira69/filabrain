@@ -80,6 +80,10 @@
     "renamed": "Gemeinsames Farbfeld umbenannt."
   },
   "filaBrain": {
+    "navFilament": "Filament",
+    "filamentTarget": "Filamentziel",
+    "currentFilament": "Aktuelles Filament",
+    "currentDraft": "Aktueller Entwurf",
     "createManufacturer": "Hersteller erstellen",
     "navResearch": "Recherche",
     "discoveryQueryLimit": "Beschreibungen oder SKUs dürfen höchstens 400 Zeichen lang sein. Produktlinks dürfen bis zu 2048 Zeichen lang sein.",

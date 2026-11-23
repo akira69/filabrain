@@ -158,6 +158,9 @@ export function mountDictation(form: HTMLFormElement, input: HTMLTextAreaElement
   document.addEventListener('click', event => {
     if (event.target instanceof Element && event.target.closest('[data-tab], [data-chat-new], [data-chat-prompt], [data-chat-history-list] button')) stop()
   }, { capture: true })
+  document.addEventListener('change', event => {
+    if (event.target instanceof Element && event.target.matches('[data-filament-target]')) stop()
+  })
   window.addEventListener('pagehide', stop)
   document.addEventListener('visibilitychange', () => { if (document.hidden) stop() })
   configure(config)

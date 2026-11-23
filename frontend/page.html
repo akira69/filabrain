@@ -23,8 +23,7 @@
       </button>
       <button type="button" data-tab="new" hidden>
         <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 13.5c-2.5-2.1-5.5-2.6-9-1.5v8c3.5-1 6.5-.5 9 1.5 2.5-2 5.5-2.5 9-1.5v-8c-3.5-1.1-6.5-.6-9 1.5v8"/><circle cx="12" cy="6.5" r="4"/><circle cx="12" cy="6.5" r="1.2"/></svg>
-        <span class="tab-label-wide" data-i18n="filaBrain.navNewFilament">New filament</span>
-        <span class="tab-label-short" data-i18n="filaBrain.navNew">New</span>
+        <span data-i18n="filaBrain.navFilament">Filament</span>
       </button>
       <button type="button" data-tab="spool" hidden>
         <svg class="action-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="2.5"/><path d="M18 14v8m-4-4h8"/></svg>
@@ -42,6 +41,13 @@
         <span class="tab-label-short" data-i18n="filaBrain.navBatches">Runs</span>
       </button>
     </div></nav></div>
+    <label id="filament-target-field" class="filament-target" hidden>
+      <span class="research-sr-only" data-i18n="filaBrain.filamentTarget">Filament target</span>
+      <select id="filament-target" class="fm-input" data-filament-target>
+        <option value="editor" data-i18n="filaBrain.currentFilament">Current filament</option>
+        <option value="new" data-i18n="filaBrain.navNewFilament">New filament</option>
+      </select>
+    </label>
   </header>
   <p id="plugin-status" role="status">Loading…</p>
   <section data-view="chat" hidden><!-- chat --></section>

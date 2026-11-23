@@ -359,13 +359,6 @@ async function main() {
         scopeResearchIds(view, 'editor-')
         view.querySelector('[data-research-id="research-heading"]')!.parentElement!.classList.add('workspace-title-only')
         source.before(view)
-        const researchTab = document.querySelector<HTMLButtonElement>('[data-tab="new"]')!.cloneNode(true) as HTMLButtonElement
-        researchTab.dataset.tab = 'editor'
-        for (const label of researchTab.querySelectorAll<HTMLElement>('span')) {
-          label.dataset.i18n = 'filaBrain.navResearch'
-          label.textContent = t('filaBrain.navResearch')
-        }
-        document.querySelector('[data-tab="new"]')!.before(researchTab)
       } else if (hostMode === 'selection' && context.mode === 'selection' && status.can_update) {
         element('plugin-header').hidden = true
         document.querySelector<HTMLElement>('[data-view="library"]')!.hidden = false
@@ -383,6 +376,17 @@ async function main() {
     })
     const header = element('plugin-header')
     const nav = header.querySelector('nav')!
+    const targetField = element<HTMLLabelElement>('filament-target-field')
+    const targetPicker = element<HTMLSelectElement>('filament-target')
+    let filamentTarget = editorContext ? 'editor' : 'new'
+    if (editorContext) {
+      const current = targetPicker.querySelector<HTMLOptionElement>('[value=editor]')!
+      current.removeAttribute('data-i18n')
+      current.textContent = [t(editorContext.mode === 'create' ? 'filaBrain.currentDraft' : 'filaBrain.currentFilament'),
+        editorContext.fields.designation].filter(Boolean).join(' · ')
+      targetPicker.querySelector<HTMLOptionElement>('[value=new]')!.hidden = !status.can_create
+      targetPicker.disabled = !status.can_create
+    }
     let chat: ReturnType<typeof mountChat> | undefined
     const researchViews = new Map<string, { chat: ReturnType<typeof mountChat>; start: ReturnType<typeof mountResearch> }>()
     let stopSpoolIntake: (() => void) | undefined
@@ -410,6 +414,10 @@ async function main() {
         const start = mountResearch(status, chat, () => setGuide(tab), context, view)
         researchViews.set(tab, { chat, start })
         workspace.attachChat(tab, view)
+      }
+      if (editorContext) {
+        targetField.hidden = false
+        header.querySelector(`[data-chat-page="${tab}"]`)!.prepend(targetField)
       }
       return researchViews.get(tab)!
     }
@@ -439,9 +447,12 @@ async function main() {
     function show(tab: string, spoolInput?: SpoolResearchInput) {
       const run = Object.hasOwn(mount, tab) && mount[tab]
       if (!run) return
+      if (tab === 'new' || tab === 'editor') {
+        filamentTarget = targetPicker.value = tab
+      }
       if (tab !== 'spool') stopSpoolIntake?.()
       for (const button of buttons) {
-        if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
+        if (button.dataset.tab === (tab === 'editor' ? 'new' : tab)) button.setAttribute('aria-current', 'page')
         else button.removeAttribute('aria-current')
       }
       setGuide(tab)
@@ -459,7 +470,8 @@ async function main() {
         run()
       }
     }
-    const workspace = mountWorkspaceTabs(header, show)
+    const workspace = mountWorkspaceTabs(header, tab => show(tab === 'new' ? filamentTarget : tab))
+    targetPicker.addEventListener('change', () => show(targetPicker.value))
     function openSettings() {
       show('settings')
       const form = element('filabrain-settings')
@@ -469,8 +481,8 @@ async function main() {
     }
     for (const button of buttons) {
       const tab = button.dataset.tab!
-      button.hidden = !mount[tab] || (tab === 'batches' && params.get('tab') !== 'batches')
-      button.addEventListener('click', () => show(tab))
+      button.hidden = !(mount[tab] || tab === 'new' && mount.editor) || (tab === 'batches' && params.get('tab') !== 'batches')
+      button.addEventListener('click', () => show(tab === 'new' ? filamentTarget : tab))
     }
     nav.hidden = !nav.querySelector('button:not([hidden])')
     const available = Object.keys(mount).find(tab => mount[tab])
@@ -483,7 +495,7 @@ async function main() {
       const researching = (event as CustomEvent<boolean>).detail
       const tab = researching ? (event.target instanceof HTMLElement ? event.target.dataset.view : undefined) || 'new' : status.can_chat ? 'chat' : 'new'
       for (const button of buttons) {
-        if (button.dataset.tab === tab) button.setAttribute('aria-current', 'page')
+        if (button.dataset.tab === (tab === 'editor' ? 'new' : tab)) button.setAttribute('aria-current', 'page')
         else button.removeAttribute('aria-current')
       }
       workspace.select(tab)
