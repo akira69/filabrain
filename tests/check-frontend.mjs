@@ -76,6 +76,7 @@ try {
   let heldContextLoad
   const sharedChatRequests = []
   let colorResponse
+  let swatchResponse
   let canCreatePalette = true
   let duplicateSpoolLookup = false
   let supplierDefaultSku = 'FIX-123'
@@ -411,6 +412,7 @@ try {
     }
     if (path.endsWith('/manufacturers')) return route.fulfill({ json: { items: [manufacturer], total: 1 } })
     if (path.endsWith('/color-previews')) {
+      if (swatchResponse) await swatchResponse
       const data = req.postDataJSON()
       return route.fulfill({ json: { current: [], can_save: true, can_assign: true, can_create: canCreatePalette,
         references: data.references.map(reference => ({ ...reference, name: 'Purple violet', hex_code: '#44263C',
@@ -1765,9 +1767,27 @@ try {
   await colorDraft.locator('#research-advanced-fields').evaluate(el => { el.open = true })
   await colorDraft.getByRole('textbox', { name: 'Material', exact: true }).fill('PLA')
   await colorDraft.getByRole('spinbutton', { name: 'Diameter (mm)', exact: true }).fill('1.75')
+  let releaseSwatches
+  swatchResponse = new Promise(resolve => { releaseSwatches = resolve })
+  const swatchRequest = colorDraft.waitForRequest(request => request.url().endsWith('/color-previews'))
   await colorDraft.getByRole('button', { name: 'Find specifications' }).click()
+  await swatchRequest
+  await colorDraft.locator('#product-research button[value=fill]:enabled').waitFor()
+  assert.equal(await colorDraft.locator('#save-filament').isDisabled(), true,
+    'a new filament cannot be saved while its color choices are still loading')
+  releaseSwatches()
+  swatchResponse = undefined
   const swatches = colorDraft.locator('[data-draft-swatches]')
   await swatches.getByText('RAL 4007', { exact: false }).first().waitFor()
+  await colorDraft.getByRole('button', { name: 'Save new filament', exact: true }).click()
+  assert.equal(await colorDraft.locator('#create-confirm').evaluate(el => el.open), false,
+    'a known color reference must not silently save a new filament without a library swatch')
+  assert.equal(await swatches.getByRole('combobox').evaluate(el => el === document.activeElement), true)
+  await swatches.getByRole('combobox').selectOption('keep')
+  await swatches.getByRole('button', { name: 'Continue without color', exact: true }).click()
+  await colorDraft.getByRole('button', { name: 'Save new filament', exact: true }).click()
+  await colorDraft.locator('#create-confirm[open]').waitFor()
+  await colorDraft.locator('#create-cancel').click()
   await swatches.getByRole('combobox').selectOption('reuse:1')
   await swatches.getByRole('button', { name: 'Use swatch', exact: true }).click()
   await colorDraft.getByRole('checkbox', { name: /Library color/ }).waitFor()

@@ -37,6 +37,11 @@
     "chooseManual": "Wähle in FilaMan aus oder recherchiere ein neues Filament."
   },
   "swatchReview": {
+    "choose": "Farbe auswählen…",
+    "noColor": "Keine Palettenfarbe",
+    "continueWithoutColor": "Ohne Farbe fortfahren",
+    "withoutColor": "Dieser Entwurf wird ohne Palettenfarbe gespeichert.",
+    "chooseBeforeSave": "Wähle eine vorhandene Farbe oder erstelle eine neue und klicke auf Farbe verwenden. Du kannst auch ausdrücklich ohne Palettenfarbe fortfahren.",
     "hostUpdate": "Diese FilaMan-Version kann Farbänderungen nicht in den Editor übernehmen. Verwenden Sie Neues Filament oder aktualisieren Sie FilaMan.",
     "colorName": "Farbname",
     "colorHex": "Hex-Farbwert",

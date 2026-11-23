@@ -37,6 +37,11 @@
     "chooseManual": "Choisissez dans FilaMan ou recherchez un nouveau filament."
   },
   "swatchReview": {
+    "choose": "Choisir une couleur…",
+    "noColor": "Aucune couleur de la palette",
+    "continueWithoutColor": "Continuer sans couleur",
+    "withoutColor": "Ce brouillon sera enregistré sans couleur de la palette.",
+    "chooseBeforeSave": "Choisissez une couleur existante ou créez-en une, puis cliquez sur Utiliser la couleur. Vous pouvez aussi continuer explicitement sans couleur de la palette.",
     "hostUpdate": "Cette version de FilaMan ne peut pas transférer les couleurs dans l’éditeur. Utilisez Nouveau filament ou mettez FilaMan à jour.",
     "colorName": "Nom de la couleur",
     "colorHex": "Code hexadécimal",

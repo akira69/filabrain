@@ -230,6 +230,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
   let draft: Fields | undefined
   let busy = false
   let saving = false
+  let colorReviewPending = false
   let duplicate = false
   let lastAction = 'fill'
   let lastProductUrl = ''
@@ -428,6 +429,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     results.replaceChildren()
     bound = undefined
     boundProposal = undefined
+    colorReviewPending = false
     refreshSpoolProfiles = undefined
     followUpControls.hidden = true
     updateSave()
@@ -471,7 +473,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     const count = editor ? selected().reduce((total, unit) => total + Object.keys(unit).length, 0) : 0
     const candidatesOnly = !editor && !boundProposal?.suggestions.length && !boundProposal?.proposals?.length &&
       boundProposal?.issues.some(issue => issue.code === 'possible_match' || issue.code === 'search_incomplete')
-    save.disabled = !bound || duplicate || candidatesOnly || busy || saving || (!!editor && count === 0)
+    save.disabled = !bound || duplicate || candidatesOnly || busy || saving || (!editor && colorReviewPending) || (!!editor && count === 0)
     followUpScope.disabled = busy || saving
     for (const panel of results.querySelectorAll<HTMLElement>('[data-draft-swatches]')) panel.inert = busy || saving
     for (const control of results.querySelectorAll<HTMLButtonElement | HTMLInputElement>(
@@ -613,6 +615,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
     const chosen = document.createElement('div')
     results.append(panel, chosen)
     const live = () => bound === context && boundProposal === proposal && revision === formRevision && panel.isConnected
+    colorReviewPending = true
     void mountSwatchReview(panel, {
       async load() {
         const review = await api.post<Review>(route + '/color-previews', {
@@ -641,6 +644,7 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
                 hex_code: reference.hex_code, source: reference.source, manufacturer_source: reference.manufacturer_source }] })
           }
           if (!live()) throw new Error(t('filaBrain.identityChanged'))
+          proposal.omit_library_color = action === 'keep' && !context.fields.color_id || undefined
           for (const [control, unit] of choices) if ('color_id' in unit) control.checked = false
           for (const control of chosen.querySelectorAll<HTMLInputElement>('input')) choices.delete(control)
           chosen.replaceChildren()
@@ -659,6 +663,10 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
           chat.saveSelection(selected())
         } finally { saving = false; updateSave() }
       },
+    }).finally(() => {
+      if (!live()) return
+      colorReviewPending = false
+      updateSave()
     })
   }
 
@@ -1200,6 +1208,15 @@ export function mountResearch(status: Status, chat: Chat, openChat: () => void, 
       const base = Object.fromEntries(draftFields.filter(field => !blank(context.fields[field]))
         .map(field => [field, context.fields[field]]))
       const data = acceptedFields(base, units)
+      const colorChoice = results.querySelector<HTMLSelectElement>('[data-draft-swatches] select')
+      if (!data.color_id && colorChoice && !boundProposal?.omit_library_color) {
+        notice.textContent = t('swatchReview.chooseBeforeSave')
+        saving = false
+        updateSave()
+        colorChoice.scrollIntoView({ block: 'center' })
+        colorChoice.focus()
+        return
+      }
       if (!Number(data.manufacturer_id) || !data.designation || !data.material_type || !(Number(data.diameter_mm) > 0)) {
         optionsSummary.hidden = false
         searchOptions.open = advanced.open = true
