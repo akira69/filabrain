@@ -116,7 +116,8 @@ async def test_new_tools_use_the_existing_native_mcp_endpoint(installed, db_sess
     from app.models import AppSettings
     from httpx import ASGITransport, AsyncClient
     tools = ['filabrain-research_filament', 'filabrain-resolve_color_reference',
-             'filabrain-find_spool_profiles', 'filabrain-audit_filament_colors']
+             'filabrain-find_spool_profiles', 'filabrain-audit_filament_colors', 'filabrain-plan_filament_intake',
+             'filabrain-choose_job_spools', 'filabrain-audit_library', 'filabrain-plan_stock']
     monkeypatch.setattr(settings, 'mcp_plugin_read_tools', ','.join(tools))
     flags = await db_session.get(AppSettings, 1)
     if flags is None:
