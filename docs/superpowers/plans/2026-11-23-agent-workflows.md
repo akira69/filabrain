@@ -10,6 +10,7 @@
 ## Global constraints
 
 - FilaMan 2.2.2+; no host changes, duplicate MCP, new dependencies or inventory application.
+- Latest user steering: polish on the FilaBrain feature branch and LAN preview; hold upstream/catalog PRs and publishing.
 - Bound selections to 50, public-link checks and per-request network work to the host MCP deadline; report partial coverage.
 - Preserve existing MCP research schema/shape, permissions, standalone/editor drafts and review protections.
 - Keep manufacturer names separate from canonical RAL/Pantone swatch names; unknown data stays unknown.
@@ -56,8 +57,8 @@ Interfaces: explicit selected task dispatches the same HTTP services; conversati
 
 ### Task 5: Review and package
 
-- [ ] Run full backend/browser suites, Ruff on changed Python, build, duplication comparison and diff checks; fix failures.
-- [ ] Fresh independent full-branch review; fix important findings with regression tests and rerun affected/full verification.
-- [ ] Build immutable candidate ZIP with a new preview version; exact ZIP install/upgrade/rollback/MCP smokes on minimum/current hosts.
-- [ ] Update LAN preview and new tool allowlist; test live Paramount intake/color/spool research, inventory planning and source failures using temporary credentials revoked afterward. Leave all inventory and prior audit decisions unchanged.
-- [ ] Keep logical commits, push a reviewable PR with concise notes and phone/desktop evidence. Keep LAN running; do not publish another release until requested.
+- [x] Run full backend/browser suites, Ruff on changed Python, build, duplication comparison and diff checks; fix failures.
+- [x] Fresh independent full-branch review; fix important findings with regression tests and rerun affected/full verification.
+- [x] Build immutable candidate ZIP with a new preview version; exact ZIP install/upgrade/rollback/MCP smokes on minimum/current hosts.
+- [x] Update LAN preview and new tool allowlist; test live Paramount intake/color/spool research, inventory planning and source failures using temporary credentials revoked afterward. Leave all inventory and prior audit decisions unchanged.
+- [x] Keep logical commits and push the reviewable FilaBrain branch with phone/desktop evidence. Keep LAN running; hold upstream/catalog PRs and publishing until requested.
