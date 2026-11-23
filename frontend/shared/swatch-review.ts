@@ -103,14 +103,16 @@ export async function mountSwatchReview(panel: HTMLElement, path: string | Draft
           `<option value="reuse:${swatch.id}">${label('reuse')} · ${escape(swatch.name)}</option>`).join('') : ''
         const control = 'swatch-choice-' + index
         const multiple = review.references.length > 1
+        const emptyDraft = typeof path !== 'string' && !current.length
         return `<form class="swatch-actions" data-swatch-index="${index}">
           <label class="${multiple ? '' : 'research-sr-only'}" for="${control}">${multiple ? escape(reference.code) : label('choice')}</label>
           <select id="${control}" name="swatch_choice" class="fm-input">
-            <option value="keep">${label(typeof path !== 'string' ? 'noChange' : current.length ? 'keep' : 'referenceOnly')}</option>
+            ${emptyDraft ? `<option value="" disabled selected>${label('choose')}</option>` : ''}
+            <option value="keep">${label(emptyDraft ? 'noColor' : typeof path !== 'string' ? 'noChange' : current.length ? 'keep' : 'referenceOnly')}</option>
             ${options}
             ${canCreate ? `<option value="create">${label('create')}</option>` : ''}
           </select>
-          <button type="submit" class="fm-btn fm-btn-outline">${label(typeof path === 'string' ? 'saveReference' : 'useSwatch')}</button>
+          <button type="submit" class="fm-btn fm-btn-outline" ${emptyDraft ? 'disabled' : ''}>${label(typeof path === 'string' ? 'saveReference' : 'useSwatch')}</button>
         </form>`
       }).join('') : ''}`
     content.querySelectorAll<HTMLButtonElement>('[data-rename-reference]').forEach(button => {
@@ -146,12 +148,15 @@ export async function mountSwatchReview(panel: HTMLElement, path: string | Draft
       const button = form.querySelector('button')!
       if (!select || !button) return
       select.addEventListener('change', () => {
-        button.textContent = tr(typeof path !== 'string' ? 'useSwatch' : select.value === 'keep' ? 'saveReference' : 'applySwatch')
+        button.disabled = !select.value
+        button.textContent = tr(typeof path !== 'string'
+          ? select.value === 'keep' && !current.length ? 'continueWithoutColor' : 'useSwatch'
+          : select.value === 'keep' ? 'saveReference' : 'applySwatch')
       })
       form.addEventListener('submit', async event => {
         event.preventDefault()
         event.stopPropagation()
-        if (content.inert) return
+        if (content.inert || !select.value) return
         const [action, id] = select.value.split(':')
         const match = reference.matches.find(swatch => swatch.id === Number(id))
         content.inert = true
@@ -167,7 +172,7 @@ export async function mountSwatchReview(panel: HTMLElement, path: string | Draft
             await load()
           } else {
             await path.choose(reference, action, match)
-            status.textContent = tr(action === 'keep' ? 'unchanged' : 'draftSelected')
+            status.textContent = tr(action === 'keep' ? current.length ? 'unchanged' : 'withoutColor' : 'draftSelected')
           }
         } catch (error) {
           status.textContent = error instanceof Error ? error.message : tr('saveFailed')

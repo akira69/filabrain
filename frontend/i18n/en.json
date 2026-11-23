@@ -37,6 +37,11 @@
     "chooseManual": "Use the FilaMan picker or research a new filament."
   },
   "swatchReview": {
+    "choose": "Choose a color…",
+    "noColor": "No library color",
+    "continueWithoutColor": "Continue without color",
+    "withoutColor": "This draft will be saved without a library color.",
+    "chooseBeforeSave": "Choose an existing swatch or create one, then select Use swatch. You can also explicitly continue without a library color.",
     "hostUpdate": "Your FilaMan version cannot stage color changes. Use New filament, or update FilaMan to enable palette staging in the editor.",
     "colorName": "Color name",
     "colorHex": "Color hex",

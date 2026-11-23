@@ -42,6 +42,7 @@ export type ResearchProposal = {
   spool_lookup_key?: string
   spool_reply?: string
   discovery_sku?: string
+  omit_library_color?: true
 }
 
 export function researchHeaders() {

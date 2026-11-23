@@ -8,6 +8,10 @@ FilaBrain is a FilaMan integration plugin maintained by `akira69`. It uses the F
 
 **Development preview.** Verified on stock FilaMan 2.2.2. Review researched values before applying them to your inventory.
 
+### What's new in 0.1.27 (development preview)
+
+- New filament saves wait for color previews and require an explicit swatch choice when one is offered. Reuse or create a swatch, or explicitly continue without a library color.
+
 ### What's new in 0.1.26 (development preview)
 
 - Follow FilaMan’s current colors and live theme changes in sidebar, editor and selection views.
@@ -137,7 +141,7 @@ When a manufacturer's website is missing, FilaBrain checks FilaManDB first and c
 Run the smoke test with the Python environment from a stock FilaMan 2.2.2 or newer checkout.
 
 ```sh
-python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.26.zip
+python scripts/smoke_install.py /path/to/filaman-system dist/filabrain-0.1.27.zip
 ```
 
 The test installs the ZIP into a temporary plugin directory and uses an isolated SQLite database. Pass `--previous path/to/old.zip` to test upgrade and rollback. The smoke test covers offline catalog research through FilaMan's built-in MCP and printing chat with a local test model. Use `--live-model` with `FILABRAIN_MODEL_URL` and `FILABRAIN_MODEL_ID` to exercise a configured server.
