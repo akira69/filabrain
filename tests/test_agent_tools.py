@@ -113,17 +113,36 @@ async def test_disabled_plugin_cannot_run_agent_read_tools(installed, db_session
 
 async def test_new_tools_use_the_existing_native_mcp_endpoint(installed, db_session, monkeypatch, publisher):
     from app.core.config import settings
-    from app.models import AppSettings
+    from app.models import AppSettings, Spool, SpoolStatus, SystemExtraField
     from httpx import ASGITransport, AsyncClient
     tools = ['filabrain-research_filament', 'filabrain-resolve_color_reference',
              'filabrain-find_spool_profiles', 'filabrain-audit_filament_colors', 'filabrain-plan_filament_intake',
-             'filabrain-choose_job_spools', 'filabrain-audit_library', 'filabrain-plan_stock']
+             'filabrain-choose_job_spools', 'filabrain-audit_library', 'filabrain-plan_stock',
+             'filabrain-audit_extra_fields']
     monkeypatch.setattr(settings, 'mcp_plugin_read_tools', ','.join(tools))
     flags = await db_session.get(AppSettings, 1)
     if flags is None:
         flags = AppSettings(id=1)
         db_session.add(flags)
     flags.mcp_enabled, flags.mcp_write_enabled = True, False
+    definitions = [
+        SystemExtraField(target_type='filament', key='heated_bed', label='Bed Temperature (°C)'),
+        SystemExtraField(target_type='filament', key='nozzle_temp', label='Print temperature'),
+        SystemExtraField(target_type='filament', key='first_layer_bed_temp', label='First-layer bed temperature'),
+        SystemExtraField(target_type='spool', key='bed_temp', label='Bed Temperature'),
+    ]
+    db_session.add_all(definitions)
+    maker = Manufacturer(name='Example overlap')
+    db_session.add(maker)
+    await db_session.flush()
+    filament = Filament(manufacturer_id=maker.id, designation='Overlap PLA', material_type='PLA', diameter_mm=1.75,
+                       bed_temp_range_c={'min': 50, 'max': 55},
+                       custom_fields={'heated_bed': {'min': 60, 'max': 65}})
+    db_session.add(filament)
+    await db_session.flush()
+    filament_id = filament.id
+    status_id = await db_session.scalar(select(SpoolStatus.id).where(SpoolStatus.key == 'new'))
+    db_session.add(Spool(filament_id=filament_id, status_id=status_id, custom_fields={'bed_temp': {'min': 50, 'max': 55}}))
     await db_session.commit()
     key = (await installed.post('/api/v1/me/api-keys', json={'name': 'Agent tool fixture'})).json()['token']
     async with AsyncClient(transport=ASGITransport(app=app), base_url='https://filaman.test',
@@ -137,6 +156,30 @@ async def test_new_tools_use_the_existing_native_mcp_endpoint(installed, db_sess
         payload = result.json()['result']
         assert payload['isError'] is False, payload
         assert json.loads(payload['content'][0]['text'])['hex_code'] == '#AB1519'
+        audited = await client.post('/mcp', json={'jsonrpc': '2.0', 'id': 3, 'method': 'tools/call',
+            'params': {'name': 'filabrain-audit_extra_fields', 'arguments': {}}})
+        payload = audited.json()['result']
+        assert payload['isError'] is False, payload
+        audit = json.loads(payload['content'][0]['text'])
+        assert audit['requires_review'] is True
+        assert [(row['key'], row['native_fields']) for row in audit['items']] == [
+            ('heated_bed', ['bed_temp_range_c']), ('nozzle_temp', ['extruder_temp_range_c']),
+        ]
+        assert audit['items'][0]['values']['bed_temp_range_c'] == {
+            'populated': 1, 'same': 0, 'different': 1, 'native_blank': 0, 'different_record_ids': [filament_id],
+        }
+        spools = await client.post('/mcp', json={'jsonrpc': '2.0', 'id': 4, 'method': 'tools/call',
+            'params': {'name': 'filabrain-audit_extra_fields', 'arguments': {'target_type': 'spool'}}})
+        payload = spools.json()['result']
+        assert payload['isError'] is False, payload
+        spool_audit = json.loads(payload['content'][0]['text'])
+        assert spool_audit['target_type'] == 'spool'
+        assert spool_audit['native_target_type'] == 'filament'
+        assert [(row['key'], row['native_fields']) for row in spool_audit['items']] == [
+            ('bed_temp', ['bed_temp_range_c']),
+        ]
+        assert spool_audit['items'][0]['values']['bed_temp_range_c']['same'] == 1
+    assert await db_session.scalar(select(func.count(SystemExtraField.id))) == len(definitions)
 
 
 async def test_agent_palette_read_uses_the_hosts_filament_read_permission(installed, publisher, monkeypatch):
