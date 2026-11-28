@@ -22,7 +22,9 @@ export function mountTheme() {
     const style = window.parent.getComputedStyle(host)
     for (const token of hostTokens) {
       const value = style.getPropertyValue(token).trim()
-      if (value) root.style.setProperty(token, value)
+      // Use the plugin's accessible Light accent when the host supplies FilaMan's default green.
+      const defaultLightAccent = token === '--accent' && root.dataset.theme === 'light' && value.toLowerCase() === '#1c9b6b'
+      if (value && !defaultLightAccent) root.style.setProperty(token, value)
       else root.style.removeProperty(token)
     }
     if (style.colorScheme !== 'normal') root.style.colorScheme = style.colorScheme

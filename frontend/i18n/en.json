@@ -375,6 +375,7 @@
     "taskIntake": "Add filament",
     "taskJob": "Choose spool",
     "taskHealth": "Check library",
+    "taskRunCheck": "Run check",
     "taskStock": "Plan stock",
     "taskRequiredGrams": "Required filament (g)",
     "taskTargetGrams": "Target per filament (g)",

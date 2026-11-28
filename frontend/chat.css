@@ -182,6 +182,7 @@
   .chat-model-warning a { color: inherit; }
   .chat-model-warning a[href] { text-decoration: underline; text-underline-offset: .15em; }
   .chat-send { display: grid; flex: none; place-items: center; width: 44px; height: 44px; padding: 0; }
+  .chat-send:has([data-send-label]:not([hidden])) { width: auto; grid-auto-flow: column; gap: .35rem; padding-inline: .65rem; }
   .chat-send[data-busy] [data-send-icon], .chat-send:not([data-busy]) [data-stop-icon] { display: none; }
   .chat-send:disabled { color: var(--text-muted); background: var(--bg-soft); border-color: var(--border); box-shadow: none; transform: none; cursor: default; }
 

@@ -50,3 +50,9 @@
   :root[data-workspace-tabs] [data-view=chat] .research-chat,
   :root[data-workspace-tabs] :is([data-view=new], [data-view=editor]) .research-chat { border-top: 0; border-radius: 0 0 .65rem .65rem; }
 }
+
+@media (max-width: 460px) {
+  .workspace-tablist { gap: .125rem; }
+  :root[data-workspace-tabs] #plugin-header nav button { flex: 1 0 auto; min-width: 44px; padding-inline: .25rem; }
+  :root[data-workspace-tabs] #plugin-header nav .action-icon { display: none; }
+}
