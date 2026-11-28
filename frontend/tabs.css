@@ -6,8 +6,7 @@
 :root[data-workspace-tabs] #plugin-header .header-utilities { margin: 0; }
 .workspace-tabs { grid-area: tabs; display: flex; align-items: end; min-width: 0; gap: .75rem; }
 :root[data-workspace-tabs] #plugin-header nav { display: block; flex: 1; min-width: 0; width: 100%; }
-.workspace-tablist { display: flex; align-items: end; gap: .25rem; overflow-x: auto; padding: 3px 1px 2px; scrollbar-width: none; }
-.workspace-tablist::-webkit-scrollbar { display: none; }
+.workspace-tablist { display: flex; align-items: end; gap: .25rem; overflow-x: auto; padding: 3px 1px 2px; }
 :root[data-workspace-tabs] #plugin-header nav button {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
   min-width: 5rem; min-height: 44px; height: 44px; padding: 0 .85rem;
@@ -15,6 +14,7 @@
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   color: var(--text-muted); background: var(--bg); position: relative; top: 3px;
 }
+:root[data-workspace-tabs] #plugin-header nav button:focus-visible { outline-offset: -3px; }
 :root[data-workspace-tabs] #plugin-header nav button[aria-selected=true] {
   height: 48px; top: 0; z-index: 1; color: var(--text); background: var(--bg-elevated);
   border-color: var(--border); box-shadow: inset 0 2px 0 var(--accent);
@@ -36,7 +36,9 @@
 .workspace-title-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
 :root[data-workspace-tabs] :is([data-view=new], [data-view=editor]) .research-inputs { border: 0; background: transparent; }
 .research-scroll:empty { display: none; }
-@media (max-width: 800px) {
+@media (max-width: 1120px) {
+  .workspace-tablist .tab-label-wide { display: none; }
+  .workspace-tablist .tab-label-short { display: inline; }
   .workspace-tabs { flex-wrap: wrap; gap: 0; }
   :root[data-workspace-tabs] #plugin-header nav { flex-basis: 100%; }
   :root[data-workspace-tabs] #plugin-header nav button { min-width: 4.3rem; padding: 0 .55rem; font-size: .8125rem; }

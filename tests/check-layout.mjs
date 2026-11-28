@@ -203,17 +203,27 @@ try {
   assert.ok((await phoneUrl.boundingBox()).height >= 44)
   assert.ok((await phone.locator('#research-add-endpoint').boundingBox()).height >= 44)
   assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 390)
+  await phone.getByRole('button', { name: 'FilaBrain settings', exact: true }).focus()
+  await phone.keyboard.press('Tab')
+  const chatTab = phone.getByRole('tab', { name: 'Chat', exact: true })
+  assert.ok(await chatTab.evaluate(tab => tab === document.activeElement), 'direct Settings has a keyboard entry to workspace tabs')
+  await phone.keyboard.press('Enter')
+  await phone.getByRole('tabpanel', { name: 'Chat', exact: true }).waitFor()
   await phone.getByRole('tab', { name: 'Chat', exact: true }).click()
   await phone.getByRole('textbox', { name: 'Your question' }).waitFor()
   assert.ok((await phone.locator('[data-chat-new]').boundingBox()).height >= 44)
   assert.ok((await phone.locator('.chat-header').boundingBox()).height <= 64)
   runs = [{ id: 'test-run', mode: 'colors', status: 'finished', total: 3, created_at: '2026-11-27T00:00:00Z' }]
-  for (const [locale, name] of [['en', 'Runs'], ['de', 'Läufe'], ['fr', 'Suivi']]) {
+  for (const [locale, name, guideName] of [
+    ['en', 'Runs', 'Guide'],
+    ['de', 'Läufe', 'Anleitung (Englisch)'],
+    ['fr', 'Suivi', 'Guide (en anglais)'],
+  ]) {
     await phone.evaluate(locale => localStorage.setItem('lang', locale), locale)
     await phone.reload()
-    const runTab = phone.getByRole('tab', { name, exact: true })
+    const runTab = phone.locator('[data-tab=batches]:visible')
     await runTab.waitFor()
-    for (const width of [320, 390]) {
+    for (const width of [320, 390, 800, 801, 900, 1024, 1120, 1280]) {
       await phone.setViewportSize({ width, height: 844 })
       assert.ok(await runTab.evaluate(tab => {
         const list = tab.closest('[role=tablist]')
@@ -222,8 +232,14 @@ try {
           && bounds.width >= 44 && bounds.height >= 44
       }), `all tabs fit at ${width}px in ${locale}`)
     }
-    await runTab.tap()
+    await phone.setViewportSize({ width: 390, height: 844 })
+    await phone.getByRole('tab', { name, exact: true }).tap()
     await phone.getByRole('tabpanel', { name, exact: true }).waitFor()
+    const guideButton = phone.getByRole('button', { name: guideName, exact: true })
+    assert.equal(await guideButton.getByText('EN', { exact: true }).isVisible(), locale !== 'en')
+    await guideButton.tap()
+    assert.equal(await phone.locator('#filabrain-docs[open] .docs-content').getAttribute('lang'), 'en')
+    await phone.keyboard.press('Escape')
   }
   await touch.close()
   assert.deepEqual(errors, [])

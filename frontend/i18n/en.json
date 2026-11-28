@@ -176,6 +176,7 @@
     "librarySelected": "{count} of 50 selected",
     "libraryInventoryChanged": "The filament library changed. Select your filaments again.",
     "docs": "Guide",
+    "docsOpen": "Guide",
     "chatChipAdd": "Add a filament",
     "chatPromptAdd": "Open the Add Filament form.",
     "chatHistory": "History",
