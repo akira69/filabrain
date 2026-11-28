@@ -1,4 +1,7 @@
-.docs-trigger { gap: .45rem; }
+.docs-trigger { gap: .35rem; }
+.docs-language { display: none; font-size: .75rem; }
+:root:not(:lang(en)) .header-utilities .docs-trigger { width: auto; padding-inline: .5rem; }
+:root:not(:lang(en)) .docs-language { display: inline; }
 .docs-trigger svg { color: var(--accent); flex: none; }
 .docs-trigger[aria-expanded="true"] { border-color: var(--accent); }
 .docs-close { width: 36px; height: 36px; padding: 0; }

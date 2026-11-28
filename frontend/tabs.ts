@@ -5,7 +5,7 @@ export function mountWorkspaceTabs(header: HTMLElement, show: (tab: string) => v
   const buttons = [...list.querySelectorAll<HTMLButtonElement>('[data-tab]')]
   const chatHeaders = new Map<string, HTMLElement>()
   let active = ''
-  let focusTab = buttons.find(button => !button.hidden)?.dataset.tab
+  let focusTab: HTMLButtonElement | undefined
   document.documentElement.dataset.workspaceTabs = ''
 
   for (const button of buttons) {
@@ -52,16 +52,19 @@ export function mountWorkspaceTabs(header: HTMLElement, show: (tab: string) => v
     select(tab: string) {
       active = tab
       const navTab = tab === 'editor' ? 'new' : tab
-      if (buttons.some(button => button.dataset.tab === navTab)) focusTab = navTab
+      const visible = buttons.filter(button => !button.hidden)
+      focusTab = visible.find(button => button.dataset.tab === navTab)
+        ?? visible.find(button => button === focusTab)
+        ?? visible[0]
       for (const button of buttons) {
         button.setAttribute('aria-selected', String(button.dataset.tab === navTab))
-        button.tabIndex = button.dataset.tab === focusTab ? 0 : -1
+        button.tabIndex = button === focusTab ? 0 : -1
         if (button.dataset.tab === 'new' && (tab === 'new' || tab === 'editor')) {
           button.setAttribute('aria-controls', 'filabrain-view-' + tab)
         }
       }
       for (const [key, controls] of chatHeaders) controls.hidden = key !== tab
-      nav.hidden = !buttons.some(button => !button.hidden)
+      nav.hidden = !visible.length
       requestAnimationFrame(() => buttons.find(button => button.dataset.tab === navTab)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }))
     },
   }

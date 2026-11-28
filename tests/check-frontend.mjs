@@ -886,7 +886,7 @@ try {
       assert.ok(offset <= 1, 'header utility icon is vertically centered')
     }
     const labels = await headerNav.getByRole('tab').evaluateAll(buttons => buttons.map(button => button.innerText.trim()))
-    assert.deepEqual(labels, width <= 800
+    assert.deepEqual(labels, width <= 1120
       ? ['Chat', 'Filament', 'Library', 'Runs']
       : ['Chat', 'Filament', 'Research library', 'Research runs'])
   }
