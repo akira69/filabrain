@@ -127,6 +127,8 @@ class Evidence:
     archived_at: str = ""
     selected_variant_unresolved: bool = False
     product_spec_tables: tuple[tuple[str, str], ...] = ()
+    product_links: tuple[str, ...] = ()
+    variants: tuple[tuple[str, str], ...] = ()
 
 
 class _ProductPage(HTMLParser):
@@ -135,6 +137,7 @@ class _ProductPage(HTMLParser):
         self.words: list[str] = []
         self.title: list[str] = []
         self.products: list[dict] = []
+        self.product_links: list[str] = []
         self.datasheets: list[str] = []
         self.heading_datasheets: list[str] = []
         self._pdf_link: str | None = None
@@ -193,6 +196,8 @@ class _ProductPage(HTMLParser):
             href = (attributes.get("href") or "").strip()
             filename = attributes.get("download") or ""
             decoded_href = unquote(href)
+            if len(self.product_links) < 12 and "/products/" in decoded_href and href not in self.product_links:
+                self.product_links.append(href)
             # Keep only PDF links. The supplier fetcher validates every URL and redirect.
             if href and not href.startswith("#") and (
                 re.search(r"\.pdf(?:[?#]|$)", decoded_href, re.IGNORECASE)
@@ -495,6 +500,13 @@ def _get_pinned(
         connection.close()
 
 
+def _related_public_url(url: str, link: str) -> str | None:
+    try:
+        return public_link(urljoin(url, link))
+    except ValueError:
+        return None
+
+
 def _fetch_supplier(
     url: str, *, max_bytes: int = DEFAULT_SUPPLIER_DOWNLOAD_BYTES, archived_product_url: str | None = None,
 ) -> Evidence:
@@ -551,6 +563,11 @@ def _fetch_supplier(
         )
         # Put structured identity first so evidence still contains it on long pages.
         prefix = " ".join(product.values()) + " " if product else ""
+        variants = {}
+        for item in parser.products[:48]:
+            for link in item["variant_urls"]:
+                if variant := _related_public_url(url, link):
+                    variants.setdefault(variant, item.get("designation", ""))
         return Evidence(
             url,
             title[:150] or parsed.hostname,
@@ -563,6 +580,11 @@ def _fetch_supplier(
             origin="openfilamentdatabase.org" if re.search(r"open filament database", visible, re.IGNORECASE) else "",
             selected_variant_unresolved=selected_variant_unresolved,
             product_spec_tables=spec_tables,
+            product_links=tuple(dict.fromkeys([
+                *list(variants)[:30],
+                *(link for value in parser.product_links if (link := _related_public_url(url, value))),
+            ])),
+            variants=tuple((name, link) for link, name in list(variants.items())[:30]),
         )
     raise ValueError("Too many supplier redirects")
 
@@ -709,7 +731,7 @@ async def paramount_product_urls(*, strict=False) -> tuple[str, ...]:
     return urls
 
 
-async def search_web(origin: str, query: str) -> list[str]:
+async def search_web(origin: str, query: str, *, limit: int = 3) -> list[str]:
     async with (
         asyncio.timeout(8),
         httpx.AsyncClient(timeout=5, trust_env=False) as client,
@@ -735,7 +757,7 @@ async def search_web(origin: str, query: str) -> list[str]:
         except ValueError:
             continue
         urls.append(url)
-        if len(urls) == 3:
+        if len(urls) == limit:
             break
     return urls
 

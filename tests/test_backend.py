@@ -325,6 +325,19 @@ async def test_search_web_rejects_invalid_or_oversized_results(monkeypatch, resp
         await sources.search_web("https://searxng.test", "PLA")
 
 
+async def test_search_web_returns_more_candidates_only_when_requested(monkeypatch):
+    from httpx import Response
+    from filabrain import sources
+
+    urls = [f"https://fixture.example/filament/{i}" for i in range(10)]
+    payload = {"results": [{"url": url} for url in urls]}
+    monkeypatch.setattr(sources.httpx, "AsyncClient", lambda **kwargs: AsyncClient(
+        transport=MockTransport(lambda _request: Response(200, json=payload)), **kwargs,
+    ))
+    assert await sources.search_web("https://searxng.test", "PLA") == urls[:3]
+    assert await sources.search_web("https://searxng.test", "PLA", limit=8) == urls[:8]
+
+
 async def test_research_sources_keep_defaults_and_survive_older_settings_clients(installed):
     url = f"{BASE}/settings"
     current = (await installed.get(url)).json()
