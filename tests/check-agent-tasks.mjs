@@ -122,6 +122,23 @@ try {
  assert.equal(requests.at(-1).body.query, 'PETG')
  assert.equal(requests.at(-1).body.target_g, 2000)
  await chat.getByText(/Page 2/).last().waitFor()
+ await page.getByRole('button', { name: 'New chat', exact: true }).click()
+ await page.setViewportSize({ width: 390, height: 320 })
+ await task.selectOption('library-health')
+ const checkLinks = chat.getByRole('checkbox', { name: 'Check product links' })
+ await checkLinks.check()
+ await chat.getByRole('button', { name: 'Send message', exact: true }).click()
+ const nextLibraryPage = chat.getByRole('button', { name: 'Next page', exact: true })
+ await nextLibraryPage.evaluate(button => button.scrollIntoView({ block: 'end' }))
+ assert.ok(await nextLibraryPage.evaluate(button => {
+  const { top, bottom } = button.getBoundingClientRect()
+  const transcript = button.closest('.chat-transcript').getBoundingClientRect()
+  return top >= transcript.top && bottom <= transcript.bottom
+ }), 'the transcript can display the whole Next page button in a short plugin frame')
+ await nextLibraryPage.click()
+ await chat.getByText(/Page 2/).waitFor()
+ assert.equal(requests.at(-1).body.check_sources, true)
+ await page.setViewportSize({ width: 1280, height: 900 })
  // A read-only user can inspect and select candidates without opening creation.
  canCreate = false
  const reader = await context.newPage(); await reader.goto('https://fila.test/plugin-page/filabrain')

@@ -30,6 +30,9 @@
 .workspace-tabs .chat-history summary { min-height: 44px; }
 :root[data-workspace-tabs] [data-view]:not([hidden]) > .fm-card { border-top-left-radius: 0; }
 :root[data-workspace-tabs] .research-chat { grid-template-rows: minmax(0, 1fr) auto; }
+/* Keep transcript actions reachable when the composer fills a short frame. */
+:root[data-workspace-tabs] [data-view=chat]:has(.chat-action) { min-height: min-content; }
+:root[data-workspace-tabs] [data-view=chat] .research-chat:has(.chat-action) { grid-template-rows: minmax(4rem, 1fr) auto; }
 .workspace-title-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
 :root[data-workspace-tabs] :is([data-view=new], [data-view=editor]) .research-inputs { border: 0; background: transparent; }
 .research-scroll:empty { display: none; }

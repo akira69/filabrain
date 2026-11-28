@@ -14,10 +14,11 @@
     align-items: start; gap: 12px;
   }
   .batch-layout nav { min-width: 0; }
-  #filament-batches .batch-overview[data-batch-detail] {
-    border: 0; background: transparent; margin-block-end: .75rem;
+  .batch-overview {
+    border-start-start-radius: 0; border-start-end-radius: 0;
   }
-  .batch-overview[data-batch-detail] > .fm-section-body { padding: 0; }
+  .batch-overview[data-batch-detail] { margin-block-end: .75rem; }
+  .batch-overview[data-batch-detail] > .fm-section-body { padding: .5rem .65rem; }
   .batch-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem; }
   .batch-toolbar > [data-batch-progress] { flex: 1 1 auto; font-size: .875rem; color: var(--text-muted); }
   #filament-batches :is(.batch-toolbar, [data-batch-review]) .fm-btn { min-height: 44px; }
