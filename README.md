@@ -177,6 +177,8 @@ These are tool names and arguments, not complete JSON-RPC requests. Intake candi
 
 The extra-field audit flags system extra fields whose key or label matches a built-in filament setting, such as bed temperature or density. It counts populated, identical, differing and missing native values. It defaults to filament definitions. Pass `target_type: "spool"` with `spools:read` to compare spool values with the linked filament. Spool-specific overrides and printer profiles may have their own purpose. The audit does not change definitions or migrate values.
 
+In **Research library → Extra field cleanup**, an administrator can review and retire one definition at a time. Cleanup copies validated values into blank native filament fields and removes duplicate custom values. It preserves the definition and original values in a downloadable archive. Fields with conflicting values, incompatible units, defaults that need review, or saved references are blocked. Spool values are compared with the linked filament and never automatically copied to it. Check your external integrations before confirming retirement.
+
 ## Verify a package
 
 Run the smoke test with the Python environment from a stock FilaMan 2.2.2 or newer checkout.

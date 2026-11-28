@@ -304,6 +304,12 @@ def _field_name(value: str) -> str:
     return re.sub(r'[\W_]+', '', label)
 
 
+def native_filament_fields(field: SystemExtraField) -> list[str]:
+    names = {_field_name(field.key), _field_name(field.label)}
+    return [key for key, aliases in NATIVE_FILAMENT_FIELD_ALIASES.items()
+            if names.intersection(map(_field_name, (key, *aliases)))]
+
+
 async def audit_extra_fields(args: ExtraFieldAuditArguments, db, principal):
     await read_access(db, principal, 'filaments:read')
     if args.target_type == 'spool':
@@ -312,10 +318,7 @@ async def audit_extra_fields(args: ExtraFieldAuditArguments, db, principal):
                                   .order_by(SystemExtraField.key)))
     items = []
     for field in fields:
-        names = {_field_name(field.key), _field_name(field.label)}
-        matches = [key for key, aliases in NATIVE_FILAMENT_FIELD_ALIASES.items()
-                   if names.intersection(map(_field_name, (key, *aliases)))]
-        if matches:
+        if matches := native_filament_fields(field):
             items.append({'id': field.id, 'key': field.key, 'label': field.label, 'field_type': field.field_type,
                           'source': field.source, 'native_fields': matches,
                           'values': {key: {'populated': 0, 'same': 0, 'different': 0, 'native_blank': 0,

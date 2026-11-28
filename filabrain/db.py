@@ -31,6 +31,16 @@ class FilamentResearchSave(Base):
     )
 
 
+class ExtraFieldCleanupArchive(Base):
+    __tablename__ = "filabrain_extra_field_cleanup_archives"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    target_type: Mapped[str] = mapped_column(String(16))
+    label: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(TZDateTime(), server_default=text("CURRENT_TIMESTAMP"))
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
 class FilamentResearchBatch(Base):
     __tablename__ = "filabrain_batches"
 
