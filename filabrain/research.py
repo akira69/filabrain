@@ -144,6 +144,7 @@ async def research_status(db: DBSession, principal: PrincipalDep):
                 "printers:read",
                 "display:read",
                 "admin:plugins_manage",
+                "admin:system",
             )
         except HTTPException as exc:
             if exc.status_code != 403:
@@ -180,6 +181,8 @@ async def research_status(db: DBSession, principal: PrincipalDep):
         "can_update_manufacturer": enabled and principal.auth_type == "session"
         and {"filaments:update", "manufacturers:update"} <= permissions,
         "can_configure": enabled and "admin:plugins_manage" in permissions,
+        "can_clean_extra_fields": enabled and principal.auth_type == "session"
+        and {"admin:system", "filaments:read"} <= permissions,
         "can_chat": can_chat,
         "chat_model": chat_model,
         "microphone_enabled": microphone_enabled,

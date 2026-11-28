@@ -193,6 +193,26 @@
         </div>
       </div>
     </section>
+    <section id="extra-field-cleanup" class="fm-card fm-section" aria-labelledby="extra-field-cleanup-heading" hidden>
+      <header class="fm-section-header"><h2 id="extra-field-cleanup-heading" data-i18n="extraFieldCleanup.title">Extra field cleanup</h2></header>
+      <div class="fm-section-body fm-compact-form">
+        <div class="actions">
+          <select class="fm-input" data-cleanup-field aria-labelledby="extra-field-cleanup-heading"></select>
+          <button type="button" class="fm-btn fm-btn-outline" data-cleanup-preview data-i18n="extraFieldCleanup.preview">Preview cleanup</button>
+        </div>
+        <p role="status" data-cleanup-status></p>
+        <div data-cleanup-details hidden></div>
+        <label data-cleanup-review hidden>
+          <input type="checkbox" data-cleanup-confirm>
+          <span data-i18n="extraFieldCleanup.confirm">I reviewed the values and checked integrations that use this field.</span>
+        </label>
+        <div><button type="button" class="fm-btn fm-btn-outline" data-cleanup-apply data-i18n="extraFieldCleanup.apply" hidden disabled>Retire this extra field</button></div>
+        <details data-cleanup-archives hidden>
+          <summary data-i18n="extraFieldCleanup.archives">Download cleanup archives</summary>
+          <ul></ul>
+        </details>
+      </div>
+    </section>
   </section>
   <section data-view="batches" hidden><!-- batches --></section>
   <section data-view="settings" hidden><!-- settings --></section>

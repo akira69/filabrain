@@ -2,8 +2,9 @@
 import asyncio
 import http.client
 import math
+import re
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from app.api.deps import DBSession, PrincipalDep, ensure_any_permission
@@ -17,6 +18,7 @@ from app.models import (
     Spool,
     SpoolEvent,
     SpoolStatus,
+    SystemExtraField,
 )
 from fastapi import APIRouter, HTTPException
 from pydantic import Field, FiniteFloat, field_validator
@@ -32,6 +34,22 @@ from .settings import config_record
 
 router = APIRouter(prefix='/agent', tags=['FilaBrain'])
 Grams = Annotated[FiniteFloat, Field(gt=0, le=100_000_000)]
+
+# shortcut: compare known labels; add an alias when its equivalence to a native field is established.
+NATIVE_FILAMENT_FIELD_ALIASES = {
+    'bed_temp_range_c': ('bed temp', 'bed temperature', 'build plate temperature', 'druckbetttemperatur'),
+    'extruder_temp_range_c': ('extruder temperature', 'nozzle temp', 'nozzle temperature', 'print temperature', 'düsentemperatur'),
+    'drying_temp_c': ('drying temp', 'drying temperature', 'trocknungstemperatur'),
+    'drying_time_hours': ('drying time', 'drying duration', 'trocknungsdauer'),
+    'chamber_temp_c': ('chamber temperature', 'chamber temp'),
+    'softening_temp_c': ('softening temperature',),
+    'cooling_fan_range_percent': ('cooling fan speed', 'fan speed'),
+    'max_volumetric_speed_mm3_s': ('max volumetric speed', 'max volumetric flow'),
+    'flow_ratio': ('flow ratio',),
+    'pressure_advance_k': ('pressure advance',),
+    'manufacturer_sku': ('manufacturer sku',),
+    'density_g_cm3': ('density',),
+}
 
 
 class JobArguments(ToolArguments):
@@ -57,6 +75,10 @@ class SelectionArguments(ToolArguments):
 
 class HealthArguments(SelectionArguments):
     check_sources: bool = False
+
+
+class ExtraFieldAuditArguments(ToolArguments):
+    target_type: Literal['filament', 'spool'] = 'filament'
 
 
 class StockArguments(SelectionArguments):
@@ -277,11 +299,63 @@ async def plan_stock(args: StockArguments, db: DBSession, principal: PrincipalDe
         'complete': not coverage['has_more'] and not coverage['unavailable_filament_ids'], 'requires_review': True})
 
 
+def _field_name(value: str) -> str:
+    label = re.sub(r'\s*\((?:°\s*[cf]|mm[³3]/s|g/cm[³3]|%|hours?|h)\)\s*$', '', value.casefold())
+    return re.sub(r'[\W_]+', '', label)
+
+
+def native_filament_fields(field: SystemExtraField) -> list[str]:
+    names = {_field_name(field.key), _field_name(field.label)}
+    return [key for key, aliases in NATIVE_FILAMENT_FIELD_ALIASES.items()
+            if names.intersection(map(_field_name, (key, *aliases)))]
+
+
+async def audit_extra_fields(args: ExtraFieldAuditArguments, db, principal):
+    await read_access(db, principal, 'filaments:read')
+    if args.target_type == 'spool':
+        await ensure_any_permission(db, principal, 'spools:read')
+    fields = list(await db.scalars(select(SystemExtraField).where(SystemExtraField.target_type == args.target_type)
+                                  .order_by(SystemExtraField.key)))
+    items = []
+    for field in fields:
+        if matches := native_filament_fields(field):
+            items.append({'id': field.id, 'key': field.key, 'label': field.label, 'field_type': field.field_type,
+                          'source': field.source, 'native_fields': matches,
+                          'values': {key: {'populated': 0, 'same': 0, 'different': 0, 'native_blank': 0,
+                                           'different_record_ids': []} for key in matches}})
+    if items:
+        keys = sorted({key for item in items for key in item['native_fields']})
+        model = Spool if args.target_type == 'spool' else Filament
+        query = select(model.id, model.custom_fields, *(getattr(Filament, key) for key in keys)).order_by(model.id)
+        if model is Spool:
+            query = query.join(Filament, Spool.filament_id == Filament.id)
+        async for record_id, custom, *native in await db.stream(query.execution_options(yield_per=100)):
+            if not isinstance(custom, dict) or not custom:
+                continue
+            for item in items:
+                value = custom.get(item['key'])
+                if value is None or value == '':
+                    continue
+                for key, current in zip(keys, native):
+                    if key not in item['values']:
+                        continue
+                    counts = item['values'][key]
+                    counts['populated'] += 1
+                    state = 'native_blank' if is_missing(key, current) else 'same' if current == value else 'different'
+                    counts[state] += 1
+                    if state == 'different' and len(counts['different_record_ids']) < 10:
+                        counts['different_record_ids'].append(record_id)
+    return bounded_result({'items': items, 'target_type': args.target_type, 'native_target_type': 'filament',
+                           'definitions_checked': len(fields), 'requires_review': True})
+
+
 mcp_read_tools = {
     'choose_job_spools': {'description': 'Find individual inventory spools with enough measured filament and material/printer evidence. Unknown weights and compatibility remain explicit; separate rolls are not pooled.',
                          'permission': 'spools:read', 'arguments': JobArguments, 'handler': choose_job_spools},
     'audit_library': {'description': 'Read a selected or paged library health report: missing specs/swatches, naming and duplicate SKU candidates. Optional bounded source checks distinguish blocked from missing pages. No changes applied.',
                       'permission': 'filaments:read', 'arguments': HealthArguments, 'handler': audit_library},
+    'audit_extra_fields': {'description': 'Find filament or spool system extra fields whose key or label overlaps a built-in filament field. Spool settings may be intentional overrides. Review before changing definitions or migrating values.',
+                           'permission': 'filaments:read', 'arguments': ExtraFieldAuditArguments, 'handler': audit_extra_fields},
     'plan_stock': {'description': 'Plan replenishment from known usable grams, explicit targets/saved thresholds and recorded consumption. Unknown weights or package sizes prevent confident quantities. Never buys or changes stock.',
                    'permission': 'spools:read', 'arguments': StockArguments, 'handler': plan_stock},
 }

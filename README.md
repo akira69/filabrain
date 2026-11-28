@@ -157,7 +157,7 @@ Task choices, options, drafts and results stay with each chat. All findings requ
 2. On FilaMan **2.2.2 or newer**, add the desired tools to the host's comma-separated `MCP_PLUGIN_READ_TOOLS` setting and restart FilaMan. With Docker Compose, add the setting to `.env` and run `docker compose up -d`.
 
 ```env
-MCP_PLUGIN_READ_TOOLS=filabrain-research_filament,filabrain-plan_filament_intake,filabrain-resolve_color_reference,filabrain-find_spool_profiles,filabrain-audit_filament_colors,filabrain-choose_job_spools,filabrain-audit_library,filabrain-plan_stock
+MCP_PLUGIN_READ_TOOLS=filabrain-research_filament,filabrain-plan_filament_intake,filabrain-resolve_color_reference,filabrain-find_spool_profiles,filabrain-audit_filament_colors,filabrain-choose_job_spools,filabrain-audit_library,filabrain-audit_extra_fields,filabrain-plan_stock
 ```
 
 3. Research, intake, color, spool-profile and library tools require `filaments:read`. Job-fit and stock planning also require `spools:read`; selecting a printer requires `printers:read`. Results appear in your external client, independently of the app's chat history. All plugin tools are read-only. After explicit user approval, use FilaMan's native write tools to create/update colors, filaments or spools.
@@ -169,10 +169,15 @@ Examples of tool arguments:
 {"tool":"filabrain-resolve_color_reference","arguments":{"code":"RAL 4007"}}
 {"tool":"filabrain-choose_job_spools","arguments":{"query":"outdoor PETG bracket","required_g":280}}
 {"tool":"filabrain-audit_library","arguments":{"page":1,"page_size":25,"check_sources":true}}
+{"tool":"filabrain-audit_extra_fields","arguments":{"target_type":"spool"}}
 {"tool":"filabrain-plan_stock","arguments":{"query":"PETG","target_g":2000,"history_days":30}}
 ```
 
 These are tool names and arguments, not complete JSON-RPC requests. Intake candidates require an explicit product selection; call again with the chosen `product_url`. Review color matches and confirm the spool design before using native create tools. Missing publisher previews, unavailable sources and partial scans remain explicit.
+
+The extra-field audit flags system extra fields whose key or label matches a built-in filament setting, such as bed temperature or density. It counts populated, identical, differing and missing native values. It defaults to filament definitions. Pass `target_type: "spool"` with `spools:read` to compare spool values with the linked filament. Spool-specific overrides and printer profiles may have their own purpose. The audit does not change definitions or migrate values.
+
+In **Research library → Extra field cleanup**, an administrator can review and retire one definition at a time. Cleanup copies validated values into blank native filament fields and removes duplicate custom values. It preserves the definition and original values in a downloadable archive. Fields with conflicting values, incompatible units, defaults that need review, or saved references are blocked. Spool values are compared with the linked filament and never automatically copied to it. Check your external integrations before confirming retirement.
 
 ## Verify a package
 

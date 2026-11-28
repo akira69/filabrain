@@ -21,7 +21,7 @@ async def smoke(host: Path, archive: Path, directory: Path, previous: Path | Non
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{directory / 'filaman.db'}"
     os.environ["PLUGINS_DIR"] = str(directory / "plugins")
     tool_names = ["research_filament", "plan_filament_intake", "resolve_color_reference", "find_spool_profiles",
-                  "audit_filament_colors", "choose_job_spools", "audit_library", "plan_stock"]
+                  "audit_filament_colors", "choose_job_spools", "audit_library", "audit_extra_fields", "plan_stock"]
     os.environ["MCP_PLUGIN_READ_TOOLS"] = ",".join("filabrain-" + name for name in tool_names)
     os.environ["FILABRAIN_SEARCH_URL"] = ""
     if not live_model:
@@ -145,7 +145,8 @@ async def smoke(host: Path, archive: Path, directory: Path, previous: Path | Non
 
             tools = {item["name"] for item in (await rpc("tools/list"))["tools"]}
             assert {"filabrain-" + name for name in tool_names} <= tools and "create_spool" not in tools
-            for name, arguments in [("choose_job_spools", {"required_g": 100}), ("audit_library", {}), ("plan_stock", {"target_g": 1000})]:
+            for name, arguments in [("choose_job_spools", {"required_g": 100}), ("audit_library", {}),
+                                    ("audit_extra_fields", {}), ("plan_stock", {"target_g": 1000})]:
                 result = await rpc("tools/call", {"name": "filabrain-" + name, "arguments": arguments})
                 assert not result.get("isError"), result
                 assert json.loads(result["content"][0]["text"])["requires_review"] is True

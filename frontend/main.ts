@@ -1,6 +1,7 @@
 import { mountChat } from './chat'
 import { connectColorHost } from './color-assistance'
 import { mountDocs } from './docs'
+import { mountExtraFieldCleanup } from './extra-field-cleanup'
 import { mountWorkspaceTabs } from './tabs'
 import { mountSettings } from './settings'
 import { mountSpoolIntake, type SpoolResearchInput } from './spool-intake'
@@ -29,6 +30,7 @@ export type Status = {
   can_create_manufacturer?: boolean
   can_create_color?: boolean
   can_configure: boolean
+  can_clean_extra_fields?: boolean
 }
 
 export function element<T extends HTMLElement = HTMLElement>(id: string) {
@@ -435,7 +437,10 @@ async function main() {
           document.querySelector<HTMLElement>('[data-view="spool"]')!, !!status.can_read_spools, researchFromSpool,
         )
       }),
-      library: !colorHost && status.can_update && (() => mountLibrary()),
+      library: !colorHost && status.can_update && (() => {
+        mountLibrary()
+        if (status.can_clean_extra_fields) mountExtraFieldCleanup(element('extra-field-cleanup'))
+      }),
       batches: !colorHost && status.can_update && (() => {
         const batch = element('filament-batches')
         batch.querySelector<HTMLElement>('[data-batch-history-link]')!.hidden = !id
