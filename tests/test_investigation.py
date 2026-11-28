@@ -255,6 +255,48 @@ Drying conditions                50°C, 4h
     assert feedback["rejected_product_source"] == 1
     assert [call.args[0] for call in fetch.await_args_list] == [OLD, selected, issuer, final_url]
 
+def test_investigation_keeps_recommendations_after_properties_and_specimen_sections():
+    from filabrain.proposals import _investigated_specs
+
+    product = Evidence(CORRECT, "Example TPU 90A", "Example TPU 90A")
+    sheet = Evidence(PDF, "Technical sheet", """Example TPU 90A
+
+Part I: Physical Properties
+Density                  1.21 g/cm³
+
+Part II: Specimen Printing Conditions
+Printing Parameters
+Density                         1.33 g/cm³
+Bed temperature                  55°C
+Chamber temperature             45°C
+
+Part III: Recommended Printing Settings
+Bed temperature                  0–60°C
+Chamber temperature             35°C
+
+Part IV: Mechanical Properties (ISO 527)
+Bed temperature                  49°C
+""", datasheet=True)
+    result = research.InvestigationResult(evidence=[product, sheet], suggestions=[
+        {"field": "bed_temp_range_c", "value": {"min": 55, "max": 55}, "source": 2,
+         "quote": "Bed temperature 55°C"},
+        {"field": "bed_temp_range_c", "value": {"min": 49, "max": 49}, "source": 2,
+         "quote": "Bed temperature 49°C"},
+        {"field": "chamber_temp_c", "value": 45, "source": 2, "quote": "Chamber temperature 45°C"},
+        {"field": "chamber_temp_c", "value": 35, "source": 2, "quote": "Chamber temperature 35°C"},
+    ])
+
+    findings, conflicts = _investigated_specs(result, product, {PDF}, {"tpu", "90a"})
+
+    assert not conflicts
+    assert {finding["field"]: finding["value"] for finding in findings} == {
+        "density_g_cm3": 1.21,
+        "bed_temp_range_c": {"min": 0, "max": 60},
+        "chamber_temp_c": 35,
+    }
+    assert all(source["url"] == PDF for finding in findings for source in finding["sources"])
+
+
 @pytest.mark.parametrize("title", [
     "Example High Speed TPU 90A Gray 1.75 mm 1 kg",
     "Example TPU 95A Gray 1.75 mm 1 kg",

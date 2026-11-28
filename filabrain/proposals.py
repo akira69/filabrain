@@ -5,6 +5,7 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from difflib import SequenceMatcher
+from itertools import groupby
 from typing import Annotated
 from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 
@@ -1389,35 +1390,46 @@ def _sheet_matches(page: Evidence, titles: set[str], identity: Identity, snapsho
                for key, values in variants.items())
 
 
-def _sheet_spec_entries(text: str) -> list[dict]:
+def _sheet_rows(text: str):
     # Specimen test settings and heatbed drying are separate from the general
     # printing settings and the oven drying fields in the filament record.
-    lines = text.splitlines()
-    rows = [" ".join(line.split()) for line in lines]
     heading = re.compile(
-        r"(?:建议打印参数\s+)?(?:(?:recommended|suggested|suggests) )?printing (?:settings|conditions|parameters)(?: data)?",
+        r"(?P<recommendation>(?:建议打印参数\s+)?(?:(?:recommended|suggested|suggests) )?)"
+        r"printing (?:settings|conditions|parameters)(?: data)?",
         re.IGNORECASE,
     )
-    other_section = re.compile(
-        r"(?:sample preparation|test (?:methods?|conditions)|(?:material |physical |mechanical |thermal )?properties"
-        r"(?: of (?:printed )?samples)?|specifications)",
+    other_section = re.compile(r"(?:(?:material |physical |mechanical |thermal )?properties|specifications)\b", re.IGNORECASE)
+    specimen = re.compile(
+        r"\b(?:specimen (?:test|printing)|printing test conditions|sample preparation|test (?:methods?|conditions)"
+        r"|properties of (?:printed )?samples)\b",
         re.IGNORECASE,
     )
-    specimen = re.compile(r"\b(?:specimen (?:test|printing)|printing test conditions)\b", re.IGNORECASE)
+    kind = "intro"
+    for line in text.splitlines():
+        row = " ".join(line.split())
+        section = re.sub(r"^(?:[•●]\s*|\d+(?:\.\d+)*[.)]\s+|part [IVX]+:\s*)", "", row, flags=re.IGNORECASE).strip().rstrip(":：")
+        if match := heading.fullmatch(section):
+            if kind != "specimen" or match["recommendation"] or re.match(r"part [IVX]+:", row, re.IGNORECASE):
+                kind = "printing"
+        elif specimen.search(section):
+            kind = "specimen"
+        elif other_section.match(section) or (kind != "specimen" and row.startswith(("•", "●"))):
+            kind = "other"
+        yield line, row, kind
+
+
+def _sheet_spec_entries(text: str) -> list[dict]:
+    rows = list(_sheet_rows(text))
     degrees = r"(?:[°˚]\s*C|℃)"
     density_unit = r"g\s*/\s*cm\s*[³3]"
     entries = []
-    printing = False
 
     def add(field, value, quote):
         entries.append({"field": field, "value": value, "source": 1, "quote": quote})
 
-    for index, (line, row) in enumerate(zip(lines, rows)):
-        section = re.sub(r"^(?:[•●]\s*|\d+(?:\.\d+)*[.)]\s+|part [IVX]+:\s*)", "", row, flags=re.IGNORECASE).strip().rstrip(":：")
-        if heading.fullmatch(section):
-            printing = True
-        elif row.startswith(("•", "●")) or other_section.fullmatch(section) or specimen.search(section):
-            printing = False
+    for index, (line, row, kind) in enumerate(rows):
+        if kind == "specimen":
+            continue
         density_row = row.removeprefix("密度 ")
         density = re.fullmatch(
             rf"Density\b.*?\s(\d+(?:\.\d+)?)\s*{density_unit}(?:\s+at\s+\d+(?:\.\d+)?\s*{degrees})?",
@@ -1427,11 +1439,12 @@ def _sheet_spec_entries(text: str) -> list[dict]:
             add("density_g_cm3", float(density[1]), density_row)
         elif (
             re.fullmatch(rf"Density\b.*\s{density_unit}", density_row, re.IGNORECASE)
-            and index + 1 < len(rows) and re.fullmatch(r"\d+\.\d+", rows[index + 1])
-            and lines[index + 1].startswith(" ")
+            and index + 1 < len(rows) and re.fullmatch(r"\d+\.\d+", rows[index + 1][1])
+            and rows[index + 1][0].startswith(" ")
         ):
-            add("density_g_cm3", float(rows[index + 1]), f"{density_row} {rows[index + 1]}")
-        if not printing:
+            density_value = rows[index + 1][1]
+            add("density_g_cm3", float(density_value), f"{density_row} {density_value}")
+        if kind != "printing":
             continue
         for column in re.split(r"[ \t]{3,}(?=[a-zA-Z])", line.strip()):
             column = " ".join(column.split()).removeprefix("平台温度 ")
@@ -1605,17 +1618,19 @@ def _investigated_product(identity: Identity, result: InvestigationResult, domai
 
 def _investigated_specs(result: InvestigationResult, product: Evidence, docs: set[str], grade: set[str]):
     sources = list(result.evidence)
-    sheet_sources = set()
+    sheet_sources = {}
     entries = []
     for index, source in enumerate(result.evidence):
         if source is product and source.product_spec_tables:
             tables = "\n".join(table for _, table in source.product_spec_tables)
             sources[index] = replace(source, text=tables, manufacturer_page=True)
         elif source.url in docs and source.datasheet and grade <= _investigation_terms(source.text[:1400]):
-            # Lab conditions later in a sheet apply to the test samples only.
-            text = re.split(r"(?im)^.{0,36}\b(?:physical properties|mechanical properties|specimen (?:test|printing))\b",
-                            source.text, maxsplit=1)[0]
-            sheet_sources.add(index + 1)
+            text = source.text
+            sheet_sources[index + 1] = [
+                (kind, " ".join(row for _, row, _ in group if row))
+                for kind, group in groupby(_sheet_rows(text), key=lambda row: row[2])
+                if kind != "specimen"
+            ]
             entries.extend({**entry, "source": index + 1} for entry in _sheet_spec_entries(text))
             sources[index] = replace(source, text=" ".join(text.split()), manufacturer_page=True)
     # Product-level instructions do not prove reel construction for an individual package.
@@ -1630,7 +1645,11 @@ def _investigated_specs(result: InvestigationResult, product: Evidence, docs: se
             continue
         quote = item.get("quote")
         if item["source"] in sheet_sources and isinstance(quote, str):
-            item = {**item, "quote": " ".join(quote.split())}
+            quote = " ".join(quote.split())
+            if not any(quote in block and (kind != "other" or item["field"] == "density_g_cm3")
+                       for kind, block in sheet_sources[item["source"]]):
+                continue
+            item = {**item, "quote": quote}
         entries.append(item)
     return extract_proposal({"suggestions": entries}, sources)
 
