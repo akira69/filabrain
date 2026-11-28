@@ -5,9 +5,11 @@ import asyncio
 import json
 import math
 import os
-from pathlib import Path
 import re
+import sqlite3
 import sys
+import time
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,6 +122,77 @@ async def run(host, scratch, cases, workers, timeout, offline):
         await engine.dispose()
 
 
+async def run_saved(host, scratch, source, ids, workers, timeout, baseline):
+    from contextlib import closing
+
+    database = scratch / "benchmark.db"
+    with (
+        closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as original,
+        closing(sqlite3.connect(database)) as copy,
+    ):
+        original.backup(copy)
+    os.chmod(database, 0o600)
+    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{database}"
+    os.environ["PLUGINS_DIR"] = str(scratch / "plugins")
+    sys.path[:0] = [str(host / "backend"), str(ROOT)]
+    migration = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "alembic", "upgrade", "head",
+        cwd=host / "backend", env={**os.environ, "PYTHONPATH": str(host / "backend")},
+    )
+    if await migration.wait():
+        raise RuntimeError("Could not migrate the temporary copy.")
+
+    from app.core.database import async_session_maker, engine
+    from app.models import Filament
+    from filabrain.db import ensure_schema
+    from filabrain.proposals import (
+        filament_snapshot,
+        research_products,
+        snapshot_identity,
+    )
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    try:
+        async with async_session_maker() as db:
+            await ensure_schema(db)
+            rows = await db.scalars(select(Filament).order_by(Filament.id).options(selectinload(Filament.manufacturer)))
+            snapshots = [filament_snapshot(row) for row in rows if not ids or row.id in ids]
+        if not snapshots or ids and set(ids) != {row["id"] for row in snapshots}:
+            raise ValueError("The selected filament IDs must exist in the backup.")
+
+        capacity = asyncio.Semaphore(workers)
+
+        async def check(snapshot):
+            async with capacity, async_session_maker() as db:
+                started = time.monotonic()
+                try:
+                    async with asyncio.timeout(timeout):
+                        result = await research_products(
+                            db, snapshot_identity(snapshot), snapshot=snapshot, release_read=True,
+                            deadline=asyncio.get_running_loop().time() + timeout, investigate_missing=not baseline,
+                        )
+                except TimeoutError:
+                    result = {"suggestions": [], "issues": [{"code": "benchmark_timeout"}]}
+                return {"id": snapshot["id"], "seconds": round(time.monotonic() - started, 3), **result}
+
+        results = await asyncio.gather(*(check(snapshot) for snapshot in snapshots))
+    finally:
+        await engine.dispose()
+
+    with (
+        closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as original,
+        closing(sqlite3.connect(database)) as copy,
+    ):
+        for table in ("manufacturers", "filaments", "spools", "colors", "filament_colors"):
+            fields = [row[1] for row in original.execute(f"PRAGMA table_info({table})")]
+            cols = ", ".join('"' + field.replace('"', '""') + '"' for field in fields)
+            query = f"SELECT {cols} FROM {table} ORDER BY {cols}"
+            if original.execute(query).fetchall() != copy.execute(query).fetchall():
+                raise ValueError(f"Inventory rows changed in {table}.")
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("host", type=Path, help="Stock FilaMan checkout")
@@ -128,8 +201,24 @@ def main():
     parser.add_argument("--workers", type=int, default=2, choices=range(1, 5))
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--require-coverage", action="store_true", help="Fail when an expected field is missing")
+    parser.add_argument("--sqlite-backup", type=Path, help="Research all saved filaments on a temporary copy")
+    parser.add_argument("--saved-id", type=int, action="append", default=[], help="Limit the saved run to these IDs")
+    parser.add_argument("--baseline", action="store_true", help="Skip model-led investigation in a saved run")
     args = parser.parse_args()
     host = args.host.resolve(strict=True)
+    if args.sqlite_backup:
+        if args.case or args.offline or args.require_coverage:
+            parser.error("Use only saved-record options with --sqlite-backup.")
+        source = args.sqlite_backup.resolve(strict=True)
+        with TemporaryDirectory(prefix="filabrain-library-benchmark-") as scratch:
+            os.chdir(scratch)
+            results = asyncio.run(run_saved(
+                host, Path(scratch), source, args.saved_id, args.workers, args.timeout, args.baseline,
+            ))
+        print(json.dumps({"mode": "baseline" if args.baseline else "investigation", "results": results}, indent=2))
+        return int(any(i["code"] == "benchmark_timeout" for item in results for i in item["issues"]))
+    if args.saved_id or args.baseline:
+        parser.error("--saved-id and --baseline require --sqlite-backup.")
     cases = json.loads(CASES.read_text(encoding="utf-8"))
     ids = {row["id"] for row in cases}
     if set(args.case) - ids:

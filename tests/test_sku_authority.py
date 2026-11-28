@@ -5,7 +5,7 @@ import pytest
 import pytest_asyncio
 from app.models import Manufacturer
 
-from test_backend import BASE, installed
+from test_backend import BASE, installed as installed
 
 pytest_plugins = ('tests.conftest',)
 pytestmark = pytest.mark.asyncio
@@ -129,16 +129,19 @@ async def test_selected_product_authority_timeout_returns_safe_partial_result(
     await db_session.execute(update(Manufacturer).where(Manufacturer.name == 'Example Maker').values(url=None))
     await db_session.commit()
     authority_sources[RETAILER] = product_page()
-    monkeypatch.setattr(research, 'INTERACTIVE_RESEARCH_SECONDS', .01)
+    # Leave time for the preceding database read. The website lookup never finishes on its own.
+    monkeypatch.setattr(research, 'INTERACTIVE_RESEARCH_SECONDS', .2)
+
     async def slow_website(_name):
-        await asyncio.sleep(1)
-        return SITE
-    monkeypatch.setattr(proposals, 'manufacturer_website', slow_website)
-    started = asyncio.get_running_loop().time()
-    response = await installed.post(f'{BASE}/proposals', json={
-        'mode': 'create', 'product_url': RETAILER, 'sku_hint': sku_hint,
-    })
-    assert asyncio.get_running_loop().time() - started < .5
+        await asyncio.Future()
+
+    website = AsyncMock(side_effect=slow_website)
+    monkeypatch.setattr(proposals, 'manufacturer_website', website)
+    async with asyncio.timeout(1):
+        response = await installed.post(f'{BASE}/proposals', json={
+            'mode': 'create', 'product_url': RETAILER, 'sku_hint': sku_hint,
+        })
+    website.assert_awaited()
     assert response.is_success, response.text
     result = response.json()
     fields = {item['field']: item['value'] for item in result['suggestions']}

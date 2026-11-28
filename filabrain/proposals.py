@@ -5,6 +5,7 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from difflib import SequenceMatcher
+from itertools import groupby
 from typing import Annotated
 from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 
@@ -20,9 +21,10 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from sqlalchemy import func, or_, select, tuple_
 
-from .color_audit import code_only, explicit_references, reference_issues
 from .catalog import linked_spool_profile, lookup_filaments, manufacturer_website
+from .color_audit import code_only, explicit_references, reference_issues
 from .color_standards import RAL_NUMBER, normalize_reference, references_in_product_url
+from .investigation import InvestigationResult, investigate
 from .knowledge import lookup_catalog, lookup_catalog_code, lookup_published_specs
 from .model import (
     LIMITS,
@@ -30,7 +32,13 @@ from .model import (
     extract_proposal,
     request_extraction,
 )
-from .settings import check_model_catalog, config_record, model_connection_problem, model_key, select_model
+from .settings import (
+    check_model_catalog,
+    config_record,
+    model_connection_problem,
+    model_key,
+    select_model,
+)
 from .sources import (
     SHARED_SPEC,
     SUPPLIER_TOO_LARGE,
@@ -1382,32 +1390,46 @@ def _sheet_matches(page: Evidence, titles: set[str], identity: Identity, snapsho
                for key, values in variants.items())
 
 
-def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
+def _sheet_rows(text: str):
     # Specimen test settings and heatbed drying are separate from the general
     # printing settings and the oven drying fields in the filament record.
-    lines = page.text.splitlines()
-    rows = [" ".join(line.split()) for line in lines]
-    page = replace(page, text=" ".join(rows).strip())
-    heading = re.compile(r"(?:建议打印参数\s+)?recommended printing (?:settings|conditions|parameters)(?: data)?", re.IGNORECASE)
-    other_section = re.compile(
-        r"(?:sample preparation|test (?:methods?|conditions)|(?:material |physical |mechanical |thermal )?properties|specifications)",
+    heading = re.compile(
+        r"(?P<recommendation>(?:建议打印参数\s+)?(?:(?:recommended|suggested|suggests) )?)"
+        r"printing (?:settings|conditions|parameters)(?: data)?",
         re.IGNORECASE,
     )
-    specimen = re.compile(r"\b(?:specimen (?:test|printing)|printing test conditions)\b", re.IGNORECASE)
+    other_section = re.compile(r"(?:(?:material |physical |mechanical |thermal )?properties|specifications)\b", re.IGNORECASE)
+    specimen = re.compile(
+        r"\b(?:specimen (?:test|printing)|printing test conditions|sample preparation|test (?:methods?|conditions)"
+        r"|properties of (?:printed )?samples)\b",
+        re.IGNORECASE,
+    )
+    kind = "intro"
+    for line in text.splitlines():
+        row = " ".join(line.split())
+        section = re.sub(r"^(?:[•●]\s*|\d+(?:\.\d+)*[.)]\s+|part [IVX]+:\s*)", "", row, flags=re.IGNORECASE).strip().rstrip(":：")
+        if match := heading.fullmatch(section):
+            if kind != "specimen" or match["recommendation"] or re.match(r"part [IVX]+:", row, re.IGNORECASE):
+                kind = "printing"
+        elif specimen.search(section):
+            kind = "specimen"
+        elif other_section.match(section) or (kind != "specimen" and row.startswith(("•", "●"))):
+            kind = "other"
+        yield line, row, kind
+
+
+def _sheet_spec_entries(text: str) -> list[dict]:
+    rows = list(_sheet_rows(text))
     degrees = r"(?:[°˚]\s*C|℃)"
     density_unit = r"g\s*/\s*cm\s*[³3]"
     entries = []
-    printing = False
 
     def add(field, value, quote):
         entries.append({"field": field, "value": value, "source": 1, "quote": quote})
 
-    for index, (line, row) in enumerate(zip(lines, rows)):
-        section = re.sub(r"^(?:[•●]\s*|\d+(?:\.\d+)*[.)]\s+)", "", row).strip().rstrip(":：")
-        if heading.fullmatch(section):
-            printing = True
-        elif row.startswith(("•", "●")) or other_section.fullmatch(section) or specimen.search(section):
-            printing = False
+    for index, (line, row, kind) in enumerate(rows):
+        if kind == "specimen":
+            continue
         density_row = row.removeprefix("密度 ")
         density = re.fullmatch(
             rf"Density\b.*?\s(\d+(?:\.\d+)?)\s*{density_unit}(?:\s+at\s+\d+(?:\.\d+)?\s*{degrees})?",
@@ -1417,11 +1439,12 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
             add("density_g_cm3", float(density[1]), density_row)
         elif (
             re.fullmatch(rf"Density\b.*\s{density_unit}", density_row, re.IGNORECASE)
-            and index + 1 < len(rows) and re.fullmatch(r"\d+\.\d+", rows[index + 1])
-            and lines[index + 1].startswith(" ")
+            and index + 1 < len(rows) and re.fullmatch(r"\d+\.\d+", rows[index + 1][1])
+            and rows[index + 1][0].startswith(" ")
         ):
-            add("density_g_cm3", float(rows[index + 1]), f"{density_row} {rows[index + 1]}")
-        if not printing:
+            density_value = rows[index + 1][1]
+            add("density_g_cm3", float(density_value), f"{density_row} {density_value}")
+        if kind != "printing":
             continue
         for column in re.split(r"[ \t]{3,}(?=[a-zA-Z])", line.strip()):
             column = " ".join(column.split()).removeprefix("平台温度 ")
@@ -1434,7 +1457,7 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
                 field = "extruder_temp_range_c" if temperature[1].casefold() == "nozzle" else "bed_temp_range_c"
                 add(field, {"min": int(temperature[2]), "max": int(temperature[3] or temperature[2])}, column)
             drying = re.fullmatch(
-                rf"(?:Blast Drying Oven|Drying (?:Oven|Preparation|temp\.? and time))\s*:?\s*(\d+)\s*{degrees}"
+                rf"(?:Blast Drying Oven|Drying (?:Oven|Preparation|Conditions|temp\.? and time))\s*:?\s*(\d+)\s*{degrees}"
                 r"(?:\s*[,，]\s*|\s+for\s+)(\d+)(?:\s*[-–~]\s*(\d+))?\s*h(?:ours?)?",
                 column, re.IGNORECASE,
             )
@@ -1442,7 +1465,12 @@ def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
                 add("drying_temp_c", int(drying[1]), column)
                 if drying[3] is None:
                     add("drying_time_hours", int(drying[2]), column)
-    return extract_proposal({"suggestions": entries}, [page])
+    return entries
+
+
+def _sheet_specs(page: Evidence) -> tuple[list[dict], list[dict]]:
+    return extract_proposal({"suggestions": _sheet_spec_entries(page.text)},
+                            [replace(page, text=" ".join(page.text.split()))])
 
 
 PRINT_TEMPERATURE_RANGE = re.compile(
@@ -1488,11 +1516,149 @@ def _exact_product_page_specs(page: Evidence, titles: set[str]) -> list[dict]:
     return extract_proposal({"suggestions": entries}, [page])[0]
 
 
+def _investigation_terms(value):
+    return set(_product_key(re.sub(r"\bgray\b", "grey", value, flags=re.IGNORECASE)))
+
+
+def _investigation_variants(identity: Identity, pages, domain: str) -> list[dict]:
+    # shortcut: reads explicit family/color labels; accept more shapes when they can preserve package choices.
+    material = _investigation_terms(identity.material)
+    names = [_investigation_terms(text) for text in (identity.designation, identity.color)
+             if text and not _swatch_code(text)]
+    candidates = {}
+    for page in pages:
+        if not page or not _on_manufacturer_site(page.url, domain):
+            continue
+        for name, value in page.variants:
+            family, sep, variant = name.partition(" - ")
+            if not sep or not material or _investigation_terms(family) != material:
+                continue
+            label = variant.split("/", 1)[0].strip()
+            article = re.search(r"\s+\(([A-Za-z0-9][A-Za-z0-9-]{2,})\)$", label)
+            if _investigation_terms(label[:article.start()] if article else label) not in names:
+                continue
+            if url := public_link(value):
+                candidates.setdefault(url, {"name": name, "url": url, "code": article[1] if article else "",
+                                            "publisher_page": page.url})
+    return list(candidates.values())
+
+
+def _verified_investigation_page(identity: Identity, page: Evidence, evidence: list[Evidence], domain: str):
+    item = page.product or {}
+    title = item.get("designation", "")
+    label = " ".join((title, item.get("material", ""), item.get("color", "")))
+    clues = _investigation_terms(" ".join(filter(None, (
+        identity.designation, identity.material, identity.color, identity.material_subgroup, identity.finish_type,
+    ))))
+    if (not title or page.selected_variant_unresolved or page.datasheet or page.manual
+            or not identity.designation or not identity.material or not identity.manufacturer
+            or not (identity.color or identity.sku) or not clues <= _investigation_terms(label)
+            or item.get("manufacturer") and _norm(item["manufacturer"]) != _norm(identity.manufacturer)):
+        return None
+    sku = item.get("mpn") or item.get("sku") or ""
+    if identity.sku and (not _sku_key(sku) or _sku_key(sku) != _sku_key(identity.sku)):
+        return None
+    mass_pattern = r"(?<![\d.,])(\d+(?:[.,]\d+)?)\s*(kg|g)\b"
+    diameter_pattern = (r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:±\s*\d+(?:\.\d+)?\s*)?mm\b"
+                        r"(?:\s*±\s*\d+(?:\.\d+)?\s*mm\b)?")
+    weights = {
+        float(value.replace(",", "" if unit.lower() == "g" and re.fullmatch(r"\d+,\d{3}", value) else "."))
+        * (1000 if unit.lower() == "kg" else 1)
+        for value, unit in re.findall(mass_pattern, title, flags=re.IGNORECASE)
+    }
+    diameters = {float(value) for value in re.findall(diameter_pattern, title, re.IGNORECASE)}
+    label_without_size = re.sub(mass_pattern, " ", re.sub(diameter_pattern, " ", label, flags=re.IGNORECASE), flags=re.IGNORECASE)
+    # Generic labels describe the listing. Unexplained recipe or package words require a choice.
+    listing_words = {"standard", "flexible", "filament", "filaments", "spool", "diameter",
+                     "us", "uk", "eu", "ca", "to", "only", "color", "colour"}
+    if _investigation_terms(label_without_size) - clues - _investigation_terms(identity.manufacturer) - listing_words:
+        return None
+    if (len(weights) != 1 or identity.weight_g is not None and weights != {identity.weight_g}
+            or len(diameters) != 1 or identity.diameter_mm is not None and diameters != {identity.diameter_mm}):
+        return None
+
+    def listing(url):
+        parsed = urlsplit(url)
+        path = re.sub(r"^/collections/[^/]+(?=/products/)", "", parsed.path)
+        return _site_host(url), path.rstrip("/")
+
+    brand = re.sub(r"[^a-z0-9]", "", _norm(identity.manufacturer))
+    grade = _investigation_terms(identity.material) | set(_line(identity.designation, identity.color))
+    linked_publishers = [
+        source for source in evidence if not source.datasheet and not source.manual
+        and (_on_manufacturer_site(source.url, domain)
+             or not domain and len(brand) >= 3 and _publisher(source.url).split(".")[0] == brand
+             and brand in _investigation_terms(source.title + " " + source.text[:1800]))
+        and grade <= _investigation_terms(source.title)
+        and any(listing(link) == listing(page.url) for link in source.product_links)
+    ]
+    if not (_on_manufacturer_site(page.url, domain) or linked_publishers):
+        return None
+    docs = {link for source in (page, *linked_publishers) for link in source.datasheets}
+    candidate = Identity(manufacturer=identity.manufacturer, designation=title, material=identity.material,
+                         color=identity.color, sku=sku, diameter_mm=next(iter(diameters)), weight_g=next(iter(weights)))
+    return page, candidate, docs, grade
+
+
+def _investigated_product(identity: Identity, result: InvestigationResult, domain: str):
+    # The model chooses which pages to read. Only corroborated storefront data can supply a SKU.
+    matches = {
+        index: match for index, page in enumerate(result.evidence, 1)
+        if (match := _verified_investigation_page(identity, page, result.evidence, domain))
+    }
+    packages = {(candidate.diameter_mm, candidate.weight_g) for _, candidate, _, _ in matches.values()}
+    skus = {_norm(candidate.sku) for _, candidate, _, _ in matches.values() if candidate.sku}
+    if len(packages) != 1 or len(skus) > 1:
+        return None
+    selected = matches.get(result.product_source)
+    if selected and (selected[1].sku or not skus):
+        return selected
+    return next(match for match in matches.values() if match[1].sku or not skus)
+
+
+def _investigated_specs(result: InvestigationResult, product: Evidence, docs: set[str], grade: set[str]):
+    sources = list(result.evidence)
+    sheet_sources = {}
+    entries = []
+    for index, source in enumerate(result.evidence):
+        if source is product and source.product_spec_tables:
+            tables = "\n".join(table for _, table in source.product_spec_tables)
+            sources[index] = replace(source, text=tables, manufacturer_page=True)
+        elif source.url in docs and source.datasheet and grade <= _investigation_terms(source.text[:1400]):
+            text = source.text
+            sheet_sources[index + 1] = [
+                (kind, " ".join(row for _, row, _ in group if row))
+                for kind, group in groupby(_sheet_rows(text), key=lambda row: row[2])
+                if kind != "specimen"
+            ]
+            entries.extend({**entry, "source": index + 1} for entry in _sheet_spec_entries(text))
+            sources[index] = replace(source, text=" ".join(text.split()), manufacturer_page=True)
+    # Product-level instructions do not prove reel construction for an individual package.
+    allowed = {
+        "density_g_cm3", "extruder_temp_range_c", "bed_temp_range_c", "drying_temp_c",
+        "drying_time_hours", "cooling_fan_range_percent", "chamber_temp_c",
+    }
+    for item in result.suggestions:
+        if not isinstance(item.get("field"), str) or item["field"] not in allowed:
+            continue
+        if not sources[item["source"] - 1].manufacturer_page:
+            continue
+        quote = item.get("quote")
+        if item["source"] in sheet_sources and isinstance(quote, str):
+            quote = " ".join(quote.split())
+            if not any(quote in block and (kind != "other" or item["field"] == "density_g_cm3")
+                       for kind, block in sheet_sources[item["source"]]):
+                continue
+            item = {**item, "quote": quote}
+        entries.append(item)
+    return extract_proposal({"suggestions": entries}, sources)
+
+
 async def research_products(
     db: DBSession, identity: Identity, *, product_url=None, reference_url=None, sku_hint="", snapshot=None,
     guidance="", release_read=False, model_id: str | None = None, endpoint_id: str | None = None,
     deadline: float | None = None, palette: list[tuple[int, int]] | None = None,
-    skip_model_extraction: bool = False,
+    skip_model_extraction: bool = False, investigate_missing: bool = False,
 ) -> dict:
     proposal = {"suggestions": [], "issues": []}
     issues = proposal["issues"]
@@ -2620,6 +2786,74 @@ async def research_products(
         first_by_site.setdefault(_site_host(source.url), source)
     extraction_evidence = [*first_by_site.values(), *(source for source in evidence if source not in first_by_site.values())]
 
+    missing = tuple(field for field in MODE_FIELDS["fill"]
+                    if snapshot is not None and is_missing(field, snapshot.get(field)) and field not in suggestions)
+    variants = _investigation_variants(supplier_identity, pages.values(), manufacturer_domain) if investigate_missing else []
+    if variants:
+        for variant in variants[:4]:
+            issues.append({"code": "possible_match", "name": variant["name"], "source": "Manufacturer website",
+                           "url": variant["url"], "product_url": variant["url"]})
+        # A storefront selector can identify more than one package for the same manufacturer article.
+        known_sku = (suggestions.get("manufacturer_sku") or {}).get("value")
+        if known_sku and {_sku_key(variant["code"]) for variant in variants} == {_sku_key(known_sku)}:
+            variant = variants[0]
+            add("manufacturer_sku", known_sku, [{"url": variant["publisher_page"], "title": "Manufacturer variant list",
+                                                  "evidence": variant["name"]}])
+    if (investigate_missing and missing and snapshot is not None
+            and endpoint["model_url"] and model and config["search_url"]):
+        if release_read and db.in_transaction():
+            await db.rollback()
+        stop_at = deadline if deadline is not None else asyncio.get_running_loop().time() + 30
+        result = await investigate(
+            supplier_identity, start_urls=tuple(direct_urls), endpoint=endpoint, model=model,
+            search_url=config["search_url"], max_bytes=supplier_max_bytes, deadline=stop_at, fields=missing,
+            publisher_host=_site_host(manufacturer_site),
+            variant_choices=tuple((variant["name"], variant["url"]) for variant in variants[:4]),
+            publisher_terms=tuple(dict.fromkeys((
+                *_product_key(supplier_identity.material), *_line(supplier_identity.designation, supplier_identity.color),
+            ))),
+            verify_product=lambda result: _investigated_product(supplier_identity, result, manufacturer_domain) is not None,
+        )
+        stored_url = public_link(snapshot.get("shop_url"))
+        if stored_url:
+            saved_link = supplier_page_url(stored_url)
+            old = checked_pages.get(saved_link) or next(
+                (page for page in result.evidence if supplier_page_url(page.url) == saved_link), None
+            )
+            if old and old.product and not (
+                _investigation_terms(identity.designation) <= _investigation_terms(old.product.get("designation", ""))
+            ):
+                issues.append({"code": "source_product_mismatch", "url": stored_url,
+                               "reason": f"The saved listing describes {old.product.get('designation') or old.title}."})
+        if match := _investigated_product(supplier_identity, result, manufacturer_domain):
+            page, candidate, docs, grade = match
+            bundled_publisher_urls.add(page.url)
+            issues.append({"code": "manufacturer_page", "name": page.title, "url": page.url})
+            citation = [{"url": page.url, "title": page.title, "evidence": candidate.designation}]
+            if candidate.sku:
+                verified_sku_sources.setdefault(_norm(candidate.sku), set()).add(page.url)
+                add("manufacturer_sku", candidate.sku,
+                    [{**citation[0], "evidence": f"{candidate.designation} · {candidate.sku}"}], primary=True)
+            add("raw_material_weight_g", candidate.weight_g, citation, primary=True)
+            add("shop_url", page.url, citation, primary=True)
+            if stored_url and supplier_page_url(stored_url) != page.url:
+                issues.append({"code": "possible_match", "name": page.title, "source": "Manufacturer website",
+                               "url": page.url, "product_url": page.url})
+            findings, discrepancies = _investigated_specs(result, page, docs, grade)
+            for issue in discrepancies:
+                sheet = any(source["url"] in docs for option in issue.get("options", []) for source in option["sources"])
+                remember_conflict(issue, primary=True, datasheet=sheet)
+            for finding in findings:
+                urls = {source["url"] for source in finding["sources"]}
+                bundled_publisher_urls.update(urls)
+                add(finding["field"], finding["value"], finding["sources"], primary=True, datasheet=bool(urls & docs))
+        elif result.status in {"complete", "needs_clue"}:
+            issues.append({"code": "manufacturer_investigation_needs_clue",
+                           "reason": "Confirm the product variant with a label, SKU, or exact product link."})
+        if result.status in {"partial", "unavailable"}:
+            issues.append({"code": "unavailable_source", "source": "Manufacturer investigation",
+                           "reason": "Investigation finished before all sources could be verified"})
+
     if not skip_model_extraction and evidence and endpoint["model_url"] and model:
         try:
             async with network_time(50):
@@ -2777,6 +3011,7 @@ async def batch_proposal(
     raw = await research_products(
         db, identity, product_url=product_url, reference_url=reference_url, sku_hint=sku_hint, snapshot=research_snapshot,
         guidance=guidance, release_read=release_read, model_id=model_id, endpoint_id=endpoint_id, deadline=deadline,
+        investigate_missing=mode == "fill",
         skip_model_extraction=mode == "colors" and bool(_norm(identity.color)) and not code_only(identity.color),
     )
     for suggestion in raw["suggestions"]:
