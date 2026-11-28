@@ -83,7 +83,10 @@ try {
 
  await page.getByRole('button', { name: 'New chat', exact: true }).click()
  await task.selectOption('library-health')
- await input.fill('slow'); await chat.getByRole('button', { name: 'Send message', exact: true }).click(); await running
+ const runCheck = chat.getByRole('button', { name: 'Run check', exact: true })
+ assert.equal(await runCheck.innerText(), 'Run check')
+ await input.fill('slow'); await runCheck.click(); await running
+ assert.equal(await chat.getByRole('button', { name: 'Stop waiting', exact: true }).innerText(), 'Stop waiting')
  await page.getByRole('button', { name: 'New chat', exact: true }).click()
  await task.selectOption('intake'); await input.fill('SKU_42')
  await chat.getByRole('button', { name: 'Send message', exact: true }).click()
@@ -100,7 +103,7 @@ try {
  assert.equal(await task.inputValue(), 'stock')
  assert.equal(await chat.getByRole('spinbutton', { name: 'Target per filament (g)' }).inputValue(), '2000')
  await task.selectOption('library-health'); await input.fill('denied')
- await chat.getByRole('button', { name: 'Send message', exact: true }).click()
+ await runCheck.click()
  await chat.getByText('Spool access denied', { exact: true }).waitFor()
  assert.equal(await input.inputValue(), 'denied')
  for (const width of [320, 390, 1280]) {
@@ -122,6 +125,24 @@ try {
  assert.equal(requests.at(-1).body.query, 'PETG')
  assert.equal(requests.at(-1).body.target_g, 2000)
  await chat.getByText(/Page 2/).last().waitFor()
+ await page.getByRole('button', { name: 'New chat', exact: true }).click()
+ await page.setViewportSize({ width: 390, height: 320 })
+ await task.selectOption('library-health')
+ const checkLinks = chat.getByRole('checkbox', { name: 'Check product links' })
+ await checkLinks.check()
+ await runCheck.click()
+ const nextLibraryPage = chat.getByRole('button', { name: 'Next page', exact: true })
+ await nextLibraryPage.evaluate(button => button.scrollIntoView({ block: 'end' }))
+ assert.ok(await nextLibraryPage.evaluate(button => {
+  const { top, bottom } = button.getBoundingClientRect()
+  const transcript = button.closest('.chat-transcript').getBoundingClientRect()
+  return top >= transcript.top && bottom <= transcript.bottom
+ }), 'the transcript can display the whole Next page button in a short plugin frame')
+ await nextLibraryPage.click()
+ await chat.getByText(/Page 2/).waitFor()
+ assert.equal(requests.at(-1).body.check_sources, true)
+ assert.equal(requests.at(-1).body.query, '')
+ await page.setViewportSize({ width: 1280, height: 900 })
  // A read-only user can inspect and select candidates without opening creation.
  canCreate = false
  const reader = await context.newPage(); await reader.goto('https://fila.test/plugin-page/filabrain')

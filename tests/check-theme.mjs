@@ -7,6 +7,29 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME_EXECU
 const origin = 'https://fila.test'
 const pageUrl = origin + '/plugin-page/filabrain'
 
+function contrast(a, b) {
+  const luminance = color => color.match(/\d+/g).slice(0, 3).map(Number).reduce((sum, channel, index) => {
+    const srgb = channel / 255
+    const linear = srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4
+    return sum + linear * [0.2126, 0.7152, 0.0722][index]
+  }, 0)
+  const [dark, light] = [luminance(a), luminance(b)].sort((x, y) => x - y)
+  return (light + 0.05) / (dark + 0.05)
+}
+
+async function assertLightContrast(frame) {
+  const { text, fill, link, card } = await frame.evaluate(() => {
+    const primary = getComputedStyle(document.querySelector('.fm-btn-primary'))
+    return {
+      text: primary.color, fill: primary.backgroundColor,
+      link: getComputedStyle(document.querySelector('.docs-content a')).color,
+      card: getComputedStyle(document.querySelector('.fm-card')).backgroundColor,
+    }
+  })
+  assert.ok(contrast(text, fill) >= 4.5, 'Light primary action text meets AA')
+  assert.ok(contrast(link, card) >= 4.5, 'Light links on cards meet AA')
+}
+
 try {
   const context = await browser.newContext()
   const page = await context.newPage()
@@ -29,7 +52,7 @@ try {
           color-scheme: light;
           --bg: #fafafa; --bg-elevated: #ffffff; --bg-soft: #f3f4f6;
           --text: #18181b; --text-muted: #52525b; --border: #d4d4d8;
-          --accent: #2563eb; --input-bg: #f3f4f6; --btn-primary-text: #ffffff;
+          --accent: #1c9b6b; --input-bg: #f3f4f6; --btn-primary-text: #ffffff;
         }
         :root.custom { --accent: #d946ef; }
       </style></head><body><iframe
@@ -84,6 +107,9 @@ try {
     assert.equal((await colors(embedded)).scheme, 'light')
     assert.equal((await colors(embedded)).iconStroke, 'rgb(24, 24, 27)')
 
+    assert.equal((await colors(embedded)).accent, '#10734f')
+    await assertLightContrast(embedded)
+
     await page.evaluate(() => document.documentElement.classList.add('custom'))
     await embedded.waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#d946ef')
     await page.evaluate(() => document.documentElement.style.setProperty('--accent', '#ef4444'))
@@ -117,7 +143,7 @@ try {
   await page.goto(pageUrl)
   for (const [theme, background, accent] of [
     ['brand', 'rgb(12, 22, 18)', '#4ee3a2'],
-    ['light', 'rgb(248, 246, 241)', '#1c9b6b'],
+    ['light', 'rgb(248, 246, 241)', '#10734f'],
     ['dark', 'rgb(11, 13, 18)', '#73d1ff'],
   ]) {
     await page.evaluate(value => localStorage.setItem('theme', value), theme)
@@ -125,6 +151,7 @@ try {
     await page.getByText('FilaBrain is disabled.').waitFor()
     const actual = await colors(page)
     assert.equal(actual.background, background)
+    if (theme === 'light') await assertLightContrast(page)
     assert.equal(actual.accent, accent)
   }
   const other = await context.newPage()

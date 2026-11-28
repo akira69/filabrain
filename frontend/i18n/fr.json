@@ -375,6 +375,7 @@
     "taskIntake": "Ajouter un filament",
     "taskJob": "Choisir une bobine",
     "taskHealth": "Vérifier la bibliothèque",
+    "taskRunCheck": "Lancer la vérification",
     "taskStock": "Planifier le stock",
     "taskRequiredGrams": "Filament nécessaire (g)",
     "taskTargetGrams": "Objectif par filament (g)",

@@ -80,6 +80,23 @@ try {
   const panel = page.locator('[data-swatch-review]')
   const rename = panel.getByRole('button', { name: 'Rename shared swatch', exact: true })
   await rename.waitFor()
+  const initialViewport = page.viewportSize()
+  for (const width of [320, 1280]) {
+    await page.setViewportSize({ width, height: initialViewport.height })
+    const tabs = await page.getByRole('tablist', { name: 'FilaBrain' }).boundingBox()
+    const allRuns = await page.getByRole('link', { name: 'All runs', exact: true }).boundingBox()
+    assert.ok(allRuns.y >= tabs.y + tabs.height + 4, `run navigation clears the tab strip at ${width}px`)
+    for (const theme of ['brand', 'dark', 'light']) {
+      const colors = await page.getByRole('tab', { selected: true }).evaluate((tab, theme) => {
+        document.documentElement.dataset.theme = theme
+        const overview = document.querySelector('.batch-overview[data-batch-detail]')
+        return [getComputedStyle(tab).backgroundColor, getComputedStyle(tab, '::after').backgroundColor, getComputedStyle(overview).backgroundColor]
+      }, theme)
+      assert.deepEqual(colors, [colors[0], colors[0], colors[0]], `run toolbar joins the selected tab in ${theme} at ${width}px`)
+    }
+    await page.evaluate(() => { delete document.documentElement.dataset.theme })
+  }
+  await page.setViewportSize(initialViewport)
   assert.match(await panel.textContent(), /Marketing Purple.*Purple violet \(RAL 4007\)/s)
   assert.match(await panel.textContent(), /Filaments using this swatch: 8/)
   assert.match(await panel.textContent(), /#593D67/)

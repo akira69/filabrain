@@ -149,6 +149,7 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
   }
   if (options.context) void restoreChatContext(options.context)
   const submit = form.querySelector<HTMLButtonElement>('.chat-send')!
+  const submitText = submit.querySelector<HTMLSpanElement>('[data-send-label]')!
   const contextPanel = form.querySelector<HTMLDetailsElement>('[data-chat-context]')!
   const printer = contextPanel.querySelector<HTMLSelectElement>('[data-chat-printer]')!
   const filament = contextPanel.querySelector<HTMLSelectElement>('[data-chat-filament]')!
@@ -209,7 +210,11 @@ export function mountChat(statusModel: { chat_model?: string | null; chat_endpoi
     submit.disabled = !contextReady || busyResearch || staging || !request && (input.disabled || !input.value.trim() && !agent.allowsEmpty)
     contextPanel.hidden = researchOnly || researching || input.hidden || taskActive && agent.value !== 'job-fit'
     for (const field of [printer, filament, filamentSearch, nozzle]) field.disabled = !!request
-    const label = t(request ? 'filaBrain.chatStop' : researching ? 'filaBrain.sendFollowUp' : 'filaBrain.chatSend')
+    const libraryCheck = taskActive && agent.value === 'library-health'
+    const action = libraryCheck ? 'filaBrain.taskRunCheck' : 'filaBrain.chatSend'
+    const label = t(request ? 'filaBrain.chatStop' : researching ? 'filaBrain.sendFollowUp' : action)
+    submitText.hidden = !libraryCheck
+    submitText.textContent = libraryCheck ? label : ''
     submit.setAttribute('aria-label', label)
     submit.title = label
     submit.toggleAttribute('data-busy', !!request)

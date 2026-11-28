@@ -10,6 +10,7 @@ const endpoint = { id: 'local', name: 'Ollama', model_url: 'http://ollama:11434/
 
 try {
   const context = await browser.newContext()
+  let runs = []
   const fixture = route => {
     const path = new URL(route.request().url()).pathname
     if (path.startsWith('/plugin-page/')) return route.fulfill({ contentType: 'text/html', body: html })
@@ -41,7 +42,7 @@ try {
       supplier_download_mib: 8, supplier_sites: [], search_url: '', model_revision: 'fixture' } })
     if (path.endsWith('/filabrain/models')) return route.fulfill({ json: { groups: [{ id: endpoint.id, name: endpoint.name, models: endpoint.models }], default_endpoint_id: endpoint.id, default_model_id: endpoint.model_id } })
     if (path.endsWith('/me')) return route.fulfill({ json: { id: 1 } })
-    if (path.endsWith('/batches')) return route.fulfill({ json: [] })
+    if (path.endsWith('/batches')) return route.fulfill({ json: runs })
     if (path.endsWith('/manufacturers') || path.endsWith('/colors')) return route.fulfill({ json: { items: [], total: 0 } })
     return route.fulfill({ status: 404, json: {} })
   }
@@ -206,6 +207,24 @@ try {
   await phone.getByRole('textbox', { name: 'Your question' }).waitFor()
   assert.ok((await phone.locator('[data-chat-new]').boundingBox()).height >= 44)
   assert.ok((await phone.locator('.chat-header').boundingBox()).height <= 64)
+  runs = [{ id: 'test-run', mode: 'colors', status: 'finished', total: 3, created_at: '2026-11-27T00:00:00Z' }]
+  for (const [locale, name] of [['en', 'Runs'], ['de', 'Läufe'], ['fr', 'Suivi']]) {
+    await phone.evaluate(locale => localStorage.setItem('lang', locale), locale)
+    await phone.reload()
+    const runTab = phone.getByRole('tab', { name, exact: true })
+    await runTab.waitFor()
+    for (const width of [320, 390]) {
+      await phone.setViewportSize({ width, height: 844 })
+      assert.ok(await runTab.evaluate(tab => {
+        const list = tab.closest('[role=tablist]')
+        const bounds = tab.getBoundingClientRect()
+        return list.scrollWidth === list.clientWidth && bounds.right <= list.getBoundingClientRect().right
+          && bounds.width >= 44 && bounds.height >= 44
+      }), `all tabs fit at ${width}px in ${locale}`)
+    }
+    await runTab.tap()
+    await phone.getByRole('tabpanel', { name, exact: true }).waitFor()
+  }
   await touch.close()
   assert.deepEqual(errors, [])
   console.log('Full-height chat, responsive guide, compact endpoints, prompt icons, scrollbars, and picker surface passed.')

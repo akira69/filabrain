@@ -375,6 +375,7 @@
     "taskIntake": "Filament hinzufügen",
     "taskJob": "Spule auswählen",
     "taskHealth": "Bibliothek prüfen",
+    "taskRunCheck": "Prüfung starten",
     "taskStock": "Bestand planen",
     "taskRequiredGrams": "Benötigtes Filament (g)",
     "taskTargetGrams": "Ziel pro Filament (g)",
